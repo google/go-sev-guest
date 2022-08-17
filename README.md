@@ -73,12 +73,33 @@ verify.SnpAttestation(myAttestation, &verify.Options{})
 
 #### `Options` type
 
-This type contains two fields: `CheckRevocations bool`, and `Getter
-HTTPSGetter`. If `CheckRevocations` is true, then `Getter` must be non-nil and
-implement the `HTTPSGetter` interface.
+This type contains three fields:
+
+*   `CheckRevocations bool`: if true, then `SnpAttestation` will download the
+    certificate revocation list (CRL) and check for revocations.
+*   `Getter HTTPSGetter`: must be non-`nil` if `CheckRevocations` is true.
+*   `TrustedRoots map[string][]*AMDRootCerts`: if `nil`, uses the library's embedded certificates.
+     Maps a platform name to all allowed root certifications for that platform (e.g., Milan).
 
 The `HTTPSGetter` interface consists of a single method `Get(url string)
 ([]byte, error)` that should return the body of the HTTPS response.
+
+
+#### `AMDRootCerts` type
+
+This type has 6 fields, the first 3 of which are mandatory:
+
+*   `Platform string`: the name of the platform this bundle is for (e.g., `"Milan"`).
+*   `AskX509 *x509.Certificate`: an X.509 representation of the AMD SEV Signer intermediate key (ASK)'s certificate.
+*   `ArkX509 *x509.Certificate`: an X.509 representation of the AMD SEV Root key (ARK)'s certificate.
+*   `AskSev *abi.AskCert`: if non-`nil`, will cross-check with
+    `AskX509`. Represents the information present in the AMD SEV certificate
+    format for the ASK.
+*   `ArkSev *abi.AskCert`: if non-`nil`, will cross-check with
+    `ArkX509`. Represents the information present in the AMD SEV certificate
+    format for the ARK.
+*   `CRL *x509.RevocationList`: the certificate revocation list signed by the ARK.
+    Will be populated if `SnpAttestation` is called with `CheckRevocations: true`.
 
 ## License
 

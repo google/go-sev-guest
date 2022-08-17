@@ -73,22 +73,21 @@ type AMDRootCerts struct {
 	// ArkX509 is an X.509 certificate for the AMD root key (ARK).
 	ArkX509 *x509.Certificate
 	// AskSev is the AMD certificate representation of the AMD signing key that certifies
-	// versioned chip endoresement keys.
+	// versioned chip endoresement keys. If present, the information must match AskX509.
 	AskSev *abi.AskCert
 	// ArkSev is the AMD certificate representation of the self-signed AMD root key that
-	// certifies the AMD signing key.
+	// certifies the AMD signing key. If present, the information must match ArkX509.
 	ArkSev *abi.AskCert
 	// Protects concurrent updates to CRL.
 	mu sync.Mutex
 	// CRL is the certificate revocation list for this AMD platform. Populated once, only when a
 	// revocation is checked.
-	CRL                  *x509.RevocationList
-	noCrossCheckTestOnly bool
+	CRL *x509.RevocationList
 }
 
 // DefaultRootCerts holds AMD's SEV API certificate format for ASK and ARK keys as published here
 // https://developer.amd.com/wp-content/resources/ask_ark_milan.cert
-var DefaultRootCerts AMDRootCerts
+var DefaultRootCerts map[string]*AMDRootCerts
 
 // Unmarshal populates ASK and ARK certificates from AMD SEV format certificates in data.
 func (r *AMDRootCerts) Unmarshal(data []byte) error {
@@ -161,7 +160,11 @@ func (r *AMDRootCerts) X509Options() *x509.VerifyOptions {
 
 // Parse ASK, ARK certificates from the embedded AMD certificate file.
 func init() {
-	DefaultRootCerts.Unmarshal(askArkMilanBytes)
+	milanCerts := new(AMDRootCerts)
+	milanCerts.Unmarshal(askArkMilanBytes)
+	DefaultRootCerts = map[string]*AMDRootCerts{
+		"Milan": milanCerts,
+	}
 }
 
 func askVerifiedBy(signee, signer *abi.AskCert, signeeName, signerName string) error {
@@ -276,7 +279,7 @@ func (r *AMDRootCerts) validateRootX509(x *x509.Certificate, version int, role, 
 // cryptographic signatures.
 func (r *AMDRootCerts) ValidateAskX509() error {
 	if r == nil {
-		r = &DefaultRootCerts
+		r = DefaultRootCerts["Milan"]
 	}
 	var cn string
 	if r.Platform != "" {
@@ -285,21 +288,17 @@ func (r *AMDRootCerts) ValidateAskX509() error {
 	if err := r.validateRootX509(r.AskX509, askX509Version, "ASK", cn); err != nil {
 		return err
 	}
-	askSev := r.AskSev
-	if askSev == nil {
-		askSev = DefaultRootCerts.AskSev
+	if r.AskSev != nil {
+		return crossCheckSevX509(r.AskSev, r.AskX509)
 	}
-	if r.noCrossCheckTestOnly {
-		return nil
-	}
-	return crossCheckSevX509(askSev, r.AskX509)
+	return nil
 }
 
 // ValidateArkX509 checks expected metadata about the ARK X.509 certificate. It does not verify the
 // cryptographic signatures.
 func (r *AMDRootCerts) ValidateArkX509() error {
 	if r == nil {
-		r = &DefaultRootCerts
+		r = DefaultRootCerts["Milan"]
 	}
 	var cn string
 	if r.Platform != "" {
@@ -308,14 +307,10 @@ func (r *AMDRootCerts) ValidateArkX509() error {
 	if err := r.validateRootX509(r.ArkX509, arkX509Version, "ARK", cn); err != nil {
 		return err
 	}
-	arkSev := r.ArkSev
-	if arkSev == nil {
-		arkSev = DefaultRootCerts.ArkSev
+	if r.ArkSev != nil {
+		return crossCheckSevX509(r.ArkSev, r.ArkX509)
 	}
-	if r.noCrossCheckTestOnly {
-		return nil
-	}
-	return crossCheckSevX509(arkSev, r.ArkX509)
+	return nil
 }
 
 // Checks some steps of AMD SEV API Appendix B.3
@@ -335,7 +330,7 @@ func validateRootSev(subject, issuer *abi.AskCert, version, keyUsage uint32, sub
 // This covers steps 1, 2, and 5
 func (r *AMDRootCerts) ValidateAskSev() error {
 	if r == nil {
-		r = &DefaultRootCerts
+		r = DefaultRootCerts["Milan"]
 	}
 	return validateRootSev(r.AskSev, r.ArkSev, askVersion, askKeyUsage, "ASK", "ARK")
 }
@@ -344,18 +339,18 @@ func (r *AMDRootCerts) ValidateAskSev() error {
 // This covers steps 5, 6, 9, and 11.
 func (r *AMDRootCerts) ValidateArkSev() error {
 	if r == nil {
-		r = &DefaultRootCerts
+		r = DefaultRootCerts["Milan"]
 	}
 	return validateRootSev(r.ArkSev, r.ArkSev, arkVersion, arkKeyUsage, "ARK", "ARK")
 }
 
 // ValidateX509 will validate the x509 certificates of the ASK and ARK.
 func (r *AMDRootCerts) ValidateX509() error {
-	if err := r.ValidateAskX509(); err != nil {
-		return fmt.Errorf("ASK validation error: %v", err)
-	}
 	if err := r.ValidateArkX509(); err != nil {
 		return fmt.Errorf("ARK validation error: %v", err)
+	}
+	if err := r.ValidateAskX509(); err != nil {
+		return fmt.Errorf("ASK validation error: %v", err)
 	}
 	return nil
 }
@@ -448,7 +443,7 @@ func (r *AMDRootCerts) validateVcekCertificatePlatformSpecifics(cert *x509.Certi
 // VcekDER checks that the VCEK certificate matches expected fields
 // from the KDS specification and also that its certificate chain matches
 // hardcoded trusted root certificates from AMD.
-func VcekDER(vcek []byte, ask []byte, ark []byte) (*x509.Certificate, *AMDRootCerts, error) {
+func VcekDER(vcek []byte, ask []byte, ark []byte, options *Options) (*x509.Certificate, *AMDRootCerts, error) {
 	vcekCert, err := x509.ParseCertificate(vcek)
 	if err != nil {
 		return nil, nil, fmt.Errorf("could not interpret VCEK DER bytes: %v", err)
@@ -457,21 +452,34 @@ func VcekDER(vcek []byte, ask []byte, ark []byte) (*x509.Certificate, *AMDRootCe
 	if err != nil {
 		return nil, nil, err
 	}
-	root := &AMDRootCerts{
-		Platform: vcekProductMap[exts.ProductName],
-		// Allow tests to disable crosscheck on test-only certificates.
-		noCrossCheckTestOnly: DefaultRootCerts.noCrossCheckTestOnly,
+	roots := options.TrustedRoots
+	platform := vcekProductMap[exts.ProductName]
+	if roots == nil {
+		root := &AMDRootCerts{
+			Platform: platform,
+			// Require that the root matches embedded root certs.
+			AskSev: DefaultRootCerts[platform].AskSev,
+			ArkSev: DefaultRootCerts[platform].ArkSev,
+		}
+		if err := root.FromDER(ask, ark); err != nil {
+			return nil, nil, err
+		}
+		if err := root.ValidateX509(); err != nil {
+			return nil, nil, err
+		}
+		roots = map[string][]*AMDRootCerts{
+			platform: []*AMDRootCerts{root},
+		}
 	}
-	if err := root.FromDER(ask, ark); err != nil {
-		return nil, nil, err
+	var lastErr error
+	for _, platformRoot := range roots[platform] {
+		if err := platformRoot.validateVcekCertificatePlatformSpecifics(vcekCert); err != nil {
+			lastErr = err
+			continue
+		}
+		return vcekCert, platformRoot, nil
 	}
-	if err := root.ValidateX509(); err != nil {
-		return nil, nil, err
-	}
-	if err := root.validateVcekCertificatePlatformSpecifics(vcekCert); err != nil {
-		return nil, nil, err
-	}
-	return vcekCert, root, nil
+	return nil, nil, fmt.Errorf("VCEK could not be verified by any trusted roots. Last error: %v", lastErr)
 }
 
 // SnpReportSignature verifies the attestation report's signature based on the report's
@@ -509,13 +517,17 @@ type Options struct {
 	// Getter takes a URL and returns the body of its contents. By default uses http.Get and returns
 	// the body.
 	Getter HTTPSGetter
+	// TrustedRoots specifies the ARK and ASK certificates to trust when checking the VCEK. If nil,
+	// then verification will fall back on embedded AMD-published root certificates.
+	// Maps the platform name to an array of allowed roots.
+	TrustedRoots map[string][]*AMDRootCerts
 }
 
 // SnpAttestation verifies the protobuf representation of an attestation report's signature based
 // on the report's SignatureAlgo, provided the certificate chain is valid.
 func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 	chain := attestation.GetCertificateChain()
-	vcek, root, err := VcekDER(chain.GetVcekCert(), chain.GetAskCert(), chain.GetArkCert())
+	vcek, root, err := VcekDER(chain.GetVcekCert(), chain.GetAskCert(), chain.GetArkCert(), options)
 	if err != nil {
 		return err
 	}

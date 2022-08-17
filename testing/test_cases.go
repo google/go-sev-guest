@@ -90,7 +90,7 @@ var oneReport = `
 // We can't sign the report with AMD keys, and verification isn't the client's responsibility, so
 // we keep the signature zeros.
 // Similarly, we leave the randomly-generated fields zero.
-func testRawReport(userData [64]byte) [abi.ReportSize]byte {
+func TestRawReport(userData [64]byte) [abi.ReportSize]byte {
 	var r [abi.ReportSize]byte
 	// Set Version to 2
 	binary.LittleEndian.PutUint32(r[0x00:0x04], 2)
@@ -127,8 +127,8 @@ type TestCase struct {
 
 // TestCases returns common test cases for get_report.
 func TestCases() []TestCase {
-	zeroRaw := testRawReport(userZeros)
-	oneRaw := testRawReport(userZeros1)
+	zeroRaw := TestRawReport(userZeros)
+	oneRaw := TestRawReport(userZeros1)
 	return []TestCase{
 		{
 			Name:        "zeros",
