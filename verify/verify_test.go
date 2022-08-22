@@ -58,27 +58,29 @@ func initSigner() {
 func TestEmbeddedCertsAppendixB3Expectations(t *testing.T) {
 	// https://www.amd.com/system/files/TechDocs/55766_SEV-KM_API_Specification.pdf
 	// Appendix B.1
-	if err := DefaultRootCerts.ValidateAskSev(); err != nil {
-		t.Errorf("Embedded ASK failed validation: %v", err)
-	}
-	if err := DefaultRootCerts.ValidateArkSev(); err != nil {
-		t.Errorf("Embedded ARK failed validation: %v", err)
+	for _, root := range DefaultRootCerts {
+		if err := root.ValidateAskSev(); err != nil {
+			t.Errorf("Embedded ASK failed validation: %v", err)
+		}
+		if err := root.ValidateArkSev(); err != nil {
+			t.Errorf("Embedded ARK failed validation: %v", err)
+		}
 	}
 }
 
 func TestFakeCertsKDSExpectations(t *testing.T) {
 	signMu.Do(initSigner)
 	root := AMDRootCerts{
-		Platform:             platform,
-		ArkX509:              signer.Ark,
-		AskX509:              signer.Ask,
-		noCrossCheckTestOnly: true,
-	}
-	if err := root.ValidateAskX509(); err != nil {
-		t.Errorf("fake ASK validation error: %v", err)
+		Platform: platform,
+		ArkX509:  signer.Ark,
+		AskX509:  signer.Ask,
+		// No ArkSev or AskSev intentionally for test certs.
 	}
 	if err := root.ValidateArkX509(); err != nil {
 		t.Errorf("fake ARK validation error: %v", err)
+	}
+	if err := root.ValidateAskX509(); err != nil {
+		t.Errorf("fake ASK validation error: %v", err)
 	}
 }
 
@@ -162,7 +164,6 @@ func TestSnpReportSignature(t *testing.T) {
 
 func TestKdsMetadataLogic(t *testing.T) {
 	signMu.Do(initSigner)
-	DefaultRootCerts.noCrossCheckTestOnly = true
 	asn1Zero, _ := asn1.Marshal(0)
 	productName, _ := asn1.Marshal("Cookie-B0")
 	var hwid [64]byte
@@ -284,7 +285,19 @@ func TestKdsMetadataLogic(t *testing.T) {
 			t.Errorf("%+v.CertChain() errored unexpectedly: %v", tc.builder, err)
 			continue
 		}
-		vcek, _, err := VcekDER(newSigner.Vcek.Raw, newSigner.Ask.Raw, newSigner.Ark.Raw)
+		// Trust the test-generated root if the test should pass. Otherwise, other root logic
+		// won't get tested.
+		options := &Options{TrustedRoots: map[string][]*AMDRootCerts{
+			"Milan": []*AMDRootCerts{&AMDRootCerts{
+				Platform: "Milan",
+				ArkX509:  newSigner.Ark,
+				AskX509:  newSigner.Ask,
+			}},
+		}}
+		if tc.wantErr != "" {
+			options = &Options{}
+		}
+		vcek, _, err := VcekDER(newSigner.Vcek.Raw, newSigner.Ask.Raw, newSigner.Ark.Raw, options)
 		if err == nil && tc.wantErr != "" {
 			t.Errorf("%s: VcekDER(...) = %+v did not error as expected.", tc.name, vcek)
 		}
@@ -382,13 +395,20 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 		t.Error(err)
 	}
 	defer d.Close()
+	// Trust the test device's root certs.
+	options := &Options{TrustedRoots: map[string][]*AMDRootCerts{
+		"Milan": []*AMDRootCerts{&AMDRootCerts{
+			Platform: "Milan",
+			ArkX509:  d.Signer.Ark,
+			AskX509:  d.Signer.Ask,
+		}}}}
 	for _, tc := range tests {
 		ereport, err := sg.GetExtendedReport(d, tc.Input)
 		if err != tc.WantErr {
 			t.Fatalf("%s: GetExtendedReport(d, %v) = %v, %v. Want err: %v", tc.Name, tc.Input, ereport, err, tc.WantErr)
 		}
 		if tc.WantErr == nil {
-			if err := SnpAttestation(ereport, &Options{}); err != nil {
+			if err := SnpAttestation(ereport, options); err != nil {
 				t.Errorf("SnpAttestation(%v) errored unexpectedly: %v", ereport, err)
 			}
 		}
