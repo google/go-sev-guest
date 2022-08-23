@@ -90,8 +90,8 @@ var oneReport = `
 // We can't sign the report with AMD keys, and verification isn't the client's responsibility, so
 // we keep the signature zeros.
 // Similarly, we leave the randomly-generated fields zero.
-func TestRawReport(userData [64]byte) [abi.ReportSize]byte {
-	var r [abi.ReportSize]byte
+func TestRawReport(userData [64]byte) [labi.SnpReportRespReportSize]byte {
+	var r [labi.SnpReportRespReportSize]byte
 	// Set Version to 2
 	binary.LittleEndian.PutUint32(r[0x00:0x04], 2)
 	binary.LittleEndian.PutUint64(r[0x08:0x10], abi.SnpPolicyToBytes(abi.SnpPolicy{Debug: true}))
@@ -118,7 +118,7 @@ func makeTestCerts(now time.Time) ([]byte, *AmdSigner, error) {
 type TestCase struct {
 	Name        string
 	Input       [64]byte
-	Output      [abi.ReportSize]byte
+	Output      [labi.SnpReportRespReportSize]byte
 	OutputProto string
 	FwErr       abi.SevFirmwareStatus
 	EsResult    labi.EsResult
@@ -160,7 +160,7 @@ func TcDevice(tcs []TestCase, now time.Time) (*Device, error) {
 	responses := map[string]interface{}{}
 	for _, tc := range tcs {
 		responses[hex.EncodeToString(tc.Input[:])] = &GetReportResponse{
-			Resp:     labi.SnpReportResp{Data: tc.Output},
+			Resp:     labi.SnpReportRespABI{Data: tc.Output},
 			FwErr:    tc.FwErr,
 			EsResult: tc.EsResult,
 		}

@@ -25,7 +25,7 @@ import (
 
 // GetReportResponse represents a mocked response to a command request.
 type GetReportResponse struct {
-	Resp     labi.SnpReportResp
+	Resp     labi.SnpReportRespABI
 	EsResult labi.EsResult
 	FwErr    abi.SevFirmwareStatus
 }
@@ -56,7 +56,7 @@ func (d *Device) Close() error {
 	return nil
 }
 
-func (d *Device) getReport(req *labi.SnpReportReq, rsp *labi.SnpReportResp, fwErr *uint64) (uintptr, error) {
+func (d *Device) getReport(req *labi.SnpReportReqABI, rsp *labi.SnpReportRespABI, fwErr *uint64) (uintptr, error) {
 	mockRspI, ok := d.UserDataRsp[hex.EncodeToString(req.UserData[:])]
 	if !ok {
 		return 0, fmt.Errorf("test error: no response for %v", req.UserData)
@@ -70,18 +70,19 @@ func (d *Device) getReport(req *labi.SnpReportReq, rsp *labi.SnpReportResp, fwEr
 		*fwErr = uint64(mockRsp.FwErr)
 		return esResult, nil
 	}
-	r, s, err := d.Signer.Sign(abi.SignedComponent(mockRsp.Resp.Data[:]))
+	report := mockRsp.Resp.Data[:abi.ReportSize]
+	r, s, err := d.Signer.Sign(abi.SignedComponent(report))
 	if err != nil {
 		return 0, fmt.Errorf("test error: could not sign report: %v", err)
 	}
-	if err := abi.SetSignature(r, s, mockRsp.Resp.Data[:]); err != nil {
+	if err := abi.SetSignature(r, s, report); err != nil {
 		return 0, fmt.Errorf("test error: could not set signature: %v", err)
 	}
-	copy(rsp.Data[:], mockRsp.Resp.Data[:])
+	copy(rsp.Data[:], report)
 	return esResult, nil
 }
 
-func (d *Device) getExtReport(req *labi.SnpExtendedReportReqSafe, rsp *labi.SnpReportResp, fwErr *uint64) (uintptr, error) {
+func (d *Device) getExtReport(req *labi.SnpExtendedReportReq, rsp *labi.SnpReportRespABI, fwErr *uint64) (uintptr, error) {
 	if req.CertsLength == 0 {
 		*fwErr = uint64(abi.GuestRequestInvalidLength)
 		req.CertsLength = uint32(len(d.Certs))
@@ -101,12 +102,12 @@ func (d *Device) getExtReport(req *labi.SnpExtendedReportReqSafe, rsp *labi.SnpR
 // Ioctl mocks commands with pre-specified responses for a finite number of requests.
 func (d *Device) Ioctl(command uintptr, req interface{}) (uintptr, error) {
 	switch sreq := req.(type) {
-	case *labi.SnpUserGuestRequestSafe:
+	case *labi.SnpUserGuestRequest:
 		switch command {
 		case labi.IocSnpGetReport:
-			return d.getReport(sreq.ReqData.(*labi.SnpReportReq), sreq.RespData.(*labi.SnpReportResp), &sreq.FwErr)
+			return d.getReport(sreq.ReqData.(*labi.SnpReportReqABI), sreq.RespData.(*labi.SnpReportRespABI), &sreq.FwErr)
 		case labi.IocSnpGetExtendedReport:
-			return d.getExtReport(sreq.ReqData.(*labi.SnpExtendedReportReqSafe), sreq.RespData.(*labi.SnpReportResp), &sreq.FwErr)
+			return d.getExtReport(sreq.ReqData.(*labi.SnpExtendedReportReq), sreq.RespData.(*labi.SnpReportRespABI), &sreq.FwErr)
 		default:
 			return 0, fmt.Errorf("invalid command 0x%x", command)
 		}
