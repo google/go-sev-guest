@@ -171,5 +171,5 @@ func (e SevFirmwareErr) Error() string {
 	if e.Status == GuestRequestInvalidLength {
 		return "too few extended guest request data pages"
 	}
-	return fmt.Sprintf("unexpected firmware status (see SEV API spec): %x", e.Status)
+	return fmt.Sprintf("unexpected firmware status (see SEV API spec): %x", uint64(e.Status))
 }

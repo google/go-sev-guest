@@ -69,6 +69,10 @@ const (
 	AskGUID = "4ab7b379-bbac-4fe4-a02f-05aef327c782"
 	// ArkGUID is the AMD Root Key GUID
 	ArkGUID = "c0b406a4-a803-4952-9743-3fb6014cd0ae"
+
+	// ExpectedReportVersion is set by the SNP API specification
+	// https://www.amd.com/system/files/TechDocs/56860.pdf
+	ExpectedReportVersion = 2
 )
 
 // CertTableHeaderEntry defines an entry of the beginning of an extended attestation report which
@@ -362,6 +366,25 @@ func checkReportSizes(r *pb.Report) error {
 	return nil
 }
 
+// ValidateReportFormat returns an error if the provided buffer violates structural expectations of
+// attestation report data.
+func ValidateReportFormat(r []byte) error {
+	if len(r) < ReportSize {
+		return fmt.Errorf("report size is %d bytes. Expected %d bytes", len(r), ReportSize)
+	}
+
+	version := binary.LittleEndian.Uint32(r[0x00:0x04])
+	if version != ExpectedReportVersion {
+		return fmt.Errorf("report version is: %d. Expected %d", version, ExpectedReportVersion)
+	}
+
+	policy := binary.LittleEndian.Uint64(r[0x08:0x10])
+	if _, err := ParseSnpPolicy(policy); err != nil {
+		return fmt.Errorf("malformed guest policy: %v", err)
+	}
+	return nil
+}
+
 // ReportToAbiBytes translates the report back into its little-endian ABI format.
 func ReportToAbiBytes(r *pb.Report) ([]byte, error) {
 	if r == nil {
@@ -375,9 +398,6 @@ func ReportToAbiBytes(r *pb.Report) ([]byte, error) {
 
 	binary.LittleEndian.PutUint32(data[0x00:0x04], r.Version)
 	binary.LittleEndian.PutUint32(data[0x04:0x08], r.GuestSvn)
-	if _, err := ParseSnpPolicy(r.Policy); err != nil {
-		return nil, fmt.Errorf("malformed guest policy: %v", err)
-	}
 	binary.LittleEndian.PutUint64(data[0x08:0x10], r.Policy)
 	copy(data[0x10:0x20], r.FamilyId[:])
 	copy(data[0x20:0x30], r.ImageId[:])
