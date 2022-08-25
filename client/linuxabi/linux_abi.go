@@ -50,6 +50,10 @@ const (
 	// IocSnpGetReport is the ioctl command for getting an attestation report
 	IocSnpGetReport = iocSnpWithoutNr | (0x0 << iocNrshift)
 
+	// IocSnpGetDerivedKey is the ioctl command for getting a key derived from measured components and
+	// either the VCEK or VMRK.
+	IocSnpGetDerivedKey = iocSnpWithoutNr | (0x1 << iocNrshift)
+
 	// IocSnpGetReport is the ioctl command for getting an extended attestation report that includes
 	// certificate information.
 	IocSnpGetExtendedReport = iocSnpWithoutNr | (0x2 << iocNrshift)
@@ -156,6 +160,55 @@ func (r *SnpReportRespABI) Finish(b BinaryConvertible) error {
 		}
 	}
 	return nil
+}
+
+// SnpDerivedKeyReqABI is the ABI representation of a request to the SEV guest device to derive a
+// key from specified information.
+type SnpDerivedKeyReqABI struct {
+	// RootKeySelect is all reserved bits except bit 0 for UseVMRK (1) or UseVCEK (0).
+	RootKeySelect    uint32
+	reserved         uint32
+	GuestFieldSelect uint64
+	// Vmpl to mix into the key. Must be greater than or equal to current Vmpl.
+	Vmpl uint32
+	// GuestSVN to mix into the key. Must be less than or equal to GuestSVN at launch.
+	GuestSVN uint32
+	// TCBVersion to mix into the key. Must be less than or equal to the CommittedTcb.
+	TCBVersion uint64
+}
+
+// Pointer returns a pointer to the object.
+func (r *SnpDerivedKeyReqABI) Pointer() unsafe.Pointer { return unsafe.Pointer(r) }
+
+// Finish is a no-op.
+func (r *SnpDerivedKeyReqABI) Finish(BinaryConvertible) error { return nil }
+
+// ABI returns the ABI representation of this object.
+func (r *SnpDerivedKeyReqABI) ABI() BinaryConversion { return r }
+
+// SnpDerivedKeyRespABI represents the response to an SnpDerivedKeyReq.
+type SnpDerivedKeyRespABI struct {
+	Status   uint32
+	reserved [0x20 - 4]byte
+	Data     [32]byte
+}
+
+// ABI returns the object itself.
+func (r *SnpDerivedKeyRespABI) ABI() BinaryConversion { return r }
+
+// Pointer returns a pointer to the object itself.
+func (r *SnpDerivedKeyRespABI) Pointer() unsafe.Pointer { return unsafe.Pointer(r) }
+
+// Finish is a no-op.
+func (r *SnpDerivedKeyRespABI) Finish(BinaryConvertible) error {
+	switch r.Status {
+	case 0:
+		return nil
+	case 0x16:
+		return errors.New("msg_key_req error: invalid parameters")
+	default:
+		return fmt.Errorf("msg_key_req unknown status code: 0x%x", r.Status)
+	}
 }
 
 // SnpExtendedReportReqABI is Linux's sev-guest ioctl abi for sending a GET_EXTENDED_REPORT request.

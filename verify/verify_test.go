@@ -135,7 +135,7 @@ func TestVerifyVcekCert(t *testing.T) {
 func TestSnpReportSignature(t *testing.T) {
 	tests := test.TestCases()
 	now := time.Date(2022, time.May, 3, 9, 0, 0, 0, time.UTC)
-	d, err := test.TcDevice(tests, now)
+	d, err := test.TcDevice(tests, nil, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,7 +387,7 @@ func TestCRLRootValidity(t *testing.T) {
 
 func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 	tests := test.TestCases()
-	d, err := test.TcDevice(tests, time.Now())
+	d, err := test.TcDevice(tests, nil, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

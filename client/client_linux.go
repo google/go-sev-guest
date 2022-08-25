@@ -286,3 +286,78 @@ func GetExtendedReportAtVmpl(d Device, userData [64]byte, vmpl int) (*pb.Attesta
 func GetExtendedReport(d Device, userData [64]byte) (*pb.Attestation, error) {
 	return GetExtendedReportAtVmpl(d, userData, 0)
 }
+
+// GuestFieldSelect represents which guest-provided information will be mixed into a derived key.
+type GuestFieldSelect struct {
+	TCBVersion  bool
+	GuestSVN    bool
+	Measurement bool
+	FamilyID    bool
+	ImageID     bool
+	GuestPolicy bool
+}
+
+// SnpDerivedKeyReq represents a request to the SEV guest device to derive a key from specified
+// information.
+type SnpDerivedKeyReq struct {
+	// UseVCEK determines if the derived key will be based on VCEK or VMRK. This is opposite from the
+	// ABI's ROOT_KEY_SELECT to avoid accidentally making an unsafe choice in a multitenant
+	// environment.
+	UseVCEK          bool
+	GuestFieldSelect GuestFieldSelect
+	// Vmpl to mix into the key. Must be greater than or equal to current Vmpl.
+	Vmpl uint32
+	// GuestSVN to mix into the key. Must be less than or equal to GuestSVN at launch.
+	GuestSVN uint32
+	// TCBVersion to mix into the key. Must be less than or equal to the CommittedTcb.
+	TCBVersion uint64
+}
+
+// ABI returns the SNP ABI-specified uint64 bitmask of guest field selection.
+func (g GuestFieldSelect) ABI() uint64 {
+	var value uint64
+	if g.TCBVersion {
+		value |= uint64(1 << 5)
+	}
+	if g.GuestSVN {
+		value |= uint64(1 << 4)
+	}
+	if g.Measurement {
+		value |= uint64(1 << 3)
+	}
+	if g.FamilyID {
+		value |= uint64(1 << 2)
+	}
+	if g.ImageID {
+		value |= uint64(1 << 1)
+	}
+	if g.GuestPolicy {
+		value |= uint64(1 << 0)
+	}
+	return value
+}
+
+// GetDerivedKeyAcknowledgingItsLimitations returns 32 bytes of key material that the AMD security
+// processor derives from the given parameters. Security limitations of this command are described
+// more in the project README.
+func GetDerivedKeyAcknowledgingItsLimitations(d Device, request *SnpDerivedKeyReq) (*labi.SnpDerivedKeyRespABI, error) {
+	response := &labi.SnpDerivedKeyRespABI{}
+	rootKeySelect := uint32(1)
+	if request.UseVCEK {
+		rootKeySelect = 0
+	}
+	guestRequest := &labi.SnpUserGuestRequest{
+		ReqData: &labi.SnpDerivedKeyReqABI{
+			RootKeySelect:    rootKeySelect,
+			GuestFieldSelect: request.GuestFieldSelect.ABI(),
+			Vmpl:             request.Vmpl,
+			GuestSVN:         request.GuestSVN,
+			TCBVersion:       request.TCBVersion,
+		},
+		RespData: response,
+	}
+	if err := message(d, labi.IocSnpGetDerivedKey, guestRequest); err != nil {
+		return nil, fmt.Errorf("error getting derived key: %v", err)
+	}
+	return response, nil
+}

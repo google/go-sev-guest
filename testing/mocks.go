@@ -34,6 +34,7 @@ type GetReportResponse struct {
 type Device struct {
 	isOpen      bool
 	UserDataRsp map[string]interface{}
+	Keys        map[string][]byte
 	Certs       []byte
 	Signer      *AmdSigner
 }
@@ -99,6 +100,23 @@ func (d *Device) getExtReport(req *labi.SnpExtendedReportReq, rsp *labi.SnpRepor
 	return ret, nil
 }
 
+// DerivedKeyRequestToString translates a DerivedKeyReqABI into a map key string representation.
+func DerivedKeyRequestToString(req *labi.SnpDerivedKeyReqABI) string {
+	return fmt.Sprintf("%x %x %x %x %x", req.RootKeySelect, req.GuestFieldSelect, req.Vmpl, req.GuestSVN, req.TCBVersion)
+}
+
+func (d *Device) getDerivedKey(req *labi.SnpDerivedKeyReqABI, rsp *labi.SnpDerivedKeyRespABI, fwErr *uint64) (uintptr, error) {
+	if len(d.Keys) == 0 {
+		return 0, errors.New("test error: no keys")
+	}
+	key, ok := d.Keys[DerivedKeyRequestToString(req)]
+	if !ok {
+		return 0, fmt.Errorf("test error: unmapped key request %v", req)
+	}
+	copy(rsp.Data[:], key)
+	return 0, nil
+}
+
 // Ioctl mocks commands with pre-specified responses for a finite number of requests.
 func (d *Device) Ioctl(command uintptr, req interface{}) (uintptr, error) {
 	switch sreq := req.(type) {
@@ -106,6 +124,8 @@ func (d *Device) Ioctl(command uintptr, req interface{}) (uintptr, error) {
 		switch command {
 		case labi.IocSnpGetReport:
 			return d.getReport(sreq.ReqData.(*labi.SnpReportReqABI), sreq.RespData.(*labi.SnpReportRespABI), &sreq.FwErr)
+		case labi.IocSnpGetDerivedKey:
+			return d.getDerivedKey(sreq.ReqData.(*labi.SnpDerivedKeyReqABI), sreq.RespData.(*labi.SnpDerivedKeyRespABI), &sreq.FwErr)
 		case labi.IocSnpGetExtendedReport:
 			return d.getExtReport(sreq.ReqData.(*labi.SnpExtendedReportReq), sreq.RespData.(*labi.SnpReportRespABI), &sreq.FwErr)
 		default:
