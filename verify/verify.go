@@ -485,6 +485,9 @@ func VcekDER(vcek []byte, ask []byte, ark []byte, options *Options) (*x509.Certi
 // SnpReportSignature verifies the attestation report's signature based on the report's
 // SignatureAlgo.
 func SnpReportSignature(report []byte, vcek *x509.Certificate) error {
+	if err := abi.ValidateReportFormat(report); err != nil {
+		return fmt.Errorf("attestation report format error: %v", err)
+	}
 	der, err := abi.ReportToSignatureDER(report)
 	if err != nil {
 		return fmt.Errorf("could not interpret report signature: %v", err)
