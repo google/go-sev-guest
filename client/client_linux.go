@@ -85,13 +85,13 @@ func (d *LinuxDevice) Close() error {
 // Ioctl sends a command with its wrapped request and response values to the Linux device.
 func (d *LinuxDevice) Ioctl(command uintptr, req interface{}) (uintptr, error) {
 	switch sreq := req.(type) {
-	case *labi.SnpUserGuestRequestSafe:
+	case *labi.SnpUserGuestRequest:
 		return labi.Ioctl(d.fd, command, sreq)
 	}
 	return 0, fmt.Errorf("unexpected request value: %v", req)
 }
 
-func message(d Device, command uintptr, req *labi.SnpUserGuestRequestSafe) error {
+func message(d Device, command uintptr, req *labi.SnpUserGuestRequest) error {
 	result, err := d.Ioctl(command, req)
 	if err != nil {
 		return err
@@ -108,13 +108,12 @@ func message(d Device, command uintptr, req *labi.SnpUserGuestRequestSafe) error
 // GetRawReportAtVmpl requests for an attestation report at the given VMPL that incorporates the
 // given user data.
 func GetRawReportAtVmpl(d Device, userData [64]byte, vmpl int) ([]byte, error) {
-	var snpReportRsp labi.SnpReportResp
-	snpReportReq := labi.SnpReportReq{
-		UserData: userData,
-		Vmpl:     uint32(vmpl),
-	}
-	userGuestReq := labi.SnpUserGuestRequestSafe{
-		ReqData:  &snpReportReq,
+	var snpReportRsp labi.SnpReportRespABI
+	userGuestReq := labi.SnpUserGuestRequest{
+		ReqData: &labi.SnpReportReqABI{
+			UserData: userData,
+			Vmpl:     uint32(vmpl),
+		},
 		RespData: &snpReportRsp,
 	}
 	if err := message(d, labi.IocSnpGetReport, &userGuestReq); err != nil {
@@ -148,16 +147,16 @@ func GetReport(d Device, userData [64]byte) (*pb.Report, error) {
 // returns the signed attestation report containing userData and the certificate chain for the
 // report's endorsement key.
 func getExtendedReportIn(d Device, userData [64]byte, vmpl int, certs []byte) ([]byte, uint32, error) {
-	var snpReportRsp labi.SnpReportResp
-	snpExtReportReq := labi.SnpExtendedReportReqSafe{
-		Data: labi.SnpReportReq{
+	var snpReportRsp labi.SnpReportRespABI
+	snpExtReportReq := labi.SnpExtendedReportReq{
+		Data: labi.SnpReportReqABI{
 			UserData: userData,
 			Vmpl:     uint32(vmpl),
 		},
 		Certs:       certs,
 		CertsLength: uint32(len(certs)),
 	}
-	userGuestReq := labi.SnpUserGuestRequestSafe{
+	userGuestReq := labi.SnpUserGuestRequest{
 		ReqData:  &snpExtReportReq,
 		RespData: &snpReportRsp,
 	}

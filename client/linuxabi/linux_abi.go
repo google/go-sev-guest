@@ -16,9 +16,11 @@
 package linuxabi
 
 import (
+	"errors"
+	"fmt"
+	"reflect"
 	"unsafe"
 
-	"github.com/google/go-sev-guest/abi"
 	"golang.org/x/sys/unix"
 )
 
@@ -34,7 +36,7 @@ const (
 	iocNrshift   = 0
 	iocTypeshift = (iocNrshift + iocNrbits)
 	iocSizeshift = (iocTypeshift + iocTypebits)
-	iocDirshift  = (iocSizeshift + iocDirbits)
+	iocDirshift  = (iocSizeshift + iocSizebits)
 	iocWrite     = 1
 	iocRead      = 2
 
@@ -43,7 +45,7 @@ const (
 	iocSnpWithoutNr    = ((iocWrite | iocRead) << iocDirshift) |
 		(iocTypeSnpGuestReq << iocTypeshift) |
 		// unsafe.Sizeof(snpUserGuestRequest)
-		(24 << iocSizeshift)
+		(32 << iocSizeshift)
 
 	// IocSnpGetReport is the ioctl command for getting an attestation report
 	IocSnpGetReport = iocSnpWithoutNr | (0x0 << iocNrshift)
@@ -51,6 +53,14 @@ const (
 	// IocSnpGetReport is the ioctl command for getting an extended attestation report that includes
 	// certificate information.
 	IocSnpGetExtendedReport = iocSnpWithoutNr | (0x2 << iocNrshift)
+
+	// The message version for MSG_REPORT_REQ in the SNP API. Specified as 1.
+	guestMsgVersion = 1
+
+	// These numbers are from the uapi header sev_guest.h
+	snpResportRespSize      = 4000
+	msgReportReqHeaderSize  = 0x20
+	SnpReportRespReportSize = snpResportRespSize - msgReportReqHeaderSize
 )
 
 const (
@@ -93,9 +103,9 @@ func (err SevEsErr) Error() string {
 	return "unknown error"
 }
 
-// SnpReportReq is Linux's sev-guest ioctl abi for sending a GET_REPORT request. See
+// SnpReportReqABI is Linux's sev-guest ioctl abi for sending a GET_REPORT request. See
 // include/uapi/linux/sev-guest.h
-type SnpReportReq struct {
+type SnpReportReqABI struct {
 	// UserData to be included in the report
 	UserData [64]uint8
 
@@ -106,87 +116,187 @@ type SnpReportReq struct {
 	reserved [28]byte
 }
 
-// SnpReportResp is Linux's sev-guest ioctl abi for receiving a GET_REPORT response.
-type SnpReportResp struct {
+// SnpReportRespABI is Linux's sev-guest ioctl abi for receiving a GET_REPORT response.
+// The size is expected to be snpReportRespSize.
+type SnpReportRespABI struct {
+	Status     uint32
+	ReportSize uint32
+	reserved   [0x20 - 8]byte
 	// Data is the response data, see SEV-SNP spec for the format
-	Data [abi.ReportSize]uint8
+	Data [SnpReportRespReportSize]uint8
 }
 
-// SnpExtendedReportReqSafe is close to Linux's sev-guest ioctl abi for sending a GET_EXTENDED_REPORT request,
-// but uses safer types for the Ioctl interface.
-type SnpExtendedReportReqSafe struct {
-	Data SnpReportReq
+// ABI returns the same object since it doesn't need a separate representation across the interface.
+func (r *SnpReportReqABI) ABI() BinaryConversion { return r }
+
+// Pointer returns a pointer to the object itself.
+func (r *SnpReportReqABI) Pointer() unsafe.Pointer {
+	return unsafe.Pointer(r)
+}
+
+// Finish is a no-op.
+func (r *SnpReportReqABI) Finish(b BinaryConvertible) error { return nil }
+
+// ABI returns the same object since it doesn't need a separate representation across the interface.
+func (r *SnpReportRespABI) ABI() BinaryConversion { return r }
+
+// Pointer returns a pointer to the object itself.
+func (r *SnpReportRespABI) Pointer() unsafe.Pointer {
+	return unsafe.Pointer(r)
+}
+
+// Finish checks the status of the message and translates it to a Golang error.
+func (r *SnpReportRespABI) Finish(b BinaryConvertible) error {
+	if r.Status != 0 {
+		switch r.Status {
+		case 0x16: // Value from MSG_REPORT_RSP specification in SNP API.
+			return errors.New("get_report had invalid parameters")
+		default:
+			return fmt.Errorf("unknown status: 0x%x", r.Status)
+		}
+	}
+	return nil
+}
+
+// SnpExtendedReportReqABI is Linux's sev-guest ioctl abi for sending a GET_EXTENDED_REPORT request.
+type SnpExtendedReportReqABI struct {
+	Data SnpReportReqABI
 
 	// Where to copy the certificate blob.
+	CertsAddress unsafe.Pointer
+
+	// length of the certificate blob
+	CertsLength uint32
+}
+
+// SnpExtendedReportReq is close to Linux's sev-guest ioctl abi for sending a GET_EXTENDED_REPORT request,
+// but uses safer types for the Ioctl interface.
+type SnpExtendedReportReq struct {
+	Data SnpReportReqABI
+
+	// Certs receives the certificate blob after the extended report request.
 	Certs []byte
 
-	// length of the certificate blob
+	// CertsLength is the length of the certificate blob.
 	CertsLength uint32
 }
 
-// SnpExtendedReportReq is Linux's sev-guest ioctl abi for sending a GET_EXTENDED_REPORT request.
-type SnpExtendedReportReq struct {
-	Data SnpReportReq
-
-	// Where to copy the certificate blob.
-	CertsAddress uint64
-
-	// length of the certificate blob
-	CertsLength uint32
+// Pointer returns a pointer so the object itself.
+func (r *SnpExtendedReportReqABI) Pointer() unsafe.Pointer {
+	return unsafe.Pointer(r)
 }
 
-// SnpUserGuestRequest is Linux's sev-guest ioctl abi for issuing a guest message.
+// Finish writes back the changed CertsLength value.
+func (r *SnpExtendedReportReqABI) Finish(b BinaryConvertible) error {
+	s, ok := b.(*SnpExtendedReportReq)
+	if !ok {
+		return fmt.Errorf("Finish argument is %v. Expects a *SnpExtendedReportReq", reflect.TypeOf(b))
+	}
+	s.CertsLength = r.CertsLength
+	return nil
+}
+
+// ABI returns an object that can cross the ABI boundary and copy back changes to the original
+// object.
+func (r *SnpExtendedReportReq) ABI() BinaryConversion {
+	var certsAddress unsafe.Pointer
+	if len(r.Certs) != 0 {
+		certsAddress = unsafe.Pointer(&r.Certs[0])
+	}
+	return &SnpExtendedReportReqABI{
+		Data:         r.Data,
+		CertsAddress: certsAddress,
+		CertsLength:  r.CertsLength,
+	}
+}
+
+// SnpUserGuestRequestABI is Linux's sev-guest ioctl abi for issuing a guest message.
+type SnpUserGuestRequestABI struct {
+	GuestMsgVersion uint32
+	// Request and response structure address.
+	ReqData  unsafe.Pointer
+	RespData unsafe.Pointer
+	// firmware error code on failure (see psp-sev.h in Linux kernel)
+	FwErr uint64
+}
+
+type snpUserGuestRequestConversion struct {
+	abi      SnpUserGuestRequestABI
+	reqConv  BinaryConversion
+	respConv BinaryConversion
+}
+
+// SnpUserGuestRequest is Linux's sev-guest ioctl interface for issuing a guest message. The
+// types here enhance runtime safety when using Ioctl as an interface.
 type SnpUserGuestRequest struct {
 	// Request and response structure address.
-	ReqData  uint64
-	RespData uint64
+	ReqData  BinaryConvertible
+	RespData BinaryConvertible
 	// firmware error code on failure (see psp-sev.h in Linux kernel)
 	FwErr uint64
 }
 
-// SnpUserGuestRequestSafe is Linux's sev-guest ioctl interface for issuing a guest message. The
-// types here enhance runtime safety when using Ioctl as an interface.
-type SnpUserGuestRequestSafe struct {
-	// Request and response structure address.
-	ReqData  interface{}
-	RespData interface{}
-	// firmware error code on failure (see psp-sev.h in Linux kernel)
-	FwErr uint64
+// ABI returns an object that can cross the ABI boundary and copy back changes to the original
+// object.
+func (r *SnpUserGuestRequest) ABI() BinaryConversion {
+	result := &snpUserGuestRequestConversion{
+		reqConv:  r.ReqData.ABI(),
+		respConv: r.RespData.ABI(),
+	}
+	result.abi.GuestMsgVersion = guestMsgVersion
+	result.abi.ReqData = result.reqConv.Pointer()
+	result.abi.RespData = result.respConv.Pointer()
+	return result
+}
+
+// Pointer returns a pointer to the object that crosses the ABI boundary.
+func (r *snpUserGuestRequestConversion) Pointer() unsafe.Pointer {
+	return unsafe.Pointer(&r.abi)
+}
+
+// Finish writes back the FwErr and any changes to the request or response objects.
+func (r *snpUserGuestRequestConversion) Finish(b BinaryConvertible) error {
+	s, ok := b.(*SnpUserGuestRequest)
+	if !ok {
+		return fmt.Errorf("Finish argument is %v. Expects a *SnpUserGuestRequestSafe", reflect.TypeOf(b))
+	}
+	if err := r.reqConv.Finish(s.ReqData); err != nil {
+		return fmt.Errorf("could not finalize request data: %v", err)
+	}
+	if err := r.respConv.Finish(s.RespData); err != nil {
+		return fmt.Errorf("could not finalize response data: %v", err)
+	}
+	s.FwErr = r.abi.FwErr
+	return nil
+}
+
+// BinaryConversion is an interface that abstracts a "stand-in" object that passes through an ABI
+// boundary and can finalize changes to the original object.
+type BinaryConversion interface {
+	Pointer() unsafe.Pointer
+	Finish(BinaryConvertible) error
+}
+
+// BinaryConvertible is an interface for an object that can produce a partner BinaryConversion
+// object to allow its representation to pass the ABI boundary.
+type BinaryConvertible interface {
+	ABI() BinaryConversion
 }
 
 // Ioctl performs the ioctl Linux syscall with the sev-guest Linux ABI unsafe pointer
 // manipulation contained all in this call.
-func Ioctl(fd int, command uintptr, sreq *SnpUserGuestRequestSafe) (uintptr, error) {
-	// Limit unsafe pointers to this scope by converting internal types to ABI types before a
-	// raw ioctl call, and converting back.
-	safeReqData := sreq.ReqData
-	var reqData interface{}
-	switch extReq := safeReqData.(type) {
-	case *SnpExtendedReportReqSafe:
-		var certsAddress uint64
-		if len(extReq.Certs) > 0 {
-			certsAddress = uint64(uintptr(unsafe.Pointer(&extReq.Certs[0])))
-		}
-		reqData = &SnpExtendedReportReq{
-			Data:         extReq.Data,
-			CertsAddress: certsAddress,
-			CertsLength:  extReq.CertsLength,
-		}
+func Ioctl(fd int, command uintptr, req *SnpUserGuestRequest) (uintptr, error) {
+	abi := req.ABI()
+	result, _, errno := unix.Syscall(unix.SYS_IOCTL, uintptr(fd), command, uintptr(abi.Pointer()))
+	abi.Finish(req)
+
+	// TODO(Issue #5): remove the work around for the kernel bug that writes
+	// uninitialized memory back on non-EIO.
+	if errno != unix.EIO {
+		req.FwErr = 0
 	}
-	abi := SnpUserGuestRequest{
-		ReqData:  uint64(uintptr(unsafe.Pointer(&reqData))),
-		RespData: uint64(uintptr(unsafe.Pointer(&sreq.RespData))),
-	}
-	ptr := uintptr(unsafe.Pointer(&abi))
-	result, _, errno := unix.RawSyscall(unix.SYS_IOCTL, uintptr(fd), command, ptr)
 	if errno != 0 {
 		return 0, errno
 	}
-	// Copy back the certsLength from the request copy if an extended report request.
-	switch extReq := reqData.(type) {
-	case *SnpExtendedReportReq:
-		safeReqData.(*SnpExtendedReportReqSafe).CertsLength = extReq.CertsLength
-	}
-	sreq.FwErr = abi.FwErr
 	return result, nil
 }
