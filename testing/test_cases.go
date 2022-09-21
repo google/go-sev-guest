@@ -152,7 +152,7 @@ func TestCases() []TestCase {
 }
 
 // TcDevice returns a mock device populated from test cases' inputs and expected outputs.
-func TcDevice(tcs []TestCase, now time.Time) (*Device, error) {
+func TcDevice(tcs []TestCase, keys map[string][]byte, now time.Time) (*Device, error) {
 	certs, signer, err := makeTestCerts(now)
 	if err != nil {
 		return nil, fmt.Errorf("test failure creating certificates: %v", err)
@@ -169,5 +169,6 @@ func TcDevice(tcs []TestCase, now time.Time) (*Device, error) {
 		UserDataRsp: responses,
 		Certs:       certs,
 		Signer:      signer,
+		Keys:        keys,
 	}, nil
 }

@@ -37,6 +37,15 @@ AMD SEV-SNP API formatted report and certificate table, or just `GetReport`,
 `GetReportAtVmpl`, `GetRawReport`, or `GetRawReportAtVmpl` to avoid fetching the
 certificate table.
 
+### `func GetDerivedKeyAcknowledgingItsLimitations(d Device, request *SnpDerivedKeyReq) ([]byte, error)`
+
+This function uses the `/dev/sev-guest` command for requesting a key derived
+from data that is measured at VM launch time, with the additional ability to
+continue to generate the same key as at earlier TCB and GuestSVN values.
+
+This function's name is selected to discourage its use in a Cloud setting. See
+[LIMITATIONS.md](LIMITATIONS.md).
+
 ### `func (d Device) Close() error`
 
 Closes the device.
