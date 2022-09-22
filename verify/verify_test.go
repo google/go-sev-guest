@@ -30,7 +30,7 @@ import (
 	"github.com/google/go-sev-guest/abi"
 	sg "github.com/google/go-sev-guest/client"
 	test "github.com/google/go-sev-guest/testing"
-	"github.com/google/go-sev-guest/verify/kds"
+	"github.com/google/go-sev-guest/kds"
 )
 
 // These certificates are committed regardless of its expiration date since we adjust the

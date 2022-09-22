@@ -31,7 +31,7 @@ import (
 	"time"
 
 	"github.com/google/go-sev-guest/abi"
-	"github.com/google/go-sev-guest/verify/kds"
+	"github.com/google/go-sev-guest/kds"
 	"github.com/pborman/uuid"
 )
 

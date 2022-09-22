@@ -31,7 +31,7 @@ import (
 	"github.com/golang/glog"
 	"github.com/google/go-sev-guest/abi"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
-	"github.com/google/go-sev-guest/verify/kds"
+	"github.com/google/go-sev-guest/kds"
 	"github.com/pborman/uuid"
 	"github.com/pkg/errors"
 	"go.uber.org/multierr"
