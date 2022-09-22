@@ -88,6 +88,19 @@ type CertTableHeaderEntry struct {
 	Length uint32
 }
 
+// CertTableEntry represents both the GUID and whole Certificate contents denoted by the
+// CertTableHeaderEntry ABI struct.
+type CertTableEntry struct {
+	GUID    uuid.UUID
+	RawCert []byte
+}
+
+// CertTable represents each (GUID, Blob) pair of certificates returned by an extended guest
+// request.
+type CertTable struct {
+	Entries []CertTableEntry
+}
+
 // Appendix B.1 of the SEV API specification
 
 // AskCert is the SEV format for AMD signing key certificates.
@@ -545,4 +558,62 @@ func ParseSnpCertTableHeader(certs []byte) ([]CertTableHeaderEntry, error) {
 		}
 	}
 	return entries, nil
+}
+
+// Unmarshal populates the certTable with the (GUID, Blob) pairs represented in the given bytes.
+// The format of the bytes is specified by the SEV SNP API for extended guest requests.
+func (c *CertTable) Unmarshal(certs []byte) error {
+	certTableHeader, err := ParseSnpCertTableHeader(certs)
+	if err != nil {
+		return err
+	}
+	for i, entry := range certTableHeader {
+		var next CertTableEntry
+		next.GUID = make([]byte, GUIDSize)
+		copy(next.GUID, entry.GUID)
+		if entry.Offset+entry.Length > uint32(len(certs)) {
+			return fmt.Errorf("cert table entry %d specifies a byte range outside the certificate data block (size %d): offset=%d, length%d", i, len(certs), entry.Offset, entry.Length)
+		}
+		next.RawCert = make([]byte, entry.Length)
+		copy(next.RawCert, certs[entry.Offset:entry.Offset+entry.Length])
+		c.Entries = append(c.Entries, next)
+	}
+	return nil
+}
+
+// GetByGUIDString returns the raw bytes for a certificate that matches a key identified by the
+// given GUID string.
+func (c *CertTable) GetByGUIDString(guid string) ([]byte, error) {
+	g := uuid.Parse(guid)
+	if g == nil {
+		return nil, fmt.Errorf("GUID string format is XXXXXXXX-XXXX-XXXX-XXXXXXXXXXXXXXXX, got %s", guid)
+	}
+	for _, entry := range c.Entries {
+		if uuid.Equal(entry.GUID, g) {
+			return entry.RawCert, nil
+		}
+		fmt.Println(entry.GUID, "is not", g)
+	}
+	return nil, fmt.Errorf("cert not found for GUID %s", guid)
+}
+
+// Proto returns a protobuf representation of the extended report certificate chain.
+func (c *CertTable) Proto() (*pb.CertificateChain, error) {
+	vcek, err := c.GetByGUIDString(VcekGUID)
+	if err != nil {
+		return nil, fmt.Errorf("VCEK not found: %v", err)
+	}
+	ask, err := c.GetByGUIDString(AskGUID)
+	if err != nil {
+		return nil, fmt.Errorf("ASK not found: %v", err)
+	}
+	ark, err := c.GetByGUIDString(ArkGUID)
+	if err != nil {
+		return nil, fmt.Errorf("ARK not found: %v", err)
+	}
+	return &pb.CertificateChain{
+		VcekCert: vcek,
+		AskCert:  ask,
+		ArkCert:  ark,
+	}, nil
 }
