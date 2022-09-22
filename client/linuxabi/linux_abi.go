@@ -20,8 +20,6 @@ import (
 	"fmt"
 	"reflect"
 	"unsafe"
-
-	"golang.org/x/sys/unix"
 )
 
 // EsResult is the status code type for Linux's GHCB communication results.
@@ -336,20 +334,3 @@ type BinaryConvertible interface {
 	ABI() BinaryConversion
 }
 
-// Ioctl performs the ioctl Linux syscall with the sev-guest Linux ABI unsafe pointer
-// manipulation contained all in this call.
-func Ioctl(fd int, command uintptr, req *SnpUserGuestRequest) (uintptr, error) {
-	abi := req.ABI()
-	result, _, errno := unix.Syscall(unix.SYS_IOCTL, uintptr(fd), command, uintptr(abi.Pointer()))
-	abi.Finish(req)
-
-	// TODO(Issue #5): remove the work around for the kernel bug that writes
-	// uninitialized memory back on non-EIO.
-	if errno != unix.EIO {
-		req.FwErr = 0
-	}
-	if errno != 0 {
-		return 0, errno
-	}
-	return result, nil
-}
