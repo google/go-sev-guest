@@ -163,7 +163,7 @@ func TestGetDerivedKey(t *testing.T) {
 		UseVCEK: true,
 	})
 	if err != nil {
-		t.Fatal("Could not get key1: %v", err)
+		t.Fatalf("Could not get key1: %v", err)
 	}
 	key2, err := GetDerivedKeyAcknowledgingItsLimitations(device, &SnpDerivedKeyReq{
 		UseVCEK: true,
@@ -180,10 +180,10 @@ func TestGetDerivedKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Could not get key3: %v", err)
 	}
-	if bytes.Equal(key1, key2) {
-		t.Errorf("GetDerivedKey...(nothing) = %v = GetDerivedKey...(guestPolicy) = %v", key1, key2)
+	if bytes.Equal(key1.Data[:], key2.Data[:]) {
+		t.Errorf("GetDerivedKey...(nothing) = %v = GetDerivedKey...(guestPolicy) = %v", key1.Data, key2.Data)
 	}
-	if !bytes.Equal(key1, key3) {
-		t.Errorf("GetDerivedKey...(nothing) = %v and %v. Expected equality", key1, key3)
+	if !bytes.Equal(key1.Data[:], key3.Data[:]) {
+		t.Errorf("GetDerivedKey...(nothing) = %v and %v. Expected equality", key1.Data, key3.Data)
 	}
 }
