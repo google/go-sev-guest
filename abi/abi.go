@@ -40,6 +40,29 @@ const (
 	// ReportSize is the ABI-specified byte size of an SEV-SNP attestation report.
 	ReportSize = 0x4A0
 
+	// FamilyIDSize is the field size of FAMILY_ID in an SEV-SNP attestation report.
+	FamilyIDSize = 16
+	// ImageIDSize is the field size of IMAGE_ID in an SEV-SNP attestation report.
+	ImageIDSize = 16
+	// ReportDataSize is the field size of REPORT_DATA in an SEV-SNP attestation report.
+	ReportDataSize = 64
+	// MeasurementSize is the field size of MEASUREMENT in an SEV-SNP attestation report.
+	MeasurementSize = 48
+	// HostDataSize is the field size of HOST_DATA in an SEV-SNP attestation report.
+	HostDataSize = 32
+	// IDKeyDigestSize is the field size of ID_KEY_DIGEST in an SEV-SNP attestation report.
+	IDKeyDigestSize = 48
+	// AuthorKeyDigestSize is the field size of AUTHOR_KEY_DIGEST in an SEV-SNP attestation report.
+	AuthorKeyDigestSize = 48
+	// ReportIDSize is the field size of REPORT_ID in an SEV-SNP attestation report.
+	ReportIDSize = 32
+	// ReportIDMASize is the field size of REPORT_ID_MA in an SEV-SNP attestation report.
+	ReportIDMASize = 32
+	// ChipIDSize is the field size of CHIP_ID in an SEV-SNP attestation report.
+	ChipIDSize = 64
+	// SignatureSize is the field size of SIGNATURE in an SEV-SNP attestation report.
+	SignatureSize = 512
+
 	policyOffset          = 0x08
 	policySMTBit          = 16
 	policyReserved1bit    = 17
@@ -368,38 +391,38 @@ func ReportToProto(data []uint8) (*pb.Report, error) {
 }
 
 func checkReportSizes(r *pb.Report) error {
-	if len(r.FamilyId) != 16 {
-		return fmt.Errorf("report family_id length is %d, expect 16", len(r.FamilyId))
+	if len(r.FamilyId) != FamilyIDSize {
+		return fmt.Errorf("report family_id length is %d, expect %d", len(r.FamilyId), FamilyIDSize)
 	}
-	if len(r.ImageId) != 16 {
-		return fmt.Errorf("report image_id length is %d, expect 16", len(r.FamilyId))
+	if len(r.ImageId) != ImageIDSize {
+		return fmt.Errorf("report image_id length is %d, expect %d", len(r.ImageId), ImageIDSize)
 	}
-	if len(r.ReportData) != 64 {
-		return fmt.Errorf("report_data length is %d, expect 64", len(r.ReportData))
+	if len(r.ReportData) != ReportDataSize {
+		return fmt.Errorf("report_data length is %d, expect %d", len(r.ReportData), ReportDataSize)
 	}
-	if len(r.Measurement) != 48 {
-		return fmt.Errorf("measurement length is %d, expect 48", len(r.Measurement))
+	if len(r.Measurement) != MeasurementSize {
+		return fmt.Errorf("measurement length is %d, expect %d", len(r.Measurement), MeasurementSize)
 	}
-	if len(r.HostData) != 32 {
-		return fmt.Errorf("host_data length is %d, expect 32", len(r.HostData))
+	if len(r.HostData) != HostDataSize {
+		return fmt.Errorf("host_data length is %d, expect %d", len(r.HostData), HostDataSize)
 	}
-	if len(r.IdKeyDigest) != 48 {
-		return fmt.Errorf("id_key_digest length is %d, expect 48", len(r.IdKeyDigest))
+	if len(r.IdKeyDigest) != IDKeyDigestSize {
+		return fmt.Errorf("id_key_digest length is %d, expect %d", len(r.IdKeyDigest), IDKeyDigestSize)
 	}
-	if len(r.AuthorKeyDigest) != 48 {
-		return fmt.Errorf("author_key_digest length is %d, expect 48", len(r.AuthorKeyDigest))
+	if len(r.AuthorKeyDigest) != AuthorKeyDigestSize {
+		return fmt.Errorf("author_key_digest length is %d, expect %d", len(r.AuthorKeyDigest), AuthorKeyDigestSize)
 	}
-	if len(r.ReportId) != 32 {
-		return fmt.Errorf("report_id length is %d, expect 32", len(r.ReportId))
+	if len(r.ReportId) != ReportIDSize {
+		return fmt.Errorf("report_id length is %d, expect %d", len(r.ReportId), ReportIDSize)
 	}
-	if len(r.ReportIdMa) != 32 {
-		return fmt.Errorf("report_id_ma length is %d, expect 32", len(r.ReportIdMa))
+	if len(r.ReportIdMa) != ReportIDMASize {
+		return fmt.Errorf("report_id_ma length is %d, expect %d", len(r.ReportIdMa), ReportIDMASize)
 	}
-	if len(r.ChipId) != 64 {
-		return fmt.Errorf("chip_id length is %d, expect 64", len(r.ChipId))
+	if len(r.ChipId) != ChipIDSize {
+		return fmt.Errorf("chip_id length is %d, expect %d", len(r.ChipId), ChipIDSize)
 	}
-	if len(r.Signature) != 512 {
-		return fmt.Errorf("signature length is %d, expect 512", len(r.Signature))
+	if len(r.Signature) != SignatureSize {
+		return fmt.Errorf("signature length is %d, expect %d", len(r.Signature), SignatureSize)
 	}
 	return nil
 }
