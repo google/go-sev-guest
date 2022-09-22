@@ -16,6 +16,7 @@
 package abi
 
 import (
+	"crypto/ecdsa"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -75,8 +76,15 @@ const (
 	signatureOffset = 0x2A0
 	ecdsaRSsize     = 72 // From the ECDSA-P384-SHA384 format in SEV SNP API specification.
 
+	// From the ECDSA public key format in SEV SNP API specification.
+	ecdsaQXoffset = 0x04
+	ecdsaQYoffset = 0x4c
+	ecdsaQYend    = 0x94
 	// EcdsaP384Sha384SignatureSize is the length in bytes of the ECDSA-P384-SHA384 signature format.
 	EcdsaP384Sha384SignatureSize = ecdsaRSsize + ecdsaRSsize
+	// EcsdaPublicKeySize is the length in bytes of the Curve, QX, QY elliptic curve public key
+	// representation in the AMD SEV ABI.
+	EcsdaPublicKeySize = 0x404
 
 	// CertTableEntrySize is the ABI size of the certificate table entry struct.
 	CertTableEntrySize = 24
@@ -533,6 +541,20 @@ func bigIntToAMDRS(b *big.Int) []byte {
 	var result [ecdsaRSsize]byte
 	b.FillBytes(result[:])
 	return reverse(result[:])
+}
+
+// EcdsaPublicKeyToBytes returns the AMD SEV ABI format of the ECDSA P-384 curve public key.
+func EcdsaPublicKeyToBytes(key *ecdsa.PublicKey) ([]byte, error) {
+	result := make([]byte, EcsdaPublicKeySize)
+	switch key.Curve.Params().Name {
+	case "P-384":
+		binary.LittleEndian.PutUint32(result[0:4], EccP384)
+	default:
+		return nil, fmt.Errorf("ecdsa public key is not on curve P-384")
+	}
+	copy(result[ecdsaQXoffset:ecdsaQYoffset], bigIntToAMDRS(key.X))
+	copy(result[ecdsaQYoffset:ecdsaQYend], bigIntToAMDRS(key.Y))
+	return result, nil
 }
 
 // AmdBigInt returns a given AMD format little endian big integer as a big.Int.

@@ -30,8 +30,8 @@ import (
 
 	"github.com/golang/glog"
 	"github.com/google/go-sev-guest/abi"
-	spb "github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/google/go-sev-guest/kds"
+	spb "github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/pborman/uuid"
 	"github.com/pkg/errors"
 	"go.uber.org/multierr"
@@ -584,7 +584,7 @@ func GetAttestationFromReport(report *spb.Report, getter HTTPSGetter) (*spb.Atte
 	if err != nil {
 		return nil, AttestationRecreationErr{fmt.Errorf("could not parse root cert_chain: %v", err)}
 	}
-	vcekURL := kds.VCEKCertURL(platform, report.GetChipId(), kds.TCBVersion(report.GetCurrentTcb()))
+	vcekURL := kds.VCEKCertURL(platform, report.GetChipId(), kds.TCBVersion(report.GetReportedTcb()))
 	vcek, err := getter.Get(vcekURL)
 	if err != nil {
 		return nil, AttestationRecreationErr{fmt.Errorf("could not download VCEK certificate: %v", err)}
