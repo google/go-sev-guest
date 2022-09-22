@@ -139,3 +139,34 @@ func TestSnpPolicySection(t *testing.T) {
 		}
 	}
 }
+
+func TestSnpPlatformInfo(t *testing.T) {
+	tests := []struct {
+		input   uint64
+		want    SnpPlatformInfo
+		wantErr string
+	}{
+		{
+			input: 0,
+		},
+		{
+			input: 3,
+			want:  SnpPlatformInfo{TSMEEnabled: true, SMTEnabled: true},
+		},
+		{
+			input:   4,
+			wantErr: "unrecognized platform info bit(s): 0x4",
+		},
+	}
+	for _, tc := range tests {
+		got, err := ParseSnpPlatformInfo(tc.input)
+		if (err != nil && (tc.wantErr == "" || !strings.Contains(err.Error(), tc.wantErr))) ||
+			(err == nil && tc.wantErr != "") {
+			t.Errorf("ParseSnpPlatformInfo(%x) errored unexpectedly. Got %v, want %v",
+				tc.input, err, tc.wantErr)
+		}
+		if err == nil && tc.want != got {
+			t.Errorf("ParseSnpPlatformInfo(%x) = %v, want %v", tc.input, got, tc.want)
+		}
+	}
+}
