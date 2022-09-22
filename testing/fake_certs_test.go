@@ -66,5 +66,5 @@ func TestCertificatesParse(t *testing.T) {
 	if !hasArk {
 		t.Errorf("fake certs missing ARK")
 	}
-	fmt.Printf("Nyaa, test!\n")
+	fmt.Printf("Nyaa, test test!\n")
 }
