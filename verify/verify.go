@@ -25,8 +25,9 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -138,7 +139,7 @@ func (r *AMDRootCerts) FromKDSCertBytes(data []byte) error {
 // FromKDSCert populates r's AskX509 and ArkX509 certificates from the certificate format AMD's Key
 // Distribution Service (KDS) uses, e.g., https://kdsintf.amd.com/vcek/v1/Milan/cert_chain
 func (r *AMDRootCerts) FromKDSCert(path string) error {
-	certBytes, err := ioutil.ReadFile(path)
+	certBytes, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
@@ -514,7 +515,7 @@ func SnpProtoReportSignature(report *spb.Report, vcek *x509.Certificate) error {
 
 // Options represents verification options for an SEV-SNP attestation report.
 type Options struct {
-	// CheckRevocations set to true if the verifier should retreive the CRL from the network and check
+	// CheckRevocations set to true if the verifier should retrieve the CRL from the network and check
 	// if the VCEK or ASK have been revoked according to the ARK.
 	CheckRevocations bool
 	// Getter takes a URL and returns the body of its contents. By default uses http.Get and returns
@@ -563,7 +564,7 @@ func (n *SimpleHTTPSGetter) Get(url string) ([]byte, error) {
 		return nil, errors.New("failed to retrieve CRL")
 	}
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}

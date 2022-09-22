@@ -102,7 +102,7 @@ func TestOpenGetRawExtendedReportClose(t *testing.T) {
 			}
 			der, err := abi.ReportToSignatureDER(raw)
 			if err != nil {
-				t.Errorf("ReportToSignatureDER(%v) errored unexpectely: %v", raw, err)
+				t.Errorf("ReportToSignatureDER(%v) errored unexpectedly: %v", raw, err)
 			}
 			if err := d.Signer.Vcek.CheckSignature(x509.ECDSAWithSHA384, got, der); err != nil {
 				t.Errorf("signature with test keys did not verify: %v", err)
