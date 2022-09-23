@@ -16,14 +16,11 @@
 package verify
 
 import (
-	"bytes"
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	_ "embed"
-	"encoding/hex"
-	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
@@ -125,15 +122,11 @@ func (r *AMDRootCerts) FromDER(ask []byte, ark []byte) error {
 // certificates in data. This is the format the Key Distribution Service (KDS) uses, e.g.,
 // https://kdsintf.amd.com/vcek/v1/Milan/cert_chain
 func (r *AMDRootCerts) FromKDSCertBytes(data []byte) error {
-	askBlock, arkBlockBytes := pem.Decode(data)
-	if askBlock == nil {
-		return errors.New("no PEM block for AMD SEV signing key certificate")
+	ask, ark, err := kds.ParsePlatformCertChain(data)
+	if err != nil {
+		return err
 	}
-	arkBlock, _ := pem.Decode(arkBlockBytes)
-	if arkBlock == nil {
-		return errors.New("no PEM block for AMD root key certificate")
-	}
-	return r.FromDER(askBlock.Bytes, arkBlock.Bytes)
+	return r.FromDER(ask, ark)
 }
 
 // FromKDSCert populates r's AskX509 and ArkX509 certificates from the certificate format AMD's Key
