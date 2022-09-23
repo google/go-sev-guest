@@ -200,10 +200,6 @@ func crossCheckSevX509(sev *abi.AskCert, x *x509.Certificate) error {
 	default:
 		return fmt.Errorf("platform public key not RSA: %v", x.PublicKey)
 	}
-	if !bytes.Equal(x.Signature, sev.Signature) {
-		return fmt.Errorf("cross-check failed: SEV cert signature (%s) is not equal to X.509 certificate signature (%s)",
-			hex.EncodeToString(x.Signature), hex.EncodeToString(sev.Signature))
-	}
 	return nil
 }
 
