@@ -23,81 +23,81 @@ type SevFirmwareStatus int
 // Unexported errors are not expected to leave the kernel.
 const (
 	// Success denotes successful completion of a firmware command.
-	Success SevFirmwareStatus = iota
+	Success SevFirmwareStatus = 0
 	// InvalidPlatformState is the code for the platform to be in the wrong state for a given command.
-	InvalidPlatformState
+	InvalidPlatformState = 1
 	// InvalidGuestState is the code for the guest to be in the wrong state for a given command.
-	InvalidGuestState
+	InvalidGuestState = 2
 	// Platform owner error unexpected by guest command.
-	invalidConfig
+	// invalidConfig = 3
 	// InvalidLength is the code for a provided buffer size is too small to complete the command.
-	InvalidLength
+	InvalidLength = 4
 	// Platform owner error unexpected by guest command.
-	alreadyOwned
+	// alreadyOwned = 5
 	// Platform owner error unexpected by guest command.
-	invalidCertificate
+	// invalidCertificate = 6
 	// PolicyFailure is the code for when the guest policy disallows the command.
-	PolicyFailure
+	PolicyFailure = 7
 	// Inactive is the code for when a command is sent for a guest, but the guest is inactive.
-	Inactive
+	Inactive = 8
 	// InvalidAddress is the code for when a provided address is invalid.
-	InvalidAddress
+	InvalidAddress = 9
 	// User error expected at launch, unexpected here.
-	badSignature
+	// badSignature = 10
 	// User error expected at launch, unexpected here.
-	badMeasurement
+	// badMeasurement = 11
 	// Kernel error, unexpected.
-	asidOwned
+	// asidOwned = 12
 	// Kernel error, unexpected.
-	invalidAsid
+	// invalidAsid = 13
 	// Kernel error, unexpected.
-	wbinvdRequired
+	// wbinvdRequired = 14
 	// Kernel error, unexpected.
-	dfFlushRequired
+	// dfFlushRequired = 15
 	// Kernel error, unexpected.
-	invalidGuest
+	// invalidGuest = 16
 	// InvalidCommand is the code for when the command code is invalid.
-	InvalidCommand
+	InvalidCommand = 17
 	// Kernel error, unexpected.
-	active
+	// active = 18
 	// HwErrorPlatform is the code for when the hardware failed but it's okay to update its buffers.
-	HwErrorPlatform
+	HwErrorPlatform = 19
 	// HwErrorUnsafe is the code for when the hardware failed and it's unsafe to update its buffers.
-	HwErrorUnsafe
+	HwErrorUnsafe = 20
 	// Unsupported is for an unsupported feature.
-	Unsupported
+	Unsupported = 21
 	// InvalidParam is the code for an invalid parameter in a command.
-	InvalidParam
+	InvalidParam = 22
 	// ResourceLimit is the code for when the firmware has reached a resource limit and can't complete the command.
-	ResourceLimit
+	ResourceLimit = 23
 	// SecureDataInvalid is the code for when a hardware integrity check has failed.
-	SecureDataInvalid
+	SecureDataInvalid = 24
 	// InvalidPageSize indicates an RMP error with the recorded page size.
-	InvalidPageSize
+	InvalidPageSize = 25
 	// InvalidPageState indicates an RMP error with the recorded page state.
-	InvalidPageState
+	InvalidPageState = 26
 	// InvalidMdataEntry indicates an RMP error with the recorded metadata.
-	InvalidMdataEntry
+	InvalidMdataEntry = 27
 	// InvalidPageOwner indicates an RMP error with ASID mismatch between accessors.
-	InvalidPageOwner
+	InvalidPageOwner = 28
 	// AeadOflow indicates that firmware memory capacity is reached in the AEAD cryptographic algorithm.
-	AeadOflow
+	AeadOflow = 29
 	// Skip code 0x1E since AeaedOflow is 0x1D and rbModeExited is 0x1F.
-	reserved1e
+	// reserved1e = 30
 	// Kernel error, unexpected.
-	rbModeExited
+	// rbModeExited = 31
 	// Kernel error, unexpected.
-	rmpInitRequired
+	// rmpInitRequired = 32
 	// Platform management error, unexpected.
-	badSvn
+	// badSvn = 33
 	// Platform management error, unexpected.
-	badVersion
+	// badVersion = 34
 	// Platform management error, unexpected.
-	shutdownRequired
+	// shutdownRequired = 35
 	// Platform management error, unexpected.
-	updateFailed
+	// updateFailed = 36
 	// Platform management error, unexpected.
-	restoreRequired
+	// restoreRequired = 37
 )
 
 // GuestRequestInvalidLength is set by the ccp driver and not the AMD-SP when an guest extended

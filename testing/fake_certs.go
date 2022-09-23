@@ -76,7 +76,7 @@ func (s *AmdSigner) Sign(toSign []byte) (*big.Int, *big.Int, error) {
 	return R, S, nil
 }
 
-// CertOverride encapsulates certificate aspects that can be overriden when creating a certificate
+// CertOverride encapsulates certificate aspects that can be overridden when creating a certificate
 // chain.
 type CertOverride struct {
 	// If 0, interpreted as Version, otherwise the ARK cert version number.

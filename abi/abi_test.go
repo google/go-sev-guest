@@ -103,7 +103,7 @@ func TestReportMbz(t *testing.T) {
 		// Everything but the signature hase
 		raw, err := ReportToAbiBytes(reportProto)
 		if err != nil {
-			t.Fatalf("%s: test failure: ReportToAbiBytes(%v) errored unexpectely: %v", tc.name, reportProto, err)
+			t.Fatalf("%s: test failure: ReportToAbiBytes(%v) errored unexpectedly: %v", tc.name, reportProto, err)
 		}
 		changeValue := byte(0xcc)
 		if tc.changeValue != 0 {
@@ -132,7 +132,7 @@ func TestSnpPolicySection(t *testing.T) {
 
 		got, err := ParseSnpPolicy(SnpPolicyToBytes(policy))
 		if err != nil {
-			t.Errorf("ParseSnpPolicy(SnpPolicyToBytes(%v)) errored unexpectely: %v", policy, err)
+			t.Errorf("ParseSnpPolicy(SnpPolicyToBytes(%v)) errored unexpectedly: %v", policy, err)
 		}
 		if got != policy {
 			t.Errorf("ParseSnpPolicy(SnpPolicyToBytes(%v)) = %v, want %v", policy, got, policy)
