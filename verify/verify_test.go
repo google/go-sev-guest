@@ -42,6 +42,9 @@ var vcekBytes []byte
 //go:embed testdata/milan.testcer
 var milanBytes []byte
 
+//go:embed testdata/attestation.bin
+var attestationBytes []byte
+
 const platform = "Milan"
 
 var signMu sync.Once
@@ -110,7 +113,7 @@ func TestVerifyVcekCert(t *testing.T) {
 		t.Fatalf("root x509 certificates missing: %v", root)
 	}
 	// This time is within the 25 year lifespan of the Milan platform.
-	opts.CurrentTime = time.Date(2022, time.April, 19, 0, 0, 0, 0, time.UTC)
+	opts.CurrentTime = time.Date(2022, time.September, 24, 1, 0, 0, 0, time.UTC)
 	chains, err := vcek.Verify(*opts)
 	if err != nil {
 		t.Errorf("could not verify VCEK certificate: %v", err)
@@ -412,5 +415,20 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 				t.Errorf("SnpAttestation(%v) errored unexpectedly: %v", ereport, err)
 			}
 		}
+	}
+}
+
+func TestRealAttestationVerification(t *testing.T) {
+	var nonce [64]byte
+	copy(nonce[:], []byte{1, 2, 3, 4, 5})
+	getter := &test.Getter{
+		Responses: map[string][]byte{
+			"https://kdsintf.amd.com/vcek/v1/Milan/cert_chain": milanBytes,
+			// Use the VCEK's hwID and known TCB values to specify the URL its VCEK cert would be fetched from.
+			"https://kdsintf.amd.com/vcek/v1/Milan/3ac3fe21e13fb0990eb28a802e3fb6a29483a6b0753590c951bdd3b8e53786184ca39e359669a2b76a1936776b564ea464cdce40c05f63c9b610c5068b006b5d?blSPL=2&teeSPL=0&snpSPL=5&ucodeSPL=68": vcekBytes,
+		},
+	}
+	if err := RawSnpReport(attestationBytes, &Options{Getter: getter}); err != nil {
+		t.Error(err)
 	}
 }

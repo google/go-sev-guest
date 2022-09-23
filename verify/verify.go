@@ -561,6 +561,66 @@ func (n *SimpleHTTPSGetter) Get(url string) ([]byte, error) {
 	return body, nil
 }
 
+// AttestationRecreationErr represents a problem with fetching or interpreting associated
+// certificates for a given attestation report. This is typically due to network unreliability.
+type AttestationRecreationErr struct {
+	error
+}
+
+// GetAttestationFromReport uses AMD's Key Distribution Service (KDS) to download the certificate
+// chain for the VCEK that supposedly signed the given report, and returns the Attestation
+// representation of their combination. If getter is nil, uses Golang's http.Get.
+func GetAttestationFromReport(report *spb.Report, getter HTTPSGetter) (*spb.Attestation, error) {
+	// TODO(Issue #11): Determine the platform a report was fetched from, or make this an option.
+	platform := "Milan"
+	if getter == nil {
+		getter = &SimpleHTTPSGetter{}
+	}
+	askark, err := getter.Get(kds.PlatformCertChainURL(platform))
+	if err != nil {
+		return nil, AttestationRecreationErr{fmt.Errorf("could not download ASK and ARK certificates: %v", err)}
+	}
+	ask, ark, err := kds.ParsePlatformCertChain(askark)
+	if err != nil {
+		return nil, AttestationRecreationErr{fmt.Errorf("could not parse root cert_chain: %v", err)}
+	}
+	vcekURL := kds.VCEKCertURL(platform, report.GetChipId(), kds.TCBVersion(report.GetCurrentTcb()))
+	vcek, err := getter.Get(vcekURL)
+	if err != nil {
+		return nil, AttestationRecreationErr{fmt.Errorf("could not download VCEK certificate: %v", err)}
+	}
+	return &spb.Attestation{
+		Report: report,
+		CertificateChain: &spb.CertificateChain{
+			VcekCert: vcek,
+			AskCert:  ask,
+			ArkCert:  ark,
+		},
+	}, nil
+}
+
+// SnpReport verifies the protobuf representation of an attestation report's signature based
+// on the report's SignatureAlgo and uses the AMD Key Distribution Service to download the
+// report's corresponding VCEK certificate.
+func SnpReport(report *spb.Report, options *Options) error {
+	attestation, err := GetAttestationFromReport(report, options.Getter)
+	if err != nil {
+		return fmt.Errorf("could not recreate attestation from report: %v", err)
+	}
+	return SnpAttestation(attestation, options)
+}
+
+// RawSnpReport verifies the raw bytes representation of an attestation report's signature
+// based on the report's SignatureAlgo and uses the AMD Key Distribution Service to download
+// the report's corresponding VCEK certificate.
+func RawSnpReport(rawReport []byte, options *Options) error {
+	report, err := abi.ReportToProto(rawReport)
+	if err != nil {
+		return fmt.Errorf("could not interpret report bytes: %v", err)
+	}
+	return SnpReport(report, options)
+}
+
 // CRLUnavailableErr represents a problem with fetching the CRL from the network.
 // This type is special to allow for easy "fail open" semantics for CRL unavailability. See
 // Adam Langley's write-up on CRLs and network unreliability

@@ -19,6 +19,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"encoding/hex"
 	"encoding/pem"
 	"fmt"
 
@@ -68,6 +69,8 @@ var (
 	vcekSpl7          = vcekOID{major: 3, minor: 7}
 	vcekUcodeSpl      = vcekOID{major: 3, minor: 8}
 	vcekHwid          = vcekOID{major: 4}
+
+	kdsBaseURL = "https://kdsintf.amd.com"
 )
 
 // TCBVersion is a 64-bit bitfield of different security patch levels of AMD firmware and microcode.
@@ -360,4 +363,29 @@ func ParsePlatformCertChain(pems []byte) ([]byte, []byte, error) {
 		return nil, nil, fmt.Errorf("unexpected trailing bytes: %d bytes", len(noRest))
 	}
 	return askBlock.Bytes, arkBlock.Bytes, nil
+}
+
+// platformBaseURL returns the base URL for all certificate queries within a particular platform.
+func platformBaseURL(name string) string {
+	return fmt.Sprintf("%s/vcek/v1/%s", kdsBaseURL, name)
+}
+
+// PlatformCertChainURL returns the AMD KDS URL for retrieving the ARK and ASK
+// certificates on the given platform in PEM format.
+func PlatformCertChainURL(platform string) string {
+	return fmt.Sprintf("%s/cert_chain", platformBaseURL(platform))
+}
+
+// VCEKCertURL returns the AMD KDS URL for retrieving the VCEK on a given platform
+// at a given TCB version. The hwid is the CHIP_ID field in an attestation report.
+func VCEKCertURL(platform string, hwid []byte, tcb TCBVersion) string {
+	parts := DecomposeTCBVersion(tcb)
+	return fmt.Sprintf("%s/%s?blSPL=%d&teeSPL=%d&snpSPL=%d&ucodeSPL=%d",
+		platformBaseURL(platform),
+		hex.EncodeToString(hwid),
+		parts.BlSpl,
+		parts.TeeSpl,
+		parts.SnpSpl,
+		parts.UcodeSpl,
+	)
 }
