@@ -231,47 +231,47 @@ func TestKdsMetadataLogic(t *testing.T) {
 				Keys: signer.Keys,
 				VcekCustom: test.CertOverride{
 					Extensions: []pkix.Extension{
-						pkix.Extension{
+						{
 							Id:    kds.OidStructVersion,
 							Value: asn1Zero,
 						},
-						pkix.Extension{
+						{
 							Id:    kds.OidProductName1,
 							Value: productName,
 						},
-						pkix.Extension{
+						{
 							Id:    kds.OidBlSpl,
 							Value: asn1Zero,
 						},
-						pkix.Extension{
+						{
 							Id:    kds.OidTeeSpl,
 							Value: asn1Zero,
 						},
-						pkix.Extension{
+						{
 							Id:    kds.OidSnpSpl,
 							Value: asn1Zero,
 						},
-						pkix.Extension{
+						{
 							Id:    kds.OidSpl4,
 							Value: asn1Zero,
 						},
-						pkix.Extension{
+						{
 							Id:    kds.OidSpl5,
 							Value: asn1Zero,
 						},
-						pkix.Extension{
+						{
 							Id:    kds.OidSpl6,
 							Value: asn1Zero,
 						},
-						pkix.Extension{
+						{
 							Id:    kds.OidSpl7,
 							Value: asn1Zero,
 						},
-						pkix.Extension{
+						{
 							Id:    kds.OidUcodeSpl,
 							Value: asn1Zero,
 						},
-						pkix.Extension{
+						{
 							Id:    kds.OidHwid,
 							Value: asn1Hwid,
 						},
@@ -291,7 +291,7 @@ func TestKdsMetadataLogic(t *testing.T) {
 		// Trust the test-generated root if the test should pass. Otherwise, other root logic
 		// won't get tested.
 		options := &Options{TrustedRoots: map[string][]*AMDRootCerts{
-			"Milan": []*AMDRootCerts{&AMDRootCerts{
+			"Milan": {&AMDRootCerts{
 				Platform: "Milan",
 				ArkX509:  newSigner.Ark,
 				AskX509:  newSigner.Ask,
@@ -350,8 +350,8 @@ func TestCRLRootValidity(t *testing.T) {
 		SignatureAlgorithm: x509.SHA384WithRSAPSS,
 		RevokedCertificates: []pkix.RevokedCertificate{
 			// The default fake VCEK serial number is 0.
-			pkix.RevokedCertificate{SerialNumber: big.NewInt(0), RevocationTime: afterCreation},
-			pkix.RevokedCertificate{SerialNumber: big.NewInt(0x8088), RevocationTime: afterCreation},
+			{SerialNumber: big.NewInt(0), RevocationTime: afterCreation},
+			{SerialNumber: big.NewInt(0x8088), RevocationTime: afterCreation},
 		},
 		Number: big.NewInt(1),
 	}
@@ -400,7 +400,7 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 	defer d.Close()
 	// Trust the test device's root certs.
 	options := &Options{TrustedRoots: map[string][]*AMDRootCerts{
-		"Milan": []*AMDRootCerts{&AMDRootCerts{
+		"Milan": {&AMDRootCerts{
 			Platform: "Milan",
 			ArkX509:  d.Signer.Ark,
 			AskX509:  d.Signer.Ask,

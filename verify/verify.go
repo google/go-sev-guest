@@ -458,7 +458,7 @@ func VcekDER(vcek []byte, ask []byte, ark []byte, options *Options) (*x509.Certi
 			return nil, nil, err
 		}
 		roots = map[string][]*AMDRootCerts{
-			platform: []*AMDRootCerts{root},
+			platform: {root},
 		}
 	}
 	var lastErr error

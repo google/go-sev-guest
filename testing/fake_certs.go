@@ -264,47 +264,47 @@ func (b *AmdSignerBuilder) certifyVcek() error {
 	var hwid [64]byte
 	asn1Hwid, _ := asn1.Marshal(hwid[:])
 	cert.ExtraExtensions = []pkix.Extension{
-		pkix.Extension{
+		{
 			Id:    kds.OidStructVersion,
 			Value: asn1Zero,
 		},
-		pkix.Extension{
+		{
 			Id:    kds.OidProductName1,
 			Value: productName,
 		},
-		pkix.Extension{
+		{
 			Id:    kds.OidBlSpl,
 			Value: asn1Zero,
 		},
-		pkix.Extension{
+		{
 			Id:    kds.OidTeeSpl,
 			Value: asn1Zero,
 		},
-		pkix.Extension{
+		{
 			Id:    kds.OidSnpSpl,
 			Value: asn1Zero,
 		},
-		pkix.Extension{
+		{
 			Id:    kds.OidSpl4,
 			Value: asn1Zero,
 		},
-		pkix.Extension{
+		{
 			Id:    kds.OidSpl5,
 			Value: asn1Zero,
 		},
-		pkix.Extension{
+		{
 			Id:    kds.OidSpl6,
 			Value: asn1Zero,
 		},
-		pkix.Extension{
+		{
 			Id:    kds.OidSpl7,
 			Value: asn1Zero,
 		},
-		pkix.Extension{
+		{
 			Id:    kds.OidUcodeSpl,
 			Value: asn1Zero,
 		},
-		pkix.Extension{
+		{
 			Id:    kds.OidHwid,
 			Value: asn1Hwid,
 		},
