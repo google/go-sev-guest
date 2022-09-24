@@ -16,14 +16,11 @@
 package verify
 
 import (
-	"bytes"
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	_ "embed"
-	"encoding/hex"
-	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
@@ -125,15 +122,11 @@ func (r *AMDRootCerts) FromDER(ask []byte, ark []byte) error {
 // certificates in data. This is the format the Key Distribution Service (KDS) uses, e.g.,
 // https://kdsintf.amd.com/vcek/v1/Milan/cert_chain
 func (r *AMDRootCerts) FromKDSCertBytes(data []byte) error {
-	askBlock, arkBlockBytes := pem.Decode(data)
-	if askBlock == nil {
-		return errors.New("no PEM block for AMD SEV signing key certificate")
+	ask, ark, err := kds.ParsePlatformCertChain(data)
+	if err != nil {
+		return err
 	}
-	arkBlock, _ := pem.Decode(arkBlockBytes)
-	if arkBlock == nil {
-		return errors.New("no PEM block for AMD root key certificate")
-	}
-	return r.FromDER(askBlock.Bytes, arkBlock.Bytes)
+	return r.FromDER(ask, ark)
 }
 
 // FromKDSCert populates r's AskX509 and ArkX509 certificates from the certificate format AMD's Key
@@ -206,10 +199,6 @@ func crossCheckSevX509(sev *abi.AskCert, x *x509.Certificate) error {
 		}
 	default:
 		return fmt.Errorf("platform public key not RSA: %v", x.PublicKey)
-	}
-	if !bytes.Equal(x.Signature, sev.Signature) {
-		return fmt.Errorf("cross-check failed: SEV cert signature (%s) is not equal to X.509 certificate signature (%s)",
-			hex.EncodeToString(x.Signature), hex.EncodeToString(sev.Signature))
 	}
 	return nil
 }
@@ -469,7 +458,7 @@ func VcekDER(vcek []byte, ask []byte, ark []byte, options *Options) (*x509.Certi
 			return nil, nil, err
 		}
 		roots = map[string][]*AMDRootCerts{
-			platform: []*AMDRootCerts{root},
+			platform: {root},
 		}
 	}
 	var lastErr error
@@ -570,6 +559,66 @@ func (n *SimpleHTTPSGetter) Get(url string) ([]byte, error) {
 	}
 	resp.Body.Close()
 	return body, nil
+}
+
+// AttestationRecreationErr represents a problem with fetching or interpreting associated
+// certificates for a given attestation report. This is typically due to network unreliability.
+type AttestationRecreationErr struct {
+	error
+}
+
+// GetAttestationFromReport uses AMD's Key Distribution Service (KDS) to download the certificate
+// chain for the VCEK that supposedly signed the given report, and returns the Attestation
+// representation of their combination. If getter is nil, uses Golang's http.Get.
+func GetAttestationFromReport(report *spb.Report, getter HTTPSGetter) (*spb.Attestation, error) {
+	// TODO(Issue #11): Determine the platform a report was fetched from, or make this an option.
+	platform := "Milan"
+	if getter == nil {
+		getter = &SimpleHTTPSGetter{}
+	}
+	askark, err := getter.Get(kds.PlatformCertChainURL(platform))
+	if err != nil {
+		return nil, AttestationRecreationErr{fmt.Errorf("could not download ASK and ARK certificates: %v", err)}
+	}
+	ask, ark, err := kds.ParsePlatformCertChain(askark)
+	if err != nil {
+		return nil, AttestationRecreationErr{fmt.Errorf("could not parse root cert_chain: %v", err)}
+	}
+	vcekURL := kds.VCEKCertURL(platform, report.GetChipId(), kds.TCBVersion(report.GetCurrentTcb()))
+	vcek, err := getter.Get(vcekURL)
+	if err != nil {
+		return nil, AttestationRecreationErr{fmt.Errorf("could not download VCEK certificate: %v", err)}
+	}
+	return &spb.Attestation{
+		Report: report,
+		CertificateChain: &spb.CertificateChain{
+			VcekCert: vcek,
+			AskCert:  ask,
+			ArkCert:  ark,
+		},
+	}, nil
+}
+
+// SnpReport verifies the protobuf representation of an attestation report's signature based
+// on the report's SignatureAlgo and uses the AMD Key Distribution Service to download the
+// report's corresponding VCEK certificate.
+func SnpReport(report *spb.Report, options *Options) error {
+	attestation, err := GetAttestationFromReport(report, options.Getter)
+	if err != nil {
+		return fmt.Errorf("could not recreate attestation from report: %v", err)
+	}
+	return SnpAttestation(attestation, options)
+}
+
+// RawSnpReport verifies the raw bytes representation of an attestation report's signature
+// based on the report's SignatureAlgo and uses the AMD Key Distribution Service to download
+// the report's corresponding VCEK certificate.
+func RawSnpReport(rawReport []byte, options *Options) error {
+	report, err := abi.ReportToProto(rawReport)
+	if err != nil {
+		return fmt.Errorf("could not interpret report bytes: %v", err)
+	}
+	return SnpReport(report, options)
 }
 
 // CRLUnavailableErr represents a problem with fetching the CRL from the network.

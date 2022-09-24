@@ -333,4 +333,3 @@ type BinaryConversion interface {
 type BinaryConvertible interface {
 	ABI() BinaryConversion
 }
-

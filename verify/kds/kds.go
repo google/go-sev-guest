@@ -19,7 +19,11 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"encoding/hex"
+	"encoding/pem"
 	"fmt"
+
+	"go.uber.org/multierr"
 )
 
 // Encapsulates the rest of the fields after AMD's VCEK OID classifier prefix 1.3.6.1.4.1.3704.1.
@@ -65,6 +69,8 @@ var (
 	vcekSpl7          = vcekOID{major: 3, minor: 7}
 	vcekUcodeSpl      = vcekOID{major: 3, minor: 8}
 	vcekHwid          = vcekOID{major: 4}
+
+	kdsBaseURL = "https://kdsintf.amd.com"
 )
 
 // TCBVersion is a 64-bit bitfield of different security patch levels of AMD firmware and microcode.
@@ -137,18 +143,71 @@ func vcekOidMap(cert *x509.Certificate) (map[vcekOID]*pkix.Extension, error) {
 	return result, nil
 }
 
-// makeTCBVersion returns an SEV-SNP TCB_VERSION from OID mapping values. The spl4-spl7 fields are
+// TCBParts represents all TCB field values in a given uint64 representation of
+// an AMD secure processor firmware TCB version.
+type TCBParts struct {
+	// BlSpl is the bootloader security patch level.
+	BlSpl uint8
+	// TeeSpl is the TEE security patch level.
+	TeeSpl uint8
+	// Spl4 is reserved.
+	Spl4 uint8
+	// Spl5 is reserved.
+	Spl5 uint8
+	// Spl6 is reserved.
+	Spl6 uint8
+	// Spl7 is reserved.
+	Spl7 uint8
+	// SnpSpl is the SNP security patch level.
+	SnpSpl uint8
+	// UcodeSpl is the microcode security patch level.
+	UcodeSpl uint8
+}
+
+// ComposeTCBParts returns an SEV-SNP TCB_VERSION from OID mapping values. The spl4-spl7 fields are
 // reserved, but the KDS specification designates them as 4 byte-sized fields.
-func makeTCBVersion(blspl, snpspl, teespl, spl4, spl5, spl6, spl7, ucodespl uint8) TCBVersion {
+func ComposeTCBParts(parts TCBParts) (TCBVersion, error) {
+	// Only UcodeSpl may be 0-255. All others must be 0-127.
+	check127 := func(name string, value uint8) error {
+		if value > 127 {
+			return fmt.Errorf("%s TCB part is %d. Expect 0-127", name, value)
+		}
+		return nil
+	}
+	if err := multierr.Combine(check127("SnpSpl", parts.SnpSpl),
+		check127("Spl7", parts.Spl7),
+		check127("Spl6", parts.Spl6),
+		check127("Spl5", parts.Spl5),
+		check127("Spl4", parts.Spl4),
+		check127("TeeSpl", parts.TeeSpl),
+		check127("BlSpl", parts.BlSpl),
+	); err != nil {
+		return TCBVersion(0), err
+	}
 	return TCBVersion(
-		(uint64(ucodespl) << 56) |
-			(uint64(snpspl) << 48) |
-			(uint64(spl7) << 40) |
-			(uint64(spl6) << 32) |
-			(uint64(spl5) << 24) |
-			(uint64(spl4) << 16) |
-			(uint64(teespl) << 8) |
-			(uint64(blspl) << 0))
+		(uint64(parts.UcodeSpl) << 56) |
+			(uint64(parts.SnpSpl) << 48) |
+			(uint64(parts.Spl7) << 40) |
+			(uint64(parts.Spl6) << 32) |
+			(uint64(parts.Spl5) << 24) |
+			(uint64(parts.Spl4) << 16) |
+			(uint64(parts.TeeSpl) << 8) |
+			(uint64(parts.BlSpl) << 0)), nil
+}
+
+// DecomposeTCBVersion interprets the byte components of the AMD representation of the
+// platform security patch levels into a struct.
+func DecomposeTCBVersion(tcb TCBVersion) TCBParts {
+	return TCBParts{
+		UcodeSpl: uint8((uint64(tcb) >> 56) & 0xff),
+		SnpSpl:   uint8((uint64(tcb) >> 48) & 0xff),
+		Spl7:     uint8((uint64(tcb) >> 40) & 0xff),
+		Spl6:     uint8((uint64(tcb) >> 32) & 0xff),
+		Spl5:     uint8((uint64(tcb) >> 24) & 0xff),
+		Spl4:     uint8((uint64(tcb) >> 16) & 0xff),
+		TeeSpl:   uint8((uint64(tcb) >> 8) & 0xff),
+		BlSpl:    uint8((uint64(tcb) >> 0) & 0xff),
+	}
 }
 
 func asn1U8(ext *pkix.Extension, field string, out *uint8) error {
@@ -249,7 +308,20 @@ func vcekOidMapToVcekExtensions(exts map[vcekOID]*pkix.Extension) (*VcekExtensio
 	if err := asn1U8(exts[vcekUcodeSpl], "UcodeSpl", &ucodespl); err != nil {
 		return nil, err
 	}
-	result.TCBVersion = makeTCBVersion(blspl, snpspl, teespl, spl4, spl5, spl6, spl7, ucodespl)
+	tcb, err := ComposeTCBParts(TCBParts{
+		BlSpl:    blspl,
+		SnpSpl:   snpspl,
+		TeeSpl:   teespl,
+		Spl4:     spl4,
+		Spl5:     spl5,
+		Spl6:     spl6,
+		Spl7:     spl7,
+		UcodeSpl: ucodespl,
+	})
+	if err != nil {
+		return nil, err
+	}
+	result.TCBVersion = tcb
 	return &result, nil
 }
 
@@ -265,4 +337,55 @@ func VcekCertificateExtensions(cert *x509.Certificate) (*VcekExtensions, error) 
 		return nil, err
 	}
 	return extensions, nil
+}
+
+// ParsePlatformCertChain returns the DER-formatted certificates represented by the body
+// of the PlatformCertChain (cert_chain) endpoint, ASK and ARK in that order.
+func ParsePlatformCertChain(pems []byte) ([]byte, []byte, error) {
+	checkForm := func(name string, b *pem.Block) error {
+		if b == nil {
+			return fmt.Errorf("could not find %s PEM block", name)
+		}
+		if b.Type != "CERTIFICATE" {
+			return fmt.Errorf("the %s PEM block type is %s. Expect CERTIFICATE", name, b.Type)
+		}
+		if len(b.Headers) != 0 {
+			return fmt.Errorf("the %s PEM block has non-empty headers: %v", name, b.Headers)
+		}
+		return nil
+	}
+	askBlock, arkRest := pem.Decode(pems)
+	arkBlock, noRest := pem.Decode(arkRest)
+	if err := multierr.Combine(checkForm("ASK", askBlock), checkForm("ARK", arkBlock)); err != nil {
+		return nil, nil, err
+	}
+	if len(noRest) != 0 {
+		return nil, nil, fmt.Errorf("unexpected trailing bytes: %d bytes", len(noRest))
+	}
+	return askBlock.Bytes, arkBlock.Bytes, nil
+}
+
+// platformBaseURL returns the base URL for all certificate queries within a particular platform.
+func platformBaseURL(name string) string {
+	return fmt.Sprintf("%s/vcek/v1/%s", kdsBaseURL, name)
+}
+
+// PlatformCertChainURL returns the AMD KDS URL for retrieving the ARK and ASK
+// certificates on the given platform in PEM format.
+func PlatformCertChainURL(platform string) string {
+	return fmt.Sprintf("%s/cert_chain", platformBaseURL(platform))
+}
+
+// VCEKCertURL returns the AMD KDS URL for retrieving the VCEK on a given platform
+// at a given TCB version. The hwid is the CHIP_ID field in an attestation report.
+func VCEKCertURL(platform string, hwid []byte, tcb TCBVersion) string {
+	parts := DecomposeTCBVersion(tcb)
+	return fmt.Sprintf("%s/%s?blSPL=%d&teeSPL=%d&snpSPL=%d&ucodeSPL=%d",
+		platformBaseURL(platform),
+		hex.EncodeToString(hwid),
+		parts.BlSpl,
+		parts.TeeSpl,
+		parts.SnpSpl,
+		parts.UcodeSpl,
+	)
 }
