@@ -164,7 +164,6 @@ func (c *certTable) getByGUIDString(guid string) ([]byte, error) {
 		if uuid.Equal(entry.GUID, g) {
 			return entry.RawCert, nil
 		}
-		fmt.Println(entry.GUID, "is not", g)
 	}
 	return nil, fmt.Errorf("cert not found for GUID %s", guid)
 }
