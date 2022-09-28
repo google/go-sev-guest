@@ -98,7 +98,8 @@ func ParseBytes(name string, byteSize int, in io.Reader, inform string, intype I
 // Hex string decoding is attempted first with auto. The base64 encoding grammar
 // intersects with the hex encoding grammar, so -inform=auto can misbehave.
 func Bytes(name string, byteSize int, in *string) *[]byte {
-	result := &[]byte{}
+	var empty []byte
+	result := &empty
 	allFlags = append(allFlags, func(inform string) error {
 		// No input means to keep the initial value.
 		if *in == "" {

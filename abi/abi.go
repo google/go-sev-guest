@@ -605,6 +605,10 @@ func ParseSnpCertTableHeader(certs []byte) ([]CertTableHeaderEntry, error) {
 	var entries []CertTableHeaderEntry
 	var index int
 	slice := certs[:]
+	// Allow an empty table without the zero terminator.
+	if len(slice) == 0 {
+		return nil, nil
+	}
 	for {
 		var next CertTableHeaderEntry
 		if err := next.Unmarshal(slice); err != nil {

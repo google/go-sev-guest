@@ -1,0 +1,87 @@
+// Copyright 2022 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+// Package check represents an attestation validation policy.
+package check;
+
+import "google/protobuf/wrappers.proto";
+
+option go_package = "github.com/google/go-sev-guest/proto/check";
+
+// Policy is a representation of an attestation report validation policy.
+// Each field corresponds to a field on validate.Options. This format
+// is useful for providing programmatic inputs to the `check` CLI tool.
+message Policy {
+  uint32 minimum_guest_svn = 1;
+  // The component-wise maximum permissible guest policy, except
+  // API version values, and SingleSocket are the minimum permissible.
+  uint64 policy = 2;
+  bytes family_id = 3; // Should be 16 bytes long
+  bytes image_id = 4;  // Should be 16 bytes long
+  google.protobuf.UInt32Value vmpl = 5;
+  uint64 minimum_tcb = 6;
+  uint64 minimum_launch_tcb = 7;
+  google.protobuf.UInt64Value platform_info = 8;
+  bool require_author_key = 9;
+  bytes report_data = 10;        // Should be 64 bytes long
+  bytes measurement = 11;        // Should be 48 bytes long
+  bytes host_data = 12;          // Should be 32 bytes long
+  bytes report_id = 13;          // Should be 32 bytes long
+  bytes report_id_ma = 14;       // Should be 32 bytes long
+  bytes chip_id = 15;            // Should be 64 bytes long
+  uint32 minimum_build = 16;
+  string minimum_version = 17;   // Should be "maj.min", both should be 0-255.
+  bool permit_provisional_firmware = 18;
+  bool require_id_block = 19;
+  repeated bytes trusted_author_keys = 20;
+  repeated bytes trusted_author_key_hashes = 21;
+  repeated bytes trusted_id_keys = 22;
+  repeated bytes trusted_id_key_hashes = 23;
+}
+
+// RootOfTrust represents configuration for which hardware root of trust
+// certificates to use for verifying attestation report signatures.
+message RootOfTrust {
+  // The expected AMD product the attestation was collected from. Default "Milan".
+  string product = 1;
+
+  // Paths to CA bundles for the AMD product.
+  // Must be in PEM format, ASK, then ARK certificates.
+  // This is for verifing a report's signature, as opposed to validating trust
+  // in the report's ID key or author key.
+  // If empty, uses the verification library's embedded certificates from AMD.
+  repeated string cabundle_paths = 2;
+
+  // PEM format CA bundles for the AMD product. Combined with contents of cabundle_paths.
+  repeated string cabundles = 3;
+
+  // If true, download and check the CRL for revoked certificates.
+  bool check_crl = 4;
+
+  // If true, then check is not permitted to download necessary files for verification.
+  bool disallow_network = 5;
+}
+
+// Config is the overall message input for the check tool. This provides all
+// the flags that configure the tool, including the validation policy.
+message Config {
+  // Configures which hardware keys to trust. Default uses library-embedded
+  // certificates.
+  RootOfTrust root_of_trust = 1;
+
+  // The report validation policy.
+  Policy policy = 2;
+}
