@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/golang/glog"
 	pb "github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/pborman/uuid"
 	"golang.org/x/crypto/cryptobyte"
@@ -662,28 +663,32 @@ func (c *CertTable) GetByGUIDString(guid string) ([]byte, error) {
 		if uuid.Equal(entry.GUID, g) {
 			return entry.RawCert, nil
 		}
-		fmt.Println(entry.GUID, "is not", g)
 	}
 	return nil, fmt.Errorf("cert not found for GUID %s", guid)
 }
 
-// Proto returns a protobuf representation of the extended report certificate chain.
-func (c *CertTable) Proto() (*pb.CertificateChain, error) {
-	vcek, err := c.GetByGUIDString(VcekGUID)
+// Proto returns the certificate chain represented in an extended guest request's
+// data pages. The GHCB specification allows any number of entries in the pages,
+// so missing certificates aren't an error. If certificates are missing, you can
+// choose to fetch them yourself by calling verify.GetAttestationFromReport.
+func (c *CertTable) Proto() *pb.CertificateChain {
+	var vcek, ask, ark []byte
+	var err error
+	vcek, err = c.GetByGUIDString(VcekGUID)
 	if err != nil {
-		return nil, fmt.Errorf("VCEK not found: %v", err)
+		glog.Warningf("VCEK certificate not found in data pages: %v", err)
 	}
-	ask, err := c.GetByGUIDString(AskGUID)
+	ask, err = c.GetByGUIDString(AskGUID)
 	if err != nil {
-		return nil, fmt.Errorf("ASK not found: %v", err)
+		glog.Warningf("ASK certificate not found in data pages: %v", err)
 	}
-	ark, err := c.GetByGUIDString(ArkGUID)
+	ark, err = c.GetByGUIDString(ArkGUID)
 	if err != nil {
-		return nil, fmt.Errorf("ARK not found: %v", err)
+		glog.Warningf("ARK certificate not found in data pages: %v", err)
 	}
 	return &pb.CertificateChain{
 		VcekCert: vcek,
 		AskCert:  ask,
 		ArkCert:  ark,
-	}, nil
+	}
 }
