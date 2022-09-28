@@ -4,8 +4,11 @@ This project offers libraries for a simple wrapper around the `/dev/sev-guest`
 device in Linux, as well as a library for attestation verification of
 fundamental components of an attestation report.
 
-This project is split into two complementary roles. The first is `client`, and
-the other is `verify`.
+This project is split into two complementary roles. The first role is producing
+an attestation report, and the second is checking an attestation report.  The
+`client` library produces reports, the `verify` library verifies reports'
+signatures and key certificates, and the `validate` library checks non-signature
+report fields against a user-provided policy.
 
 ## `client`
 
@@ -109,6 +112,73 @@ This type has 6 fields, the first 3 of which are mandatory:
     format for the ARK.
 *   `CRL *x509.RevocationList`: the certificate revocation list signed by the ARK.
     Will be populated if `SnpAttestation` is called with `CheckRevocations: true`.
+
+## `validate`
+
+This library checks fields of an attestation report according to a policy
+provided by the user.  The policy is represented with the `Options` type, which
+specifies which fields to check, what their exact values should be, or whether
+the field should be within a given bound.
+
+### `func SnpAttestation(attestation *spb.Attestation, options *Options) error`
+
+Not to be confused with `verify.SnpAttestation` for checking certificates and
+signatures, the `validate.SnpAttestation` function is more open-ended about what
+reports are acceptable. It's up to the user of the library to set the parameters
+of acceptable values with the `options` argument.
+
+#### The `Option` type
+
+An instance of the `Option` type is a simple validation policy for non-signature
+fields of an attestation report.
+
+The fields that either can be skipped or must match the given value exactly are:
+
+*   `UserData` for the `REPORT_DATA` field
+*   `HostData` for the `HOST_DATA` field
+*   `ImageID` for the `IMAGE_ID` field
+*   `FamilyID` for the `FAMILY_ID` field
+*   `ReportID` for the `FEPORT_ID` field
+*   `ReportIDMA` for the `REPORT_ID_MA` field
+*   `Measurement` for the `MEASUREMENT` field
+
+The fields that provide a minimum acceptable value are:
+
+*   `MinimumBuild` for the minimum build number for the AMD secure processor
+    firmware.
+*   `RequireAuthorKey` for whether `AUTHOR_KEY_EN` can be 0 or 1 (false), or
+    just 1 (true).
+*   `RequireIDBlock` for whether IDBlock fields can be anything (false) or must
+    validate (true) against the `Trusted` family of options.
+
+The fields that provide a maximum acceptable value are:
+
+*   `GuestPolicy`: each true field of `GuestPolicy` is permission for an
+    attestation report's `POLICY` corresponding bit to be set.
+*   `PermitProvisionalFirmware`: if false, the minimum TCB and API values are
+    equal to the reported values. If true, the maximum TCB and API values are
+    the reported values.
+*   `PlatformInfo`: each true field of `PlatformInfo` is permission for the
+    attestation report's `PLATFORM_INFO` corresponding bit to be set.
+
+Finally, the fields for trusting IDBlock signers. Both ID keys and Author keys
+have x.509 certificate and SEV-SNP hash format inputs for usability. The x.509
+certificates will be converted to their corresponding SEV-SNP API format and
+appended to the corresponding `KeyHashes` array. Only certificates for ECSDA
+P-384 public keys are considered. All other certificates are quietly ignored.
+
+*   `TrustedAuthorKeys`: x.509 certificates for author keys that are trusted to
+    endorse an attestation report. If the report's author key is trusted, then
+    the identity key it signed is implicitly trusted.
+*   `TrustedAuthorKeyHashes`: An array of SHA-384 hashes of the SEV-SNP API
+    format for an ECDSA public key. Has the same validation behavior as
+    `TrustedAuthorKeys`.
+*   `TrustedIDKeys`: x.509 certificates for identity keys that are trusted to
+    endorse an attestation report. If the report's identity key is explicitly
+    trusted, then its author key does not need to be trusted.
+*   `TrustedIDKeyHashes`: An array of SHA-384 hashes of the SEV-SNP API format
+    for an ECDSA public key. Has the same validation behavior as
+    `TrustedIDKeys`.
 
 ## License
 

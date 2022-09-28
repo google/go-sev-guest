@@ -31,7 +31,7 @@ import (
 	"time"
 
 	"github.com/google/go-sev-guest/abi"
-	"github.com/google/go-sev-guest/verify/kds"
+	"github.com/google/go-sev-guest/kds"
 	"github.com/pborman/uuid"
 )
 
@@ -248,6 +248,35 @@ func (b *AmdSignerBuilder) certifyAsk() error {
 	return err
 }
 
+// CustomVcekExtensions returns an array of extensions following the KDS specification
+// for the given values.
+func CustomVcekExtensions(tcb kds.TCBParts, hwid [64]byte) []pkix.Extension {
+	asn1Zero, _ := asn1.Marshal(0)
+	productName, _ := asn1.Marshal("Milan-B0")
+	blSpl, _ := asn1.Marshal(int(tcb.BlSpl))
+	teeSpl, _ := asn1.Marshal(int(tcb.TeeSpl))
+	snpSpl, _ := asn1.Marshal(int(tcb.SnpSpl))
+	spl4, _ := asn1.Marshal(int(tcb.Spl4))
+	spl5, _ := asn1.Marshal(int(tcb.Spl5))
+	spl6, _ := asn1.Marshal(int(tcb.Spl6))
+	spl7, _ := asn1.Marshal(int(tcb.Spl7))
+	ucodeSpl, _ := asn1.Marshal(int(tcb.UcodeSpl))
+	asn1Hwid, _ := asn1.Marshal(hwid[:])
+	return []pkix.Extension{
+		{Id: kds.OidStructVersion, Value: asn1Zero},
+		{Id: kds.OidProductName1, Value: productName},
+		{Id: kds.OidBlSpl, Value: blSpl},
+		{Id: kds.OidTeeSpl, Value: teeSpl},
+		{Id: kds.OidSnpSpl, Value: snpSpl},
+		{Id: kds.OidSpl4, Value: spl4},
+		{Id: kds.OidSpl5, Value: spl5},
+		{Id: kds.OidSpl6, Value: spl6},
+		{Id: kds.OidSpl7, Value: spl7},
+		{Id: kds.OidUcodeSpl, Value: ucodeSpl},
+		{Id: kds.OidHwid, Value: asn1Hwid},
+	}
+}
+
 func (b *AmdSignerBuilder) certifyVcek() error {
 	cert := &x509.Certificate{}
 	cert.SignatureAlgorithm = x509.SHA384WithRSAPSS
@@ -259,56 +288,8 @@ func (b *AmdSignerBuilder) certifyVcek() error {
 	cert.Subject.SerialNumber = fmt.Sprintf("%x", cert.SerialNumber)
 	cert.NotBefore = time.Time{}
 	cert.NotAfter = b.VcekCreationTime.Add(vcekExpirationYears * 365 * 24 * time.Hour)
-	asn1Zero, _ := asn1.Marshal(0)
-	productName, _ := asn1.Marshal("Milan-B0")
 	var hwid [64]byte
-	asn1Hwid, _ := asn1.Marshal(hwid[:])
-	cert.ExtraExtensions = []pkix.Extension{
-		{
-			Id:    kds.OidStructVersion,
-			Value: asn1Zero,
-		},
-		{
-			Id:    kds.OidProductName1,
-			Value: productName,
-		},
-		{
-			Id:    kds.OidBlSpl,
-			Value: asn1Zero,
-		},
-		{
-			Id:    kds.OidTeeSpl,
-			Value: asn1Zero,
-		},
-		{
-			Id:    kds.OidSnpSpl,
-			Value: asn1Zero,
-		},
-		{
-			Id:    kds.OidSpl4,
-			Value: asn1Zero,
-		},
-		{
-			Id:    kds.OidSpl5,
-			Value: asn1Zero,
-		},
-		{
-			Id:    kds.OidSpl6,
-			Value: asn1Zero,
-		},
-		{
-			Id:    kds.OidSpl7,
-			Value: asn1Zero,
-		},
-		{
-			Id:    kds.OidUcodeSpl,
-			Value: asn1Zero,
-		},
-		{
-			Id:    kds.OidHwid,
-			Value: asn1Hwid,
-		},
-	}
+	cert.ExtraExtensions = CustomVcekExtensions(kds.TCBParts{}, hwid)
 
 	b.VcekCustom.override(cert)
 

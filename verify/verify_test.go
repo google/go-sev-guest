@@ -29,8 +29,8 @@ import (
 
 	"github.com/google/go-sev-guest/abi"
 	sg "github.com/google/go-sev-guest/client"
+	"github.com/google/go-sev-guest/kds"
 	test "github.com/google/go-sev-guest/testing"
-	"github.com/google/go-sev-guest/verify/kds"
 )
 
 // These certificates are committed regardless of its expiration date since we adjust the
@@ -138,7 +138,7 @@ func TestVerifyVcekCert(t *testing.T) {
 func TestSnpReportSignature(t *testing.T) {
 	tests := test.TestCases()
 	now := time.Date(2022, time.May, 3, 9, 0, 0, 0, time.UTC)
-	d, err := test.TcDevice(tests, nil, now)
+	d, err := test.TcDevice(tests, &test.DeviceOptions{Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +390,7 @@ func TestCRLRootValidity(t *testing.T) {
 
 func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 	tests := test.TestCases()
-	d, err := test.TcDevice(tests, nil, time.Now())
+	d, err := test.TcDevice(tests, &test.DeviceOptions{Now: time.Now()})
 	if err != nil {
 		t.Fatal(err)
 	}

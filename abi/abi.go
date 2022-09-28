@@ -16,6 +16,7 @@
 package abi
 
 import (
+	"crypto/ecdsa"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -40,6 +41,29 @@ const (
 	// ReportSize is the ABI-specified byte size of an SEV-SNP attestation report.
 	ReportSize = 0x4A0
 
+	// FamilyIDSize is the field size of FAMILY_ID in an SEV-SNP attestation report.
+	FamilyIDSize = 16
+	// ImageIDSize is the field size of IMAGE_ID in an SEV-SNP attestation report.
+	ImageIDSize = 16
+	// ReportDataSize is the field size of REPORT_DATA in an SEV-SNP attestation report.
+	ReportDataSize = 64
+	// MeasurementSize is the field size of MEASUREMENT in an SEV-SNP attestation report.
+	MeasurementSize = 48
+	// HostDataSize is the field size of HOST_DATA in an SEV-SNP attestation report.
+	HostDataSize = 32
+	// IDKeyDigestSize is the field size of ID_KEY_DIGEST in an SEV-SNP attestation report.
+	IDKeyDigestSize = 48
+	// AuthorKeyDigestSize is the field size of AUTHOR_KEY_DIGEST in an SEV-SNP attestation report.
+	AuthorKeyDigestSize = 48
+	// ReportIDSize is the field size of REPORT_ID in an SEV-SNP attestation report.
+	ReportIDSize = 32
+	// ReportIDMASize is the field size of REPORT_ID_MA in an SEV-SNP attestation report.
+	ReportIDMASize = 32
+	// ChipIDSize is the field size of CHIP_ID in an SEV-SNP attestation report.
+	ChipIDSize = 64
+	// SignatureSize is the field size of SIGNATURE in an SEV-SNP attestation report.
+	SignatureSize = 512
+
 	policyOffset          = 0x08
 	policySMTBit          = 16
 	policyReserved1bit    = 17
@@ -47,11 +71,20 @@ const (
 	policyDebugBit        = 19
 	policySingleSocketBit = 20
 
+	maxPlatformInfoBit = 1
+
 	signatureOffset = 0x2A0
 	ecdsaRSsize     = 72 // From the ECDSA-P384-SHA384 format in SEV SNP API specification.
 
+	// From the ECDSA public key format in SEV SNP API specification.
+	ecdsaQXoffset = 0x04
+	ecdsaQYoffset = 0x4c
+	ecdsaQYend    = 0x94
 	// EcdsaP384Sha384SignatureSize is the length in bytes of the ECDSA-P384-SHA384 signature format.
 	EcdsaP384Sha384SignatureSize = ecdsaRSsize + ecdsaRSsize
+	// EcsdaPublicKeySize is the length in bytes of the Curve, QX, QY elliptic curve public key
+	// representation in the AMD SEV ABI.
+	EcsdaPublicKeySize = 0x404
 
 	// CertTableEntrySize is the ABI size of the certificate table entry struct.
 	CertTableEntrySize = 24
@@ -88,6 +121,19 @@ type CertTableHeaderEntry struct {
 	Length uint32
 }
 
+// CertTableEntry represents both the GUID and whole Certificate contents denoted by the
+// CertTableHeaderEntry ABI struct.
+type CertTableEntry struct {
+	GUID    uuid.UUID
+	RawCert []byte
+}
+
+// CertTable represents each (GUID, Blob) pair of certificates returned by an extended guest
+// request.
+type CertTable struct {
+	Entries []CertTableEntry
+}
+
 // Appendix B.1 of the SEV API specification
 
 // AskCert is the SEV format for AMD signing key certificates.
@@ -101,6 +147,15 @@ type AskCert struct {
 	PubExp       []byte
 	Modulus      []byte
 	Signature    []byte
+}
+
+// SnpPlatformInfo represents an interpretation of the PLATFORM_INFO field of an attestation report.
+type SnpPlatformInfo struct {
+	// SMTEnabled represents if the platform that produced the attestation report has SMT enabled.
+	SMTEnabled bool
+	// TSMEEnabled represents if the platform that produced the attestation report has transparent
+	// secure memory encryption (TSME) enabled.
+	TSMEEnabled bool
 }
 
 // SnpPolicy represents the bitmask guest policy that governs the VM's behavior from launch.
@@ -154,6 +209,20 @@ func SnpPolicyToBytes(policy SnpPolicy) uint64 {
 		result |= uint64(1 << policySingleSocketBit)
 	}
 	return result
+}
+
+// ParseSnpPlatformInfo returns an interpretation of the given platform info, or an error for
+// unrecognized bits.
+func ParseSnpPlatformInfo(platformInfo uint64) (SnpPlatformInfo, error) {
+	result := SnpPlatformInfo{
+		SMTEnabled:  (platformInfo & (1 << 0)) != 0,
+		TSMEEnabled: (platformInfo & (1 << 1)) != 0,
+	}
+	reserved := platformInfo & ^uint64((1<<(maxPlatformInfoBit+1))-1)
+	if reserved != 0 {
+		return result, fmt.Errorf("unrecognized platform info bit(s): 0x%x", platformInfo)
+	}
+	return result, nil
 }
 
 // ParseAskCert returns a struct representation of the AMD certificate format from a byte array.
@@ -330,38 +399,38 @@ func ReportToProto(data []uint8) (*pb.Report, error) {
 }
 
 func checkReportSizes(r *pb.Report) error {
-	if len(r.FamilyId) != 16 {
-		return fmt.Errorf("report family_id length is %d, expect 16", len(r.FamilyId))
+	if len(r.FamilyId) != FamilyIDSize {
+		return fmt.Errorf("report family_id length is %d, expect %d", len(r.FamilyId), FamilyIDSize)
 	}
-	if len(r.ImageId) != 16 {
-		return fmt.Errorf("report image_id length is %d, expect 16", len(r.FamilyId))
+	if len(r.ImageId) != ImageIDSize {
+		return fmt.Errorf("report image_id length is %d, expect %d", len(r.ImageId), ImageIDSize)
 	}
-	if len(r.ReportData) != 64 {
-		return fmt.Errorf("report_data length is %d, expect 64", len(r.ReportData))
+	if len(r.ReportData) != ReportDataSize {
+		return fmt.Errorf("report_data length is %d, expect %d", len(r.ReportData), ReportDataSize)
 	}
-	if len(r.Measurement) != 48 {
-		return fmt.Errorf("measurement length is %d, expect 48", len(r.Measurement))
+	if len(r.Measurement) != MeasurementSize {
+		return fmt.Errorf("measurement length is %d, expect %d", len(r.Measurement), MeasurementSize)
 	}
-	if len(r.HostData) != 32 {
-		return fmt.Errorf("host_data length is %d, expect 32", len(r.HostData))
+	if len(r.HostData) != HostDataSize {
+		return fmt.Errorf("host_data length is %d, expect %d", len(r.HostData), HostDataSize)
 	}
-	if len(r.IdKeyDigest) != 48 {
-		return fmt.Errorf("id_key_digest length is %d, expect 48", len(r.IdKeyDigest))
+	if len(r.IdKeyDigest) != IDKeyDigestSize {
+		return fmt.Errorf("id_key_digest length is %d, expect %d", len(r.IdKeyDigest), IDKeyDigestSize)
 	}
-	if len(r.AuthorKeyDigest) != 48 {
-		return fmt.Errorf("author_key_digest length is %d, expect 48", len(r.AuthorKeyDigest))
+	if len(r.AuthorKeyDigest) != AuthorKeyDigestSize {
+		return fmt.Errorf("author_key_digest length is %d, expect %d", len(r.AuthorKeyDigest), AuthorKeyDigestSize)
 	}
-	if len(r.ReportId) != 32 {
-		return fmt.Errorf("report_id length is %d, expect 32", len(r.ReportId))
+	if len(r.ReportId) != ReportIDSize {
+		return fmt.Errorf("report_id length is %d, expect %d", len(r.ReportId), ReportIDSize)
 	}
-	if len(r.ReportIdMa) != 32 {
-		return fmt.Errorf("report_id_ma length is %d, expect 32", len(r.ReportIdMa))
+	if len(r.ReportIdMa) != ReportIDMASize {
+		return fmt.Errorf("report_id_ma length is %d, expect %d", len(r.ReportIdMa), ReportIDMASize)
 	}
-	if len(r.ChipId) != 64 {
-		return fmt.Errorf("chip_id length is %d, expect 64", len(r.ChipId))
+	if len(r.ChipId) != ChipIDSize {
+		return fmt.Errorf("chip_id length is %d, expect %d", len(r.ChipId), ChipIDSize)
 	}
-	if len(r.Signature) != 512 {
-		return fmt.Errorf("signature length is %d, expect 512", len(r.Signature))
+	if len(r.Signature) != SignatureSize {
+		return fmt.Errorf("signature length is %d, expect %d", len(r.Signature), SignatureSize)
 	}
 	return nil
 }
@@ -474,6 +543,20 @@ func bigIntToAMDRS(b *big.Int) []byte {
 	return reverse(result[:])
 }
 
+// EcdsaPublicKeyToBytes returns the AMD SEV ABI format of the ECDSA P-384 curve public key.
+func EcdsaPublicKeyToBytes(key *ecdsa.PublicKey) ([]byte, error) {
+	result := make([]byte, EcsdaPublicKeySize)
+	switch key.Curve.Params().Name {
+	case "P-384":
+		binary.LittleEndian.PutUint32(result[0:4], EccP384)
+	default:
+		return nil, fmt.Errorf("ecdsa public key is not on curve P-384")
+	}
+	copy(result[ecdsaQXoffset:ecdsaQYoffset], bigIntToAMDRS(key.X))
+	copy(result[ecdsaQYoffset:ecdsaQYend], bigIntToAMDRS(key.Y))
+	return result, nil
+}
+
 // AmdBigInt returns a given AMD format little endian big integer as a big.Int.
 func AmdBigInt(b []byte) *big.Int {
 	return new(big.Int).SetBytes(reverse(clone(b)))
@@ -545,4 +628,62 @@ func ParseSnpCertTableHeader(certs []byte) ([]CertTableHeaderEntry, error) {
 		}
 	}
 	return entries, nil
+}
+
+// Unmarshal populates the certTable with the (GUID, Blob) pairs represented in the given bytes.
+// The format of the bytes is specified by the SEV SNP API for extended guest requests.
+func (c *CertTable) Unmarshal(certs []byte) error {
+	certTableHeader, err := ParseSnpCertTableHeader(certs)
+	if err != nil {
+		return err
+	}
+	for i, entry := range certTableHeader {
+		var next CertTableEntry
+		next.GUID = make([]byte, GUIDSize)
+		copy(next.GUID, entry.GUID)
+		if entry.Offset+entry.Length > uint32(len(certs)) {
+			return fmt.Errorf("cert table entry %d specifies a byte range outside the certificate data block (size %d): offset=%d, length%d", i, len(certs), entry.Offset, entry.Length)
+		}
+		next.RawCert = make([]byte, entry.Length)
+		copy(next.RawCert, certs[entry.Offset:entry.Offset+entry.Length])
+		c.Entries = append(c.Entries, next)
+	}
+	return nil
+}
+
+// GetByGUIDString returns the raw bytes for a certificate that matches a key identified by the
+// given GUID string.
+func (c *CertTable) GetByGUIDString(guid string) ([]byte, error) {
+	g := uuid.Parse(guid)
+	if g == nil {
+		return nil, fmt.Errorf("GUID string format is XXXXXXXX-XXXX-XXXX-XXXXXXXXXXXXXXXX, got %s", guid)
+	}
+	for _, entry := range c.Entries {
+		if uuid.Equal(entry.GUID, g) {
+			return entry.RawCert, nil
+		}
+		fmt.Println(entry.GUID, "is not", g)
+	}
+	return nil, fmt.Errorf("cert not found for GUID %s", guid)
+}
+
+// Proto returns a protobuf representation of the extended report certificate chain.
+func (c *CertTable) Proto() (*pb.CertificateChain, error) {
+	vcek, err := c.GetByGUIDString(VcekGUID)
+	if err != nil {
+		return nil, fmt.Errorf("VCEK not found: %v", err)
+	}
+	ask, err := c.GetByGUIDString(AskGUID)
+	if err != nil {
+		return nil, fmt.Errorf("ASK not found: %v", err)
+	}
+	ark, err := c.GetByGUIDString(ArkGUID)
+	if err != nil {
+		return nil, fmt.Errorf("ARK not found: %v", err)
+	}
+	return &pb.CertificateChain{
+		VcekCert: vcek,
+		AskCert:  ask,
+		ArkCert:  ark,
+	}, nil
 }

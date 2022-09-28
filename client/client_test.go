@@ -46,7 +46,7 @@ func initDevice() {
 		test.DerivedKeyRequestToString(&labi.SnpDerivedKeyReqABI{}):                    make([]byte, 32),
 		test.DerivedKeyRequestToString(&labi.SnpDerivedKeyReqABI{GuestFieldSelect: 1}): ones32,
 	}
-	newDevice, err := test.TcDevice(tests, keys, now)
+	newDevice, err := test.TcDevice(tests, &test.DeviceOptions{Keys: keys, Now: now})
 	if err != nil { // Unexpected
 		panic(err)
 	}

@@ -20,7 +20,6 @@ import (
 	"github.com/google/go-sev-guest/abi"
 	labi "github.com/google/go-sev-guest/client/linuxabi"
 	pb "github.com/google/go-sev-guest/proto/sevsnp"
-	"github.com/pborman/uuid"
 	"github.com/pkg/errors"
 )
 
@@ -29,17 +28,6 @@ type Device interface {
 	Open(path string) error
 	Close() error
 	Ioctl(command uintptr, argument interface{}) (uintptr, error)
-}
-
-type certTableEntry struct {
-	GUID    uuid.UUID
-	RawCert []byte
-}
-
-// certTable represents each (GUID, Blob) pair of certificates returned by an extended guest
-// request.
-type certTable struct {
-	entries []certTableEntry
 }
 
 func message(d Device, command uintptr, req *labi.SnpUserGuestRequest) error {
@@ -132,62 +120,6 @@ func queryCertificateLength(d Device, vmpl int) (uint32, error) {
 	return length, nil
 }
 
-// Unmarshal populates the certTable with the (GUID, Blob) pairs represented in the given bytes.
-// The format of the bytes is specified by the SEV SNP API for extended guest requests.
-func (c *certTable) Unmarshal(certs []byte) error {
-	certTableHeader, err := abi.ParseSnpCertTableHeader(certs)
-	if err != nil {
-		return err
-	}
-	for i, entry := range certTableHeader {
-		var next certTableEntry
-		next.GUID = make([]byte, abi.GUIDSize)
-		copy(next.GUID, entry.GUID)
-		if entry.Offset+entry.Length > uint32(len(certs)) {
-			return fmt.Errorf("cert table entry %d specifies a byte range outside the certificate data block (size %d): offset=%d, length%d", i, len(certs), entry.Offset, entry.Length)
-		}
-		next.RawCert = make([]byte, entry.Length)
-		copy(next.RawCert, certs[entry.Offset:entry.Offset+entry.Length])
-		c.entries = append(c.entries, next)
-	}
-	return nil
-}
-
-// getByGUIDString returns the raw bytes for a certificate that matches a key identified by the
-// given GUID string.
-func (c *certTable) getByGUIDString(guid string) ([]byte, error) {
-	g := uuid.Parse(guid)
-	if g == nil {
-		return nil, fmt.Errorf("GUID string format is XXXXXXXX-XXXX-XXXX-XXXXXXXXXXXXXXXX, got %s", guid)
-	}
-	for _, entry := range c.entries {
-		if uuid.Equal(entry.GUID, g) {
-			return entry.RawCert, nil
-		}
-	}
-	return nil, fmt.Errorf("cert not found for GUID %s", guid)
-}
-
-func (c *certTable) proto() (*pb.CertificateChain, error) {
-	vcek, err := c.getByGUIDString(abi.VcekGUID)
-	if err != nil {
-		return nil, fmt.Errorf("VCEK not found: %v", err)
-	}
-	ask, err := c.getByGUIDString(abi.AskGUID)
-	if err != nil {
-		return nil, fmt.Errorf("ASK not found: %v", err)
-	}
-	ark, err := c.getByGUIDString(abi.ArkGUID)
-	if err != nil {
-		return nil, fmt.Errorf("ARK not found: %v", err)
-	}
-	return &pb.CertificateChain{
-		VcekCert: vcek,
-		AskCert:  ask,
-		ArkCert:  ark,
-	}, nil
-}
-
 // GetRawExtendedReportAtVmpl requests for an attestation report that incorporates the given user
 // data at the given VMPL, and additional key certificate information.
 func GetRawExtendedReportAtVmpl(d Device, userData [64]byte, vmpl int) ([]byte, []byte, error) {
@@ -221,11 +153,11 @@ func GetExtendedReportAtVmpl(d Device, userData [64]byte, vmpl int) (*pb.Attesta
 		return nil, err
 	}
 
-	certs := new(certTable)
+	certs := new(abi.CertTable)
 	if err := certs.Unmarshal(certBytes); err != nil {
 		return nil, err
 	}
-	certChain, err := certs.proto()
+	certChain, err := certs.Proto()
 	if err != nil {
 		return nil, err
 	}

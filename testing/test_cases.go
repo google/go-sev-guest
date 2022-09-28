@@ -103,10 +103,21 @@ func TestRawReport(userData [64]byte) [labi.SnpReportRespReportSize]byte {
 	return r
 }
 
-func makeTestCerts(now time.Time) ([]byte, *AmdSigner, error) {
-	signer, err := DefaultCertChain("Milan", now)
-	if err != nil {
-		return nil, nil, err
+// DeviceOptions specifies customizations for a fake sev-guest device.
+type DeviceOptions struct {
+	Keys   map[string][]byte
+	Now    time.Time
+	Signer *AmdSigner
+}
+
+func makeTestCerts(opts *DeviceOptions) ([]byte, *AmdSigner, error) {
+	signer := opts.Signer
+	if signer == nil {
+		s, err := DefaultCertChain("Milan", opts.Now)
+		if err != nil {
+			return nil, nil, err
+		}
+		signer = s
 	}
 	certs, err := signer.CertTableBytes()
 	if err != nil {
@@ -153,8 +164,8 @@ func TestCases() []TestCase {
 }
 
 // TcDevice returns a mock device populated from test cases' inputs and expected outputs.
-func TcDevice(tcs []TestCase, keys map[string][]byte, now time.Time) (*Device, error) {
-	certs, signer, err := makeTestCerts(now)
+func TcDevice(tcs []TestCase, opts *DeviceOptions) (*Device, error) {
+	certs, signer, err := makeTestCerts(opts)
 	if err != nil {
 		return nil, fmt.Errorf("test failure creating certificates: %v", err)
 	}
@@ -170,6 +181,6 @@ func TcDevice(tcs []TestCase, keys map[string][]byte, now time.Time) (*Device, e
 		UserDataRsp: responses,
 		Certs:       certs,
 		Signer:      signer,
-		Keys:        keys,
+		Keys:        opts.Keys,
 	}, nil
 }
