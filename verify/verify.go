@@ -507,6 +507,9 @@ type Options struct {
 	// CheckRevocations set to true if the verifier should retrieve the CRL from the network and check
 	// if the VCEK or ASK have been revoked according to the ARK.
 	CheckRevocations bool
+	// DisableCertFetching set to true if SnpAttestation should not connect to the AMD KDS to fill in
+	// any missing certificates in an attestation's certificate chain. Uses Getter if false.
+	DisableCertFetching bool
 	// Getter takes a URL and returns the body of its contents. By default uses http.Get and returns
 	// the body.
 	Getter HTTPSGetter
@@ -519,6 +522,12 @@ type Options struct {
 // SnpAttestation verifies the protobuf representation of an attestation report's signature based
 // on the report's SignatureAlgo, provided the certificate chain is valid.
 func SnpAttestation(attestation *spb.Attestation, options *Options) error {
+	// Make sure we have the whole certificate chain if we're allowed.
+	if !options.DisableCertFetching {
+		if err := fillInAttestation(attestation, options.Getter); err != nil {
+			return err
+		}
+	}
 	chain := attestation.GetCertificateChain()
 	vcek, root, err := VcekDER(chain.GetVcekCert(), chain.GetAskCert(), chain.GetArkCert(), options)
 	if err != nil {
@@ -567,42 +576,65 @@ type AttestationRecreationErr struct {
 	error
 }
 
-// GetAttestationFromReport uses AMD's Key Distribution Service (KDS) to download the certificate
-// chain for the VCEK that supposedly signed the given report, and returns the Attestation
-// representation of their combination. If getter is nil, uses Golang's http.Get.
-func GetAttestationFromReport(report *spb.Report, getter HTTPSGetter) (*spb.Attestation, error) {
+// fillInAttestation uses AMD's KDS to populate any empty certificate field in the attestation's
+// certificate chain.
+func fillInAttestation(attestation *spb.Attestation, getter HTTPSGetter) error {
 	// TODO(Issue #11): Determine the platform a report was fetched from, or make this an option.
 	platform := "Milan"
 	if getter == nil {
 		getter = &SimpleHTTPSGetter{}
 	}
-	askark, err := getter.Get(kds.PlatformCertChainURL(platform))
-	if err != nil {
-		return nil, AttestationRecreationErr{fmt.Errorf("could not download ASK and ARK certificates: %v", err)}
+	report := attestation.GetReport()
+	chain := attestation.GetCertificateChain()
+	if len(chain.GetAskCert()) == 0 || len(chain.GetArkCert()) == 0 {
+		askark, err := getter.Get(kds.PlatformCertChainURL(platform))
+		if err != nil {
+			return AttestationRecreationErr{fmt.Errorf("could not download ASK and ARK certificates: %v", err)}
+		}
+		ask, ark, err := kds.ParsePlatformCertChain(askark)
+		if err != nil {
+			// Treat a bad parse as a network error since it's likely due to an incomplete transfer.
+			return AttestationRecreationErr{fmt.Errorf("could not parse root cert_chain: %v", err)}
+		}
+		if len(chain.GetAskCert()) == 0 {
+			chain.AskCert = ask
+		}
+		if len(chain.GetArkCert()) == 0 {
+			chain.ArkCert = ark
+		}
 	}
-	ask, ark, err := kds.ParsePlatformCertChain(askark)
-	if err != nil {
-		return nil, AttestationRecreationErr{fmt.Errorf("could not parse root cert_chain: %v", err)}
+	if len(chain.GetVcekCert()) == 0 {
+		vcekURL := kds.VCEKCertURL(platform, report.GetChipId(), kds.TCBVersion(report.GetCurrentTcb()))
+		vcek, err := getter.Get(vcekURL)
+		if err != nil {
+			return AttestationRecreationErr{fmt.Errorf("could not download VCEK certificate: %v", err)}
+		}
+		chain.VcekCert = vcek
 	}
-	vcekURL := kds.VCEKCertURL(platform, report.GetChipId(), kds.TCBVersion(report.GetReportedTcb()))
-	vcek, err := getter.Get(vcekURL)
-	if err != nil {
-		return nil, AttestationRecreationErr{fmt.Errorf("could not download VCEK certificate: %v", err)}
+	return nil
+}
+
+// GetAttestationFromReport uses AMD's Key Distribution Service (KDS) to download the certificate
+// chain for the VCEK that supposedly signed the given report, and returns the Attestation
+// representation of their combination. If getter is nil, uses Golang's http.Get.
+func GetAttestationFromReport(report *spb.Report, getter HTTPSGetter) (*spb.Attestation, error) {
+	result := &spb.Attestation{
+		Report:           report,
+		CertificateChain: &spb.CertificateChain{},
 	}
-	return &spb.Attestation{
-		Report: report,
-		CertificateChain: &spb.CertificateChain{
-			VcekCert: vcek,
-			AskCert:  ask,
-			ArkCert:  ark,
-		},
-	}, nil
+	if err := fillInAttestation(result, getter); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // SnpReport verifies the protobuf representation of an attestation report's signature based
 // on the report's SignatureAlgo and uses the AMD Key Distribution Service to download the
 // report's corresponding VCEK certificate.
 func SnpReport(report *spb.Report, options *Options) error {
+	if options.DisableCertFetching {
+		return errors.New("cannot verify attestation report without fetching certificates")
+	}
 	attestation, err := GetAttestationFromReport(report, options.Getter)
 	if err != nil {
 		return fmt.Errorf("could not recreate attestation from report: %v", err)
