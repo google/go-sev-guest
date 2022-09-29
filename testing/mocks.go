@@ -32,11 +32,11 @@ type GetReportResponse struct {
 
 // Device represents a sev-guest driver implementation with pre-programmed responses to commands.
 type Device struct {
-	isOpen      bool
-	UserDataRsp map[string]interface{}
-	Keys        map[string][]byte
-	Certs       []byte
-	Signer      *AmdSigner
+	isOpen        bool
+	ReportDataRsp map[string]interface{}
+	Keys          map[string][]byte
+	Certs         []byte
+	Signer        *AmdSigner
 }
 
 // Open changes the mock device's state to open.
@@ -58,9 +58,9 @@ func (d *Device) Close() error {
 }
 
 func (d *Device) getReport(req *labi.SnpReportReqABI, rsp *labi.SnpReportRespABI, fwErr *uint64) (uintptr, error) {
-	mockRspI, ok := d.UserDataRsp[hex.EncodeToString(req.UserData[:])]
+	mockRspI, ok := d.ReportDataRsp[hex.EncodeToString(req.ReportData[:])]
 	if !ok {
-		return 0, fmt.Errorf("test error: no response for %v", req.UserData)
+		return 0, fmt.Errorf("test error: no response for %v", req.ReportData)
 	}
 	mockRsp, ok := mockRspI.(*GetReportResponse)
 	if !ok {

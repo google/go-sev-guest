@@ -24,10 +24,10 @@ import (
 	labi "github.com/google/go-sev-guest/client/linuxabi"
 )
 
-// userZeros defines a UserData example that is all zeros
+// userZeros defines a ReportData example that is all zeros
 var userZeros [64]byte
 
-// userZeros1 defines a UserData example that is all zeros except the last byte is 1.
+// userZeros1 defines a ReportData example that is all zeros except the last byte is 1.
 var userZeros1 = [64]byte{
 	0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0,
@@ -38,7 +38,7 @@ var userZeros1 = [64]byte{
 	0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 1}
 
-// userZeros11 defines a UserData example that is all zeros except the last 2 bytes are both 1.
+// userZeros11 defines a ReportData example that is all zeros except the last 2 bytes are both 1.
 var userZeros11 = [64]byte{
 	0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0,
@@ -91,7 +91,7 @@ var oneReport = `
 // We can't sign the report with AMD keys, and verification isn't the client's responsibility, so
 // we keep the signature zeros.
 // Similarly, we leave the randomly-generated fields zero.
-func TestRawReport(userData [64]byte) [labi.SnpReportRespReportSize]byte {
+func TestRawReport(reportData [64]byte) [labi.SnpReportRespReportSize]byte {
 	var r [labi.SnpReportRespReportSize]byte
 	// Set Version to 2
 	binary.LittleEndian.PutUint32(r[0x00:0x04], 2)
@@ -99,7 +99,7 @@ func TestRawReport(userData [64]byte) [labi.SnpReportRespReportSize]byte {
 	// Signature algorithm ECC P-384 with SHA-384 is encoded as 1.
 	binary.LittleEndian.PutUint32(r[0x34:0x38], 1)
 	// Place user data in its report location.
-	copy(r[0x50:0x90], userData[:])
+	copy(r[0x50:0x90], reportData[:])
 	return r
 }
 
@@ -178,9 +178,9 @@ func TcDevice(tcs []TestCase, opts *DeviceOptions) (*Device, error) {
 		}
 	}
 	return &Device{
-		UserDataRsp: responses,
-		Certs:       certs,
-		Signer:      signer,
-		Keys:        opts.Keys,
+		ReportDataRsp: responses,
+		Certs:         certs,
+		Signer:        signer,
+		Keys:          opts.Keys,
 	}, nil
 }

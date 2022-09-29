@@ -27,7 +27,7 @@ This function creates a file descriptor to the `/dev/sev-guest` device and
 returns an object that has methods encapsulating commands to the device. When
 done, remember to `Close()` the device.
 
-### `func GetExtendedReport(d Device, userData [64]byte) (*pb.Attestation, error)`
+### `func GetExtendedReport(d Device, reportData [64]byte) (*pb.Attestation, error)`
 
 This function takes an object implementing the `Device` interface (e.g., a
 `LinuxDevice`) and returns the protocol buffer representation of the attestation
@@ -134,7 +134,7 @@ fields of an attestation report.
 
 The fields that either can be skipped or must match the given value exactly are:
 
-*   `UserData` for the `REPORT_DATA` field
+*   `ReportData` for the `REPORT_DATA` field
 *   `HostData` for the `HOST_DATA` field
 *   `ImageID` for the `IMAGE_ID` field
 *   `FamilyID` for the `FAMILY_ID` field

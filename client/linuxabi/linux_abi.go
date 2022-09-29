@@ -108,8 +108,8 @@ func (err SevEsErr) Error() string {
 // SnpReportReqABI is Linux's sev-guest ioctl abi for sending a GET_REPORT request. See
 // include/uapi/linux/sev-guest.h
 type SnpReportReqABI struct {
-	// UserData to be included in the report
-	UserData [64]uint8
+	// ReportData to be included in the report
+	ReportData [64]uint8
 
 	// Vmpl is the SEV-SNP VMPL level to be included in the report.
 	// The kernel must have access to the corresponding VMPCK.

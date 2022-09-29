@@ -46,12 +46,12 @@ func message(d Device, command uintptr, req *labi.SnpUserGuestRequest) error {
 
 // GetRawReportAtVmpl requests for an attestation report at the given VMPL that incorporates the
 // given user data.
-func GetRawReportAtVmpl(d Device, userData [64]byte, vmpl int) ([]byte, error) {
+func GetRawReportAtVmpl(d Device, reportData [64]byte, vmpl int) ([]byte, error) {
 	var snpReportRsp labi.SnpReportRespABI
 	userGuestReq := labi.SnpUserGuestRequest{
 		ReqData: &labi.SnpReportReqABI{
-			UserData: userData,
-			Vmpl:     uint32(vmpl),
+			ReportData: reportData,
+			Vmpl:       uint32(vmpl),
 		},
 		RespData: &snpReportRsp,
 	}
@@ -62,13 +62,13 @@ func GetRawReportAtVmpl(d Device, userData [64]byte, vmpl int) ([]byte, error) {
 }
 
 // GetRawReport requests for an attestation report at VMPL0 that incorporates the given user data.
-func GetRawReport(d Device, userData [64]byte) ([]byte, error) {
-	return GetRawReportAtVmpl(d, userData, 0)
+func GetRawReport(d Device, reportData [64]byte) ([]byte, error) {
+	return GetRawReportAtVmpl(d, reportData, 0)
 }
 
 // GetReportAtVmpl gets an attestation report at the given VMPL into its protobuf representation.
-func GetReportAtVmpl(d Device, userData [64]byte, vmpl int) (*pb.Report, error) {
-	data, err := GetRawReportAtVmpl(d, userData, vmpl)
+func GetReportAtVmpl(d Device, reportData [64]byte, vmpl int) (*pb.Report, error) {
+	data, err := GetRawReportAtVmpl(d, reportData, vmpl)
 	if err != nil {
 		return nil, err
 	}
@@ -76,21 +76,21 @@ func GetReportAtVmpl(d Device, userData [64]byte, vmpl int) (*pb.Report, error) 
 }
 
 // GetReport gets an attestation report at VMPL0 into its protobuf representation.
-func GetReport(d Device, userData [64]byte) (*pb.Report, error) {
-	return GetReportAtVmpl(d, userData, 0)
+func GetReport(d Device, reportData [64]byte) (*pb.Report, error) {
+	return GetReportAtVmpl(d, reportData, 0)
 }
 
-// getExtendedReportIn issues a GetExtendedReport command to the sev-guest driver with userData
+// getExtendedReportIn issues a GetExtendedReport command to the sev-guest driver with reportData
 // input and certs as a destination for certificate data. If certs is empty, this function returns
 // the expected size of certs as its second result value. If certs is non-empty, this function
-// returns the signed attestation report containing userData and the certificate chain for the
+// returns the signed attestation report containing reportData and the certificate chain for the
 // report's endorsement key.
-func getExtendedReportIn(d Device, userData [64]byte, vmpl int, certs []byte) ([]byte, uint32, error) {
+func getExtendedReportIn(d Device, reportData [64]byte, vmpl int, certs []byte) ([]byte, uint32, error) {
 	var snpReportRsp labi.SnpReportRespABI
 	snpExtReportReq := labi.SnpExtendedReportReq{
 		Data: labi.SnpReportReqABI{
-			UserData: userData,
-			Vmpl:     uint32(vmpl),
+			ReportData: reportData,
+			Vmpl:       uint32(vmpl),
 		},
 		Certs:       certs,
 		CertsLength: uint32(len(certs)),
@@ -122,13 +122,13 @@ func queryCertificateLength(d Device, vmpl int) (uint32, error) {
 
 // GetRawExtendedReportAtVmpl requests for an attestation report that incorporates the given user
 // data at the given VMPL, and additional key certificate information.
-func GetRawExtendedReportAtVmpl(d Device, userData [64]byte, vmpl int) ([]byte, []byte, error) {
+func GetRawExtendedReportAtVmpl(d Device, reportData [64]byte, vmpl int) ([]byte, []byte, error) {
 	length, err := queryCertificateLength(d, vmpl)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error querying certificate length: %v", err)
 	}
 	certs := make([]byte, length)
-	report, _, err := getExtendedReportIn(d, userData, vmpl, certs)
+	report, _, err := getExtendedReportIn(d, reportData, vmpl, certs)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -137,13 +137,13 @@ func GetRawExtendedReportAtVmpl(d Device, userData [64]byte, vmpl int) ([]byte, 
 
 // GetRawExtendedReport requests for an attestation report that incorporates the given user data,
 // and additional key certificate information.
-func GetRawExtendedReport(d Device, userData [64]byte) ([]byte, []byte, error) {
-	return GetRawExtendedReportAtVmpl(d, userData, 0)
+func GetRawExtendedReport(d Device, reportData [64]byte) ([]byte, []byte, error) {
+	return GetRawExtendedReportAtVmpl(d, reportData, 0)
 }
 
 // GetExtendedReportAtVmpl gets an extended attestation report at the given VMPL into a structured type.
-func GetExtendedReportAtVmpl(d Device, userData [64]byte, vmpl int) (*pb.Attestation, error) {
-	reportBytes, certBytes, err := GetRawExtendedReportAtVmpl(d, userData, vmpl)
+func GetExtendedReportAtVmpl(d Device, reportData [64]byte, vmpl int) (*pb.Attestation, error) {
+	reportBytes, certBytes, err := GetRawExtendedReportAtVmpl(d, reportData, vmpl)
 	if err != nil {
 		return nil, err
 	}
@@ -161,8 +161,8 @@ func GetExtendedReportAtVmpl(d Device, userData [64]byte, vmpl int) (*pb.Attesta
 }
 
 // GetExtendedReport gets an extended attestation report at VMPL0 into a structured type.
-func GetExtendedReport(d Device, userData [64]byte) (*pb.Attestation, error) {
-	return GetExtendedReportAtVmpl(d, userData, 0)
+func GetExtendedReport(d Device, reportData [64]byte) (*pb.Attestation, error) {
+	return GetExtendedReportAtVmpl(d, reportData, 0)
 }
 
 // GuestFieldSelect represents which guest-provided information will be mixed into a derived key.
