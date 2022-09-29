@@ -91,7 +91,7 @@ This type contains three fields:
     certificate revocation list (CRL) and check for revocations.
 *   `Getter HTTPSGetter`: must be non-`nil` if `CheckRevocations` is true.
 *   `TrustedRoots map[string][]*AMDRootCerts`: if `nil`, uses the library's embedded certificates.
-     Maps a platform name to all allowed root certifications for that platform (e.g., Milan).
+     Maps a product name to all allowed root certifications for that product (e.g., Milan).
 
 The `HTTPSGetter` interface consists of a single method `Get(url string)
 ([]byte, error)` that should return the body of the HTTPS response.
@@ -101,7 +101,7 @@ The `HTTPSGetter` interface consists of a single method `Get(url string)
 
 This type has 6 fields, the first 3 of which are mandatory:
 
-*   `Platform string`: the name of the platform this bundle is for (e.g., `"Milan"`).
+*   `Product string`: the name of the product this bundle is for (e.g., `"Milan"`).
 *   `AskX509 *x509.Certificate`: an X.509 representation of the AMD SEV Signer intermediate key (ASK)'s certificate.
 *   `ArkX509 *x509.Certificate`: an X.509 representation of the AMD SEV Root key (ARK)'s certificate.
 *   `AskSev *abi.AskCert`: if non-`nil`, will cross-check with
