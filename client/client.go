@@ -157,11 +157,7 @@ func GetExtendedReportAtVmpl(d Device, userData [64]byte, vmpl int) (*pb.Attesta
 	if err := certs.Unmarshal(certBytes); err != nil {
 		return nil, err
 	}
-	certChain, err := certs.Proto()
-	if err != nil {
-		return nil, err
-	}
-	return &pb.Attestation{Report: report, CertificateChain: certChain}, nil
+	return &pb.Attestation{Report: report, CertificateChain: certs.Proto()}, nil
 }
 
 // GetExtendedReport gets an extended attestation report at VMPL0 into a structured type.
