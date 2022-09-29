@@ -45,13 +45,13 @@ var milanBytes []byte
 //go:embed testdata/attestation.bin
 var attestationBytes []byte
 
-const platform = "Milan"
+const product = "Milan"
 
 var signMu sync.Once
 var signer *test.AmdSigner
 
 func initSigner() {
-	newSigner, err := test.DefaultCertChain(platform, time.Now())
+	newSigner, err := test.DefaultCertChain(product, time.Now())
 	if err != nil { // Unexpected
 		panic(err)
 	}
@@ -74,9 +74,9 @@ func TestEmbeddedCertsAppendixB3Expectations(t *testing.T) {
 func TestFakeCertsKDSExpectations(t *testing.T) {
 	signMu.Do(initSigner)
 	root := AMDRootCerts{
-		Platform: platform,
-		ArkX509:  signer.Ark,
-		AskX509:  signer.Ask,
+		Product: product,
+		ArkX509: signer.Ark,
+		AskX509: signer.Ask,
 		// No ArkSev or AskSev intentionally for test certs.
 	}
 	if err := root.ValidateArkX509(); err != nil {
@@ -92,7 +92,7 @@ func TestParseVcekCert(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not parse valid VCEK certificate: %v", err)
 	}
-	if _, err := validateVcekCertificatePlatformNonspecific(cert); err != nil {
+	if _, err := validateVcekCertificateProductNonspecific(cert); err != nil {
 		t.Errorf("could not validate valid VCEK certificate: %v", err)
 	}
 }
@@ -112,7 +112,7 @@ func TestVerifyVcekCert(t *testing.T) {
 	if opts == nil {
 		t.Fatalf("root x509 certificates missing: %v", root)
 	}
-	// This time is within the 25 year lifespan of the Milan platform.
+	// This time is within the 25 year lifespan of the Milan product.
 	opts.CurrentTime = time.Date(2022, time.September, 24, 1, 0, 0, 0, time.UTC)
 	chains, err := vcek.Verify(*opts)
 	if err != nil {
@@ -292,9 +292,9 @@ func TestKdsMetadataLogic(t *testing.T) {
 		// won't get tested.
 		options := &Options{TrustedRoots: map[string][]*AMDRootCerts{
 			"Milan": {&AMDRootCerts{
-				Platform: "Milan",
-				ArkX509:  newSigner.Ark,
-				AskX509:  newSigner.Ask,
+				Product: "Milan",
+				ArkX509: newSigner.Ark,
+				AskX509: newSigner.Ask,
 			}},
 		}}
 		if tc.wantErr != "" {
@@ -356,9 +356,9 @@ func TestCRLRootValidity(t *testing.T) {
 		Number: big.NewInt(1),
 	}
 	root := &AMDRootCerts{
-		Platform: "Milan",
-		ArkX509:  signer.Ark,
-		AskX509:  signer.Ask,
+		Product: "Milan",
+		ArkX509: signer.Ark,
+		AskX509: signer.Ask,
 	}
 
 	// Now try signing a CRL with a different root that certifies Vcek with a different serial number.
@@ -378,9 +378,9 @@ func TestCRLRootValidity(t *testing.T) {
 
 	// Finally try checking a VCEK that's signed by a revoked ASK.
 	root2 := &AMDRootCerts{
-		Platform: "Milan",
-		ArkX509:  signer2.Ark,
-		AskX509:  signer2.Ask,
+		Product: "Milan",
+		ArkX509: signer2.Ark,
+		AskX509: signer2.Ask,
 	}
 	wantErr2 := "ASK was revoked at 2022-06-14 12:01:00 +0000 UTC"
 	if err := root2.VcekNotRevoked(g2, signer2.Vcek); err == nil || !strings.Contains(err.Error(), wantErr2) {
@@ -401,9 +401,9 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 	// Trust the test device's root certs.
 	options := &Options{TrustedRoots: map[string][]*AMDRootCerts{
 		"Milan": {&AMDRootCerts{
-			Platform: "Milan",
-			ArkX509:  d.Signer.Ark,
-			AskX509:  d.Signer.Ask,
+			Product: "Milan",
+			ArkX509: d.Signer.Ark,
+			AskX509: d.Signer.Ask,
 		}}}}
 	for _, tc := range tests {
 		ereport, err := sg.GetExtendedReport(d, tc.Input)

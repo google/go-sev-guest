@@ -339,9 +339,9 @@ func VcekCertificateExtensions(cert *x509.Certificate) (*VcekExtensions, error) 
 	return extensions, nil
 }
 
-// ParsePlatformCertChain returns the DER-formatted certificates represented by the body
-// of the PlatformCertChain (cert_chain) endpoint, ASK and ARK in that order.
-func ParsePlatformCertChain(pems []byte) ([]byte, []byte, error) {
+// ParseProductCertChain returns the DER-formatted certificates represented by the body
+// of the ProductCertChain (cert_chain) endpoint, ASK and ARK in that order.
+func ParseProductCertChain(pems []byte) ([]byte, []byte, error) {
 	checkForm := func(name string, b *pem.Block) error {
 		if b == nil {
 			return fmt.Errorf("could not find %s PEM block", name)
@@ -365,23 +365,23 @@ func ParsePlatformCertChain(pems []byte) ([]byte, []byte, error) {
 	return askBlock.Bytes, arkBlock.Bytes, nil
 }
 
-// platformBaseURL returns the base URL for all certificate queries within a particular platform.
-func platformBaseURL(name string) string {
+// productBaseURL returns the base URL for all certificate queries within a particular product.
+func productBaseURL(name string) string {
 	return fmt.Sprintf("%s/vcek/v1/%s", kdsBaseURL, name)
 }
 
-// PlatformCertChainURL returns the AMD KDS URL for retrieving the ARK and ASK
-// certificates on the given platform in PEM format.
-func PlatformCertChainURL(platform string) string {
-	return fmt.Sprintf("%s/cert_chain", platformBaseURL(platform))
+// ProductCertChainURL returns the AMD KDS URL for retrieving the ARK and ASK
+// certificates on the given product in PEM format.
+func ProductCertChainURL(product string) string {
+	return fmt.Sprintf("%s/cert_chain", productBaseURL(product))
 }
 
-// VCEKCertURL returns the AMD KDS URL for retrieving the VCEK on a given platform
+// VCEKCertURL returns the AMD KDS URL for retrieving the VCEK on a given product
 // at a given TCB version. The hwid is the CHIP_ID field in an attestation report.
-func VCEKCertURL(platform string, hwid []byte, tcb TCBVersion) string {
+func VCEKCertURL(product string, hwid []byte, tcb TCBVersion) string {
 	parts := DecomposeTCBVersion(tcb)
 	return fmt.Sprintf("%s/%s?blSPL=%d&teeSPL=%d&snpSPL=%d&ucodeSPL=%d",
-		platformBaseURL(platform),
+		productBaseURL(product),
 		hex.EncodeToString(hwid),
 		parts.BlSpl,
 		parts.TeeSpl,

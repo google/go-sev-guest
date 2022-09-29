@@ -34,8 +34,8 @@ import (
 type Options struct {
 	// GuestPolicy is the maximum of acceptable guest policies.
 	GuestPolicy abi.SnpPolicy
-	// UserData is the expected REPORT_DATA field. Must be nil or 64 bytes long. Not checked if nil.
-	UserData []byte
+	// ReportData is the expected REPORT_DATA field. Must be nil or 64 bytes long. Not checked if nil.
+	ReportData []byte
 	// HostData is the expected HOST_DATA field. Must be nil or 32 bytes long. Not checked if nil.
 	HostData []byte
 	// ImageID is the expected IMAGE_ID field. Must be nil or 16 bytes long. Not checked if nil.
@@ -139,7 +139,7 @@ func validateByteField(option, field string, size int, given, required []byte) e
 
 func validateVerbatimFields(report *spb.Report, options *Options) error {
 	return multierr.Combine(
-		validateByteField("UserData", "REPORT_DATA", abi.ReportDataSize, report.GetReportData(), options.UserData),
+		validateByteField("ReportData", "REPORT_DATA", abi.ReportDataSize, report.GetReportData(), options.ReportData),
 		validateByteField("HostData", "HOST_DATA", abi.HostDataSize, report.GetHostData(), options.HostData),
 		validateByteField("FamilyID", "FAMILY_ID", abi.FamilyIDSize, report.GetFamilyId(), options.FamilyID),
 		validateByteField("ImageID", "IMAGE_ID", abi.ImageIDSize, report.GetImageId(), options.ImageID),

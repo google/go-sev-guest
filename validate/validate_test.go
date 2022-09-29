@@ -265,7 +265,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 	}
 	tests := []testCase{
 		{
-			name: "just userData",
+			name: "just reportData",
 			attestation: func() *spb.Attestation {
 				report, err := sg.GetReport(device0, nonce0s1)
 				if err != nil {
@@ -278,13 +278,13 @@ func TestValidateSnpAttestation(t *testing.T) {
 						VcekCert: sign0.Vcek.Raw,
 					}}
 			}(),
-			opts: &Options{UserData: nonce0s1[:], GuestPolicy: abi.SnpPolicy{Debug: true}},
+			opts: &Options{ReportData: nonce0s1[:], GuestPolicy: abi.SnpPolicy{Debug: true}},
 		},
 		{
 			name:        "deep check",
 			attestation: attestation12345,
 			opts: &Options{
-				UserData:               nonce12345[:],
+				ReportData:             nonce12345[:],
 				GuestPolicy:            abi.SnpPolicy{Debug: true, SMT: true},
 				PlatformInfo:           &abi.SnpPlatformInfo{SMTEnabled: true},
 				Measurement:            measurement,
@@ -306,7 +306,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 			name:        "Minimum TCB checked",
 			attestation: attestation12345,
 			opts: &Options{
-				UserData:     nonce12345[:],
+				ReportData:   nonce12345[:],
 				GuestPolicy:  abi.SnpPolicy{Debug: true, SMT: true},
 				PlatformInfo: &abi.SnpPlatformInfo{SMTEnabled: true},
 				MinimumTCB:   kds.TCBParts{UcodeSpl: 0xff, SnpSpl: 0x05, BlSpl: 0x02},
@@ -317,7 +317,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 			name:        "Minimum build checked",
 			attestation: attestation12345,
 			opts: &Options{
-				UserData:     nonce12345[:],
+				ReportData:   nonce12345[:],
 				GuestPolicy:  abi.SnpPolicy{Debug: true, SMT: true},
 				PlatformInfo: &abi.SnpPlatformInfo{SMTEnabled: true},
 				MinimumBuild: 3,
@@ -328,7 +328,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 			name:        "Minimum version checked",
 			attestation: attestation12345,
 			opts: &Options{
-				UserData:       nonce12345[:],
+				ReportData:     nonce12345[:],
 				GuestPolicy:    abi.SnpPolicy{Debug: true, SMT: true},
 				PlatformInfo:   &abi.SnpPlatformInfo{SMTEnabled: true},
 				MinimumVersion: 0xff00,
@@ -339,7 +339,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 			name:        "Author key checked",
 			attestation: attestation54321,
 			opts: &Options{
-				UserData:         nonce54321[:],
+				ReportData:       nonce54321[:],
 				GuestPolicy:      abi.SnpPolicy{Debug: true, SMT: true},
 				PlatformInfo:     &abi.SnpPlatformInfo{SMTEnabled: true},
 				RequireAuthorKey: true,
@@ -352,7 +352,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 			name:        "PlatformInfo checked",
 			attestation: attestation54321,
 			opts: &Options{
-				UserData:     nonce54321[:],
+				ReportData:   nonce54321[:],
 				GuestPolicy:  abi.SnpPolicy{Debug: true, SMT: true},
 				PlatformInfo: &abi.SnpPlatformInfo{},
 			},
@@ -362,7 +362,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 			name:        "Requiring IDBlock requires trust",
 			attestation: attestation12345,
 			opts: &Options{
-				UserData:       nonce12345[:],
+				ReportData:     nonce12345[:],
 				GuestPolicy:    abi.SnpPolicy{Debug: true, SMT: true},
 				PlatformInfo:   &abi.SnpPlatformInfo{SMTEnabled: true},
 				RequireIDBlock: true,
@@ -375,7 +375,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 			name:        "accepted provisional by build",
 			attestation: attestationb1455,
 			opts: &Options{
-				UserData:                  nonceb1455[:],
+				ReportData:                nonceb1455[:],
 				GuestPolicy:               abi.SnpPolicy{Debug: true},
 				PermitProvisionalFirmware: true,
 			},
@@ -383,14 +383,14 @@ func TestValidateSnpAttestation(t *testing.T) {
 		{
 			name:        "rejected provisional by build",
 			attestation: attestationb1455,
-			opts:        &Options{UserData: nonceb1455[:], GuestPolicy: abi.SnpPolicy{Debug: true}},
+			opts:        &Options{ReportData: nonceb1455[:], GuestPolicy: abi.SnpPolicy{Debug: true}},
 			wantErr:     "committed build number 1 does not match the current build number 2",
 		},
 		{
 			name:        "accepted provisional by tcb",
 			attestation: attestationcb1455,
 			opts: &Options{
-				UserData:                  noncecb1455[:],
+				ReportData:                noncecb1455[:],
 				GuestPolicy:               abi.SnpPolicy{Debug: true},
 				PermitProvisionalFirmware: true,
 			},
@@ -398,14 +398,14 @@ func TestValidateSnpAttestation(t *testing.T) {
 		{
 			name:        "rejected provisional by tcb",
 			attestation: attestationcb1455,
-			opts:        &Options{UserData: noncecb1455[:], GuestPolicy: abi.SnpPolicy{Debug: true}},
+			opts:        &Options{ReportData: noncecb1455[:], GuestPolicy: abi.SnpPolicy{Debug: true}},
 			wantErr:     "firmware's committed TCB 9270000000007f00 does not match the current TCB 9270000000007f1f",
 		},
 		{
 			name:        "accepted provisional by version",
 			attestation: attestation11355,
 			opts: &Options{
-				UserData:                  nonce11355[:],
+				ReportData:                nonce11355[:],
 				GuestPolicy:               abi.SnpPolicy{Debug: true},
 				PermitProvisionalFirmware: true,
 			},
@@ -413,7 +413,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 		{
 			name:        "rejected provisional by version",
 			attestation: attestation11355,
-			opts:        &Options{UserData: nonce11355[:], GuestPolicy: abi.SnpPolicy{Debug: true}},
+			opts:        &Options{ReportData: nonce11355[:], GuestPolicy: abi.SnpPolicy{Debug: true}},
 			wantErr:     "committed API version (1.49) does not match the current API version (1.51)",
 		},
 	}
@@ -427,7 +427,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 		switch i {
 		case 0:
 			name = "REPORT_DATA"
-			opts.UserData = make([]byte, abi.ReportDataSize)
+			opts.ReportData = make([]byte, abi.ReportDataSize)
 		case 1:
 			name = "HOST_DATA"
 			opts.HostData = make([]byte, abi.HostDataSize)

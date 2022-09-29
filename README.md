@@ -27,7 +27,7 @@ This function creates a file descriptor to the `/dev/sev-guest` device and
 returns an object that has methods encapsulating commands to the device. When
 done, remember to `Close()` the device.
 
-### `func GetExtendedReport(d Device, userData [64]byte) (*pb.Attestation, error)`
+### `func GetExtendedReport(d Device, reportData [64]byte) (*pb.Attestation, error)`
 
 This function takes an object implementing the `Device` interface (e.g., a
 `LinuxDevice`) and returns the protocol buffer representation of the attestation
@@ -91,7 +91,7 @@ This type contains three fields:
     certificate revocation list (CRL) and check for revocations.
 *   `Getter HTTPSGetter`: must be non-`nil` if `CheckRevocations` is true.
 *   `TrustedRoots map[string][]*AMDRootCerts`: if `nil`, uses the library's embedded certificates.
-     Maps a platform name to all allowed root certifications for that platform (e.g., Milan).
+     Maps a product name to all allowed root certifications for that product (e.g., Milan).
 
 The `HTTPSGetter` interface consists of a single method `Get(url string)
 ([]byte, error)` that should return the body of the HTTPS response.
@@ -101,7 +101,7 @@ The `HTTPSGetter` interface consists of a single method `Get(url string)
 
 This type has 6 fields, the first 3 of which are mandatory:
 
-*   `Platform string`: the name of the platform this bundle is for (e.g., `"Milan"`).
+*   `Product string`: the name of the product this bundle is for (e.g., `"Milan"`).
 *   `AskX509 *x509.Certificate`: an X.509 representation of the AMD SEV Signer intermediate key (ASK)'s certificate.
 *   `ArkX509 *x509.Certificate`: an X.509 representation of the AMD SEV Root key (ARK)'s certificate.
 *   `AskSev *abi.AskCert`: if non-`nil`, will cross-check with
@@ -134,7 +134,7 @@ fields of an attestation report.
 
 The fields that either can be skipped or must match the given value exactly are:
 
-*   `UserData` for the `REPORT_DATA` field
+*   `ReportData` for the `REPORT_DATA` field
 *   `HostData` for the `HOST_DATA` field
 *   `ImageID` for the `IMAGE_ID` field
 *   `FamilyID` for the `FAMILY_ID` field
