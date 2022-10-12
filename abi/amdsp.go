@@ -100,10 +100,6 @@ const (
 	// restoreRequired = 37
 )
 
-// GuestRequestInvalidLength is set by the ccp driver and not the AMD-SP when an guest extended
-// request provides too few pages for the firmware to populate with data.
-const GuestRequestInvalidLength SevFirmwareStatus = 0x100000000
-
 // SevFirmwareErr is an error that interprets firmware status codes from the AMD secure processor.
 type SevFirmwareErr struct {
 	error
@@ -167,9 +163,6 @@ func (e SevFirmwareErr) Error() string {
 	}
 	if e.Status == AeadOflow {
 		return "AMD-SP firmware memory would be over capacity for AEAD use"
-	}
-	if e.Status == GuestRequestInvalidLength {
-		return "too few extended guest request data pages"
 	}
 	return fmt.Sprintf("unexpected firmware status (see SEV API spec): %x", uint64(e.Status))
 }

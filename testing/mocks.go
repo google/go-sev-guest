@@ -17,26 +17,34 @@ package testing
 import (
 	"encoding/hex"
 	"fmt"
+	"time"
 
 	"github.com/google/go-sev-guest/abi"
 	labi "github.com/google/go-sev-guest/client/linuxabi"
 	"github.com/pkg/errors"
+	"golang.org/x/sys/unix"
 )
 
 // GetReportResponse represents a mocked response to a command request.
 type GetReportResponse struct {
-	Resp     labi.SnpReportRespABI
-	EsResult labi.EsResult
-	FwErr    abi.SevFirmwareStatus
+	Resp   labi.SnpReportRespABI
+	FwErr  abi.SevFirmwareStatus
+	VmmErr abi.GuestRequestVmmErrorStatus
 }
 
 // Device represents a sev-guest driver implementation with pre-programmed responses to commands.
 type Device struct {
-	isOpen        bool
-	ReportDataRsp map[string]any
-	Keys          map[string][]byte
-	Certs         []byte
-	Signer        *AmdSigner
+	isOpen          bool
+	ReportDataRsp   map[string]any
+	Keys            map[string][]byte
+	Certs           []byte
+	Signer          *AmdSigner
+	TimeoutDuration time.Duration
+}
+
+// Timeout returns the configured timeout duration.
+func (d *Device) Timeout() time.Duration {
+	return d.TimeoutDuration
 }
 
 // Open changes the mock device's state to open.
@@ -57,7 +65,7 @@ func (d *Device) Close() error {
 	return nil
 }
 
-func (d *Device) getReport(req *labi.SnpReportReqABI, rsp *labi.SnpReportRespABI, fwErr *uint64) (uintptr, error) {
+func (d *Device) getReport(req *labi.SnpReportReqABI, rsp *labi.SnpReportRespABI, sreq *labi.SnpUserGuestRequest) (uintptr, error) {
 	mockRspI, ok := d.ReportDataRsp[hex.EncodeToString(req.ReportData[:])]
 	if !ok {
 		return 0, fmt.Errorf("test error: no response for %v", req.ReportData)
@@ -66,10 +74,16 @@ func (d *Device) getReport(req *labi.SnpReportReqABI, rsp *labi.SnpReportRespABI
 	if !ok {
 		return 0, fmt.Errorf("test error: incorrect response type %v", mockRspI)
 	}
-	esResult := uintptr(mockRsp.EsResult)
+	if mockRsp.VmmErr != 0 {
+		sreq.VmmErr = mockRsp.VmmErr
+		if sreq.VmmErr == abi.GuestRequestVmmErrBusy {
+			return 0, &labi.RetryErr{}
+		}
+		return uintptr(unix.EIO), nil
+	}
 	if mockRsp.FwErr != 0 {
-		*fwErr = uint64(mockRsp.FwErr)
-		return esResult, nil
+		sreq.FwErr = mockRsp.FwErr
+		return uintptr(unix.EIO), nil
 	}
 	report := mockRsp.Resp.Data[:abi.ReportSize]
 	r, s, err := d.Signer.Sign(abi.SignedComponent(report))
@@ -80,16 +94,16 @@ func (d *Device) getReport(req *labi.SnpReportReqABI, rsp *labi.SnpReportRespABI
 		return 0, fmt.Errorf("test error: could not set signature: %v", err)
 	}
 	copy(rsp.Data[:], report)
-	return esResult, nil
+	return 0, nil
 }
 
-func (d *Device) getExtReport(req *labi.SnpExtendedReportReq, rsp *labi.SnpReportRespABI, fwErr *uint64) (uintptr, error) {
+func (d *Device) getExtReport(req *labi.SnpExtendedReportReq, rsp *labi.SnpReportRespABI, sreq *labi.SnpUserGuestRequest) (uintptr, error) {
 	if req.CertsLength == 0 {
-		*fwErr = uint64(abi.GuestRequestInvalidLength)
+		sreq.VmmErr = abi.GuestRequestVmmErrInvalidLength
 		req.CertsLength = uint32(len(d.Certs))
 		return 0, nil
 	}
-	ret, err := d.getReport(&req.Data, rsp, fwErr)
+	ret, err := d.getReport(&req.Data, rsp, sreq)
 	if err != nil {
 		return ret, err
 	}
@@ -105,7 +119,7 @@ func DerivedKeyRequestToString(req *labi.SnpDerivedKeyReqABI) string {
 	return fmt.Sprintf("%x %x %x %x %x", req.RootKeySelect, req.GuestFieldSelect, req.Vmpl, req.GuestSVN, req.TCBVersion)
 }
 
-func (d *Device) getDerivedKey(req *labi.SnpDerivedKeyReqABI, rsp *labi.SnpDerivedKeyRespABI, fwErr *uint64) (uintptr, error) {
+func (d *Device) getDerivedKey(req *labi.SnpDerivedKeyReqABI, rsp *labi.SnpDerivedKeyRespABI, sreq *labi.SnpUserGuestRequest) (uintptr, error) {
 	if len(d.Keys) == 0 {
 		return 0, errors.New("test error: no keys")
 	}
@@ -123,11 +137,11 @@ func (d *Device) Ioctl(command uintptr, req any) (uintptr, error) {
 	case *labi.SnpUserGuestRequest:
 		switch command {
 		case labi.IocSnpGetReport:
-			return d.getReport(sreq.ReqData.(*labi.SnpReportReqABI), sreq.RespData.(*labi.SnpReportRespABI), &sreq.FwErr)
+			return d.getReport(sreq.ReqData.(*labi.SnpReportReqABI), sreq.RespData.(*labi.SnpReportRespABI), sreq)
 		case labi.IocSnpGetDerivedKey:
-			return d.getDerivedKey(sreq.ReqData.(*labi.SnpDerivedKeyReqABI), sreq.RespData.(*labi.SnpDerivedKeyRespABI), &sreq.FwErr)
+			return d.getDerivedKey(sreq.ReqData.(*labi.SnpDerivedKeyReqABI), sreq.RespData.(*labi.SnpDerivedKeyRespABI), sreq)
 		case labi.IocSnpGetExtendedReport:
-			return d.getExtReport(sreq.ReqData.(*labi.SnpExtendedReportReq), sreq.RespData.(*labi.SnpReportRespABI), &sreq.FwErr)
+			return d.getExtReport(sreq.ReqData.(*labi.SnpExtendedReportReq), sreq.RespData.(*labi.SnpReportRespABI), sreq)
 		default:
 			return 0, fmt.Errorf("invalid command 0x%x", command)
 		}

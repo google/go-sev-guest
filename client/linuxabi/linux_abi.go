@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"reflect"
 	"unsafe"
+
+	"github.com/google/go-sev-guest/abi"
 )
 
 // EsResult is the status code type for Linux's GHCB communication results.
@@ -76,9 +78,16 @@ const (
 	EsDecodeFailed
 	// EsException denotes that the GHCB communication caused an exception.
 	EsException
-	// EsRetry is the code for a retry instruction emulation
+	// EsRetry is the code for a retry instruction emulation.
 	EsRetry
 )
+
+// RetryErr is an error a Device Ioctl may return if the Ioctl needs to be retried.
+type RetryErr struct{}
+
+func (*RetryErr) Error() string {
+	return "device busy"
+}
 
 // SevEsErr is an error that interprets SEV-ES guest-host communication results.
 type SevEsErr struct {
@@ -267,8 +276,8 @@ type SnpUserGuestRequestABI struct {
 	// Request and response structure address.
 	ReqData  unsafe.Pointer
 	RespData unsafe.Pointer
-	// firmware error code on failure (see psp-sev.h in Linux kernel)
-	FwErr uint64
+	FwErr    uint32
+	VmmErr   uint32
 }
 
 type snpUserGuestRequestConversion struct {
@@ -284,7 +293,9 @@ type SnpUserGuestRequest struct {
 	ReqData  BinaryConvertible
 	RespData BinaryConvertible
 	// firmware error code on failure (see psp-sev.h in Linux kernel)
-	FwErr uint64
+	FwErr abi.SevFirmwareStatus
+	// vmm error core on failure
+	VmmErr abi.GuestRequestVmmErrorStatus
 }
 
 // ABI returns an object that can cross the ABI boundary and copy back changes to the original
@@ -317,7 +328,8 @@ func (r *snpUserGuestRequestConversion) Finish(b BinaryConvertible) error {
 	if err := r.respConv.Finish(s.RespData); err != nil {
 		return fmt.Errorf("could not finalize response data: %v", err)
 	}
-	s.FwErr = r.abi.FwErr
+	s.FwErr = abi.SevFirmwareStatus(r.abi.FwErr)
+	s.VmmErr = abi.GuestRequestVmmErrorStatus(r.abi.VmmErr)
 	return nil
 }
 

@@ -18,6 +18,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/go-sev-guest/abi"
@@ -48,6 +49,17 @@ var userZeros11 = [64]byte{
 	0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 1, 1}
+
+// user12 defines a ReportData example that is all zeros except the first two bytes are 1, 2.
+var user12 = [64]byte{
+	1, 2, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0}
 
 // zeroReport is a textproto representing an unsigned report response to UserZeros.
 // The policy just sets the debug bit and bit 17 to 1, and the signature algo 1 is the encoding for
@@ -105,9 +117,10 @@ func TestRawReport(reportData [64]byte) [labi.SnpReportRespReportSize]byte {
 
 // DeviceOptions specifies customizations for a fake sev-guest device.
 type DeviceOptions struct {
-	Keys   map[string][]byte
-	Now    time.Time
-	Signer *AmdSigner
+	Keys    map[string][]byte
+	Now     time.Time
+	Signer  *AmdSigner
+	Timeout time.Duration
 }
 
 func makeTestCerts(opts *DeviceOptions) ([]byte, *AmdSigner, error) {
@@ -133,8 +146,14 @@ type TestCase struct {
 	Output      [labi.SnpReportRespReportSize]byte
 	OutputProto string
 	FwErr       abi.SevFirmwareStatus
-	EsResult    labi.EsResult
-	WantErr     error
+	VmmErr      abi.GuestRequestVmmErrorStatus
+	WantErr     string
+}
+
+// Expect returns true iff the given error matches the test case's error expectations.
+func (tc TestCase) Expect(err error) bool {
+	return (err == nil && tc.WantErr == "") ||
+		(err != nil && tc.WantErr != "" && strings.Contains(err.Error(), tc.WantErr))
 }
 
 // TestCases returns common test cases for get_report.
@@ -158,7 +177,13 @@ func TestCases() []TestCase {
 			Name:    "fw oom",
 			Input:   userZeros11,
 			FwErr:   abi.ResourceLimit,
-			WantErr: abi.SevFirmwareErr{Status: abi.ResourceLimit},
+			WantErr: abi.SevFirmwareErr{Status: abi.ResourceLimit}.Error(),
+		},
+		{
+			Name:    "throttled",
+			Input:   user12,
+			VmmErr:  abi.GuestRequestVmmErrBusy,
+			WantErr: "timed out",
 		},
 	}
 }
@@ -172,15 +197,20 @@ func TcDevice(tcs []TestCase, opts *DeviceOptions) (*Device, error) {
 	responses := map[string]any{}
 	for _, tc := range tcs {
 		responses[hex.EncodeToString(tc.Input[:])] = &GetReportResponse{
-			Resp:     labi.SnpReportRespABI{Data: tc.Output},
-			FwErr:    tc.FwErr,
-			EsResult: tc.EsResult,
+			Resp:   labi.SnpReportRespABI{Data: tc.Output},
+			FwErr:  tc.FwErr,
+			VmmErr: tc.VmmErr,
 		}
 	}
+	timeout := opts.Timeout
+	if timeout == time.Duration(0) {
+		timeout = 20 * time.Millisecond
+	}
 	return &Device{
-		ReportDataRsp: responses,
-		Certs:         certs,
-		Signer:        signer,
-		Keys:          opts.Keys,
+		ReportDataRsp:   responses,
+		Certs:           certs,
+		Signer:          signer,
+		Keys:            opts.Keys,
+		TimeoutDuration: timeout,
 	}, nil
 }

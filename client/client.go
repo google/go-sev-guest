@@ -16,6 +16,8 @@ package client
 
 import (
 	"fmt"
+	"math/rand"
+	"time"
 
 	"github.com/google/go-sev-guest/abi"
 	labi "github.com/google/go-sev-guest/client/linuxabi"
@@ -23,25 +25,77 @@ import (
 	"github.com/pkg/errors"
 )
 
+const (
+	// maxNoiseMs is the maximum amount of milliseconds to randomly add to a wait interval.
+	maxNoiseMs = 100
+	// wait at most 2 minutes
+	maxWaitMs = 120000
+)
+
+// Allow some random jitter for retry durations
+func init() {
+	rand.Seed(time.Now().UTC().UnixNano())
+}
+
 // Device encapsulates the possible commands to the AMD SEV guest device.
 type Device interface {
 	Open(path string) error
 	Close() error
 	Ioctl(command uintptr, argument any) (uintptr, error)
+	// Timeout is the maximum amount of time in a request can take before erroring.
+	// 0 means no timeout.
+	Timeout() time.Duration
+}
+
+type backoff struct {
+	attempts  int
+	totalWait time.Duration
+	limit     time.Duration
+}
+
+func (b *backoff) wait() error {
+	b.attempts++
+	if b.attempts == 1 {
+		return nil
+	}
+	millis := uint32(maxWaitMs)
+	if b.attempts < 16 {
+		noise := uint32(rand.Intn(maxNoiseMs))
+		millis = (1 << b.attempts) + noise
+	}
+	if millis > maxWaitMs {
+		millis = maxWaitMs
+	}
+	b.totalWait += time.Duration(millis) * time.Millisecond
+	if b.limit > 0 && b.totalWait > b.limit {
+		return errors.New("timed out")
+	}
+	time.Sleep(time.Duration(millis) * time.Millisecond)
+	return nil
 }
 
 func message(d Device, command uintptr, req *labi.SnpUserGuestRequest) error {
-	result, err := d.Ioctl(command, req)
-	if err != nil {
-		return err
+	b := &backoff{limit: d.Timeout()}
+	for {
+		_, err := d.Ioctl(command, req)
+
+		if err != nil {
+			if err.(*labi.RetryErr) != nil {
+				if err := b.wait(); err != nil {
+					return err
+				}
+				continue
+			}
+			return err
+		}
+		if req.FwErr != 0 {
+			return abi.SevFirmwareErr{Status: abi.SevFirmwareStatus(req.FwErr)}
+		}
+		if req.VmmErr != 0 {
+			return abi.GuestRequestVmmErr{Status: req.VmmErr}
+		}
+		return nil
 	}
-	if result != uintptr(labi.EsOk) {
-		return labi.SevEsErr{Result: labi.EsResult(result)}
-	}
-	if req.FwErr != 0 {
-		return abi.SevFirmwareErr{Status: abi.SevFirmwareStatus(req.FwErr)}
-	}
-	return nil
 }
 
 // GetRawReportAtVmpl requests for an attestation report at the given VMPL that incorporates the
@@ -101,8 +155,8 @@ func getExtendedReportIn(d Device, reportData [64]byte, vmpl int, certs []byte) 
 	}
 	// Query the length required for certs.
 	if err := message(d, labi.IocSnpGetExtendedReport, &userGuestReq); err != nil {
-		var fwErr abi.SevFirmwareErr
-		if errors.As(err, &fwErr) && fwErr.Status == abi.GuestRequestInvalidLength {
+		var vmmErr abi.GuestRequestVmmErr
+		if errors.As(err, &vmmErr) && vmmErr.Status == abi.GuestRequestVmmErrInvalidLength {
 			return nil, snpExtReportReq.CertsLength, nil
 		}
 		return nil, 0, err

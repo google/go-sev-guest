@@ -109,6 +109,44 @@ const (
 	ExpectedReportVersion = 2
 )
 
+// GuestRequestVmmErrorStatus is the type of VMM error codes that are returned from a guest request.
+type GuestRequestVmmErrorStatus uint32
+
+const (
+	// VmmErrOk indicates that there are no VMM errors.
+	GuestRequestVmmOk GuestRequestVmmErrorStatus = iota
+	// GuestRequestVmmErrInvalidLen is a GHCB-specified value that
+	// the VMM can return in the upper 32 bits of EXIT_INFO_2
+	// during an extended guest request. This error indicates that
+	// the data buffer provided is not large enough to receive the
+	// data installed provided from the host device.
+	GuestRequestVmmErrInvalidLength = 1
+	// GuestRequestVmmErrBusy is a GHCB-specified value that the
+	// VMM can return in the upper 32 bits of EXIT_INFO_2 during a
+	// guest request. We use this error to retry messages after
+	// waiting an increasing amount of time.
+	GuestRequestVmmErrBusy = 2
+)
+
+// GuestRequestVmmErr is an error type for SevKvmErrStatus.
+type GuestRequestVmmErr struct {
+	error
+	Status GuestRequestVmmErrorStatus
+}
+
+func (e GuestRequestVmmErr) Error() string {
+	switch e.Status {
+	case GuestRequestVmmOk:
+		return "success"
+	case GuestRequestVmmErrInvalidLength:
+		return "data buffer length invalid"
+	case GuestRequestVmmErrBusy:
+		return "throttled"
+	default:
+		return fmt.Sprintf("[unknown: %d]", uint32(e.Status))
+	}
+}
+
 // CertTableHeaderEntry defines an entry of the beginning of an extended attestation report which
 // points to a specific key's certificate.
 type CertTableHeaderEntry struct {

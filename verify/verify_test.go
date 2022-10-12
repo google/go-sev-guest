@@ -149,10 +149,10 @@ func TestSnpReportSignature(t *testing.T) {
 	for _, tc := range tests {
 		// Does the Raw report match expectations?
 		raw, err := sg.GetRawReport(d, tc.Input)
-		if err != tc.WantErr {
+		if !tc.Expect(err) {
 			t.Fatalf("GetRawReport(d, %v) = %v, %v. Want err: %v", tc.Input, raw, err, tc.WantErr)
 		}
-		if tc.WantErr == nil {
+		if tc.WantErr == "" {
 			got := abi.SignedComponent(raw)
 			want := abi.SignedComponent(tc.Output[:])
 			if !bytes.Equal(got, want) {
@@ -407,10 +407,10 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 		}}}}
 	for _, tc := range tests {
 		ereport, err := sg.GetExtendedReport(d, tc.Input)
-		if err != tc.WantErr {
+		if !tc.Expect(err) {
 			t.Fatalf("%s: GetExtendedReport(d, %v) = %v, %v. Want err: %v", tc.Name, tc.Input, ereport, err, tc.WantErr)
 		}
-		if tc.WantErr == nil {
+		if tc.WantErr == "" {
 			if err := SnpAttestation(ereport, options); err != nil {
 				t.Errorf("SnpAttestation(%v) errored unexpectedly: %v", ereport, err)
 			}
