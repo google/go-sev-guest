@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// +build darwin
+//go:build darwin
 
 package client
 
@@ -39,6 +39,6 @@ func (d *MacOSDevice) Close() error {
 }
 
 // Ioctl is not supported on MacOS.
-func (d *MacOSDevice) Ioctl(command uintptr, req interface{}) (uintptr, error) {
+func (d *MacOSDevice) Ioctl(command uintptr, req any) (uintptr, error) {
 	return 0, fmt.Errorf("MacOS is unsupported")
 }

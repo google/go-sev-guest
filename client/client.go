@@ -27,7 +27,7 @@ import (
 type Device interface {
 	Open(path string) error
 	Close() error
-	Ioctl(command uintptr, argument interface{}) (uintptr, error)
+	Ioctl(command uintptr, argument any) (uintptr, error)
 }
 
 func message(d Device, command uintptr, req *labi.SnpUserGuestRequest) error {
