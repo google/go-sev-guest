@@ -33,7 +33,7 @@ type GetReportResponse struct {
 // Device represents a sev-guest driver implementation with pre-programmed responses to commands.
 type Device struct {
 	isOpen        bool
-	ReportDataRsp map[string]interface{}
+	ReportDataRsp map[string]any
 	Keys          map[string][]byte
 	Certs         []byte
 	Signer        *AmdSigner
@@ -118,7 +118,7 @@ func (d *Device) getDerivedKey(req *labi.SnpDerivedKeyReqABI, rsp *labi.SnpDeriv
 }
 
 // Ioctl mocks commands with pre-specified responses for a finite number of requests.
-func (d *Device) Ioctl(command uintptr, req interface{}) (uintptr, error) {
+func (d *Device) Ioctl(command uintptr, req any) (uintptr, error) {
 	switch sreq := req.(type) {
 	case *labi.SnpUserGuestRequest:
 		switch command {

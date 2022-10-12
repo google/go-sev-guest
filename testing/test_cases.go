@@ -169,7 +169,7 @@ func TcDevice(tcs []TestCase, opts *DeviceOptions) (*Device, error) {
 	if err != nil {
 		return nil, fmt.Errorf("test failure creating certificates: %v", err)
 	}
-	responses := map[string]interface{}{}
+	responses := map[string]any{}
 	for _, tc := range tcs {
 		responses[hex.EncodeToString(tc.Input[:])] = &GetReportResponse{
 			Resp:     labi.SnpReportRespABI{Data: tc.Output},

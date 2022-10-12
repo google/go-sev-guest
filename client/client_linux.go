@@ -13,7 +13,6 @@
 // limitations under the License.
 
 //go:build linux || freebsd || openbsd || netbsd
-// +build linux freebsd openbsd netbsd
 
 // Package client provides an interface to the AMD SEV-SNP guest device commands.
 package client
@@ -64,7 +63,7 @@ func (d *LinuxDevice) Close() error {
 }
 
 // Ioctl sends a command with its wrapped request and response values to the Linux device.
-func (d *LinuxDevice) Ioctl(command uintptr, req interface{}) (uintptr, error) {
+func (d *LinuxDevice) Ioctl(command uintptr, req any) (uintptr, error) {
 	switch sreq := req.(type) {
 	case *labi.SnpUserGuestRequest:
 		abi := sreq.ABI()

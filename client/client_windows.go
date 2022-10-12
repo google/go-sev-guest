@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// +build windows
+//go:build windows
 
 package client
 
@@ -39,7 +39,7 @@ func (d *WindowsDevice) Close() error {
 }
 
 // Ioctl is not supported on Windows.
-func (d *WindowsDevice) Ioctl(command uintptr, req interface{}) (uintptr, error) {
+func (d *WindowsDevice) Ioctl(command uintptr, req any) (uintptr, error) {
 	// The GuestAttestation library on Windows is closed source.
 	return 0, fmt.Errorf("Windows is unsupported")
 }
