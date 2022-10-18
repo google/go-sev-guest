@@ -33,13 +33,16 @@ type Device interface {
 func message(d Device, command uintptr, req *labi.SnpUserGuestRequest) error {
 	result, err := d.Ioctl(command, req)
 	if err != nil {
+		// The ioctl could have failed with a firmware error that
+		// indicates a problem certificate length. We need to
+		// communicate that specifically.
+		if req.FwErr != 0 {
+			return abi.SevFirmwareErr{Status: abi.SevFirmwareStatus(req.FwErr)}
+		}
 		return err
 	}
 	if result != uintptr(labi.EsOk) {
 		return labi.SevEsErr{Result: labi.EsResult(result)}
-	}
-	if req.FwErr != 0 {
-		return abi.SevFirmwareErr{Status: abi.SevFirmwareStatus(req.FwErr)}
 	}
 	return nil
 }

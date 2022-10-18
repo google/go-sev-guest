@@ -17,10 +17,12 @@ package testing
 import (
 	"encoding/hex"
 	"fmt"
+	"syscall"
 
 	"github.com/google/go-sev-guest/abi"
 	labi "github.com/google/go-sev-guest/client/linuxabi"
 	"github.com/pkg/errors"
+	"golang.org/x/sys/unix"
 )
 
 // GetReportResponse represents a mocked response to a command request.
@@ -69,7 +71,7 @@ func (d *Device) getReport(req *labi.SnpReportReqABI, rsp *labi.SnpReportRespABI
 	esResult := uintptr(mockRsp.EsResult)
 	if mockRsp.FwErr != 0 {
 		*fwErr = uint64(mockRsp.FwErr)
-		return esResult, nil
+		return esResult, syscall.Errno(unix.EIO)
 	}
 	report := mockRsp.Resp.Data[:abi.ReportSize]
 	r, s, err := d.Signer.Sign(abi.SignedComponent(report))
@@ -87,7 +89,7 @@ func (d *Device) getExtReport(req *labi.SnpExtendedReportReq, rsp *labi.SnpRepor
 	if req.CertsLength == 0 {
 		*fwErr = uint64(abi.GuestRequestInvalidLength)
 		req.CertsLength = uint32(len(d.Certs))
-		return 0, nil
+		return 0, syscall.Errno(unix.EIO)
 	}
 	ret, err := d.getReport(&req.Data, rsp, fwErr)
 	if err != nil {
