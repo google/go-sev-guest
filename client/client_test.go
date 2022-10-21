@@ -37,7 +37,7 @@ var tests []test.TestCase
 // Initializing a device with key generation is expensive. Just do it once for the test suite.
 func initDevice() {
 	now := time.Date(2022, time.May, 3, 9, 0, 0, 0, time.UTC)
-	tests := test.TestCases()
+	tests = test.TestCases()
 	ones32 := make([]byte, 32)
 	for i := range ones32 {
 		ones32[i] = 1
