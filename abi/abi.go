@@ -22,11 +22,11 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/golang/glog"
 	pb "github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/pborman/uuid"
 	"golang.org/x/crypto/cryptobyte"
 	"golang.org/x/crypto/cryptobyte/asn1"
+	klog "k8s.io/klog/v2"
 )
 
 const (
@@ -676,15 +676,15 @@ func (c *CertTable) Proto() *pb.CertificateChain {
 	var err error
 	vcek, err = c.GetByGUIDString(VcekGUID)
 	if err != nil {
-		glog.Warningf("VCEK certificate not found in data pages: %v", err)
+		klog.Warningf("VCEK certificate not found in data pages: %v", err)
 	}
 	ask, err = c.GetByGUIDString(AskGUID)
 	if err != nil {
-		glog.Warningf("ASK certificate not found in data pages: %v", err)
+		klog.Warningf("ASK certificate not found in data pages: %v", err)
 	}
 	ark, err = c.GetByGUIDString(ArkGUID)
 	if err != nil {
-		glog.Warningf("ARK certificate not found in data pages: %v", err)
+		klog.Warningf("ARK certificate not found in data pages: %v", err)
 	}
 	return &pb.CertificateChain{
 		VcekCert: vcek,
