@@ -28,13 +28,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/glog"
 	"github.com/google/go-sev-guest/abi"
 	"github.com/google/go-sev-guest/kds"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/pborman/uuid"
 	"github.com/pkg/errors"
 	"go.uber.org/multierr"
+	klog "k8s.io/klog/v2"
 )
 
 var (
@@ -112,7 +112,7 @@ func (r *AMDRootCerts) FromDER(ask []byte, ark []byte) error {
 
 	arkCert, err := x509.ParseCertificate(ark)
 	if err != nil {
-		glog.Errorf("could not parse ARK certificate: %v", err)
+		klog.Errorf("could not parse ARK certificate: %v", err)
 	}
 	r.ArkX509 = arkCert
 	return nil
