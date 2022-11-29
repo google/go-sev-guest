@@ -23,9 +23,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/google/go-sev-guest/abi"
 	"github.com/google/go-sev-guest/kds"
+	cpb "github.com/google/go-sev-guest/proto/check"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
 	"go.uber.org/multierr"
 )
@@ -34,6 +37,8 @@ import (
 type Options struct {
 	// GuestPolicy is the maximum of acceptable guest policies.
 	GuestPolicy abi.SnpPolicy
+	// MinimumGuestSvn is the minimum guest security version number.
+	MinimumGuestSvn uint32
 	// ReportData is the expected REPORT_DATA field. Must be nil or 64 bytes long. Not checked if nil.
 	ReportData []byte
 	// HostData is the expected HOST_DATA field. Must be nil or 32 bytes long. Not checked if nil.
@@ -66,7 +71,10 @@ type Options struct {
 	// PlatformInfo is the maximum of acceptable PLATFORM_INFO data. Not checked if nil.
 	PlatformInfo *abi.SnpPlatformInfo
 	// RequireAuthorKey if true, will not validate a report without AUTHOR_KEY_EN equal to 1.
+	// Implies RequireIDBlock is true.
 	RequireAuthorKey bool
+	// VMPL is the expected VMPL value, 0-3. Unchecked if nil.
+	VMPL *int
 	// RequireIDBlock if true, will not validate a report if it does not have an ID_KEY_DIGEST that
 	// is trusted through all keys in TrustedIDKeys or TrustedIDKeyHashes, or any ID key whose hash
 	// was signed by a key in TrustedAuthorKeys or TrustedIDKeyHashes. No signatures are checked,
@@ -85,6 +93,142 @@ type Options struct {
 	// TrustedIDKeyHashes is an array of SHA-384 hashes of trusted ID signer keys's public key in
 	// SEV-SNP API format. Not required if TrustedKeyKeys is provided.
 	TrustedIDKeyHashes [][]byte
+}
+
+func lengthCheck(name string, length int, value []byte) error {
+	if value != nil && len(value) != length {
+		return fmt.Errorf("option %q length is %d. Want %d", name, len(value), length)
+	}
+	return nil
+}
+
+func checkOptionsLengths(opts *Options) error {
+	if err := multierr.Combine(
+		lengthCheck("family_id", abi.FamilyIDSize, opts.FamilyID),
+		lengthCheck("image_id", abi.ImageIDSize, opts.ImageID),
+		lengthCheck("report_data", abi.ReportDataSize, opts.ReportData),
+		lengthCheck("measurement", abi.MeasurementSize, opts.Measurement),
+		lengthCheck("host_data", abi.HostDataSize, opts.HostData),
+		lengthCheck("report_id", abi.ReportIDSize, opts.ReportID),
+		lengthCheck("report_id_ma", abi.ReportIDMASize, opts.ReportIDMA),
+		lengthCheck("chip_id", abi.ChipIDSize, opts.ChipID)); err != nil {
+		return err
+	}
+	return nil
+}
+
+// Converts "maj.min" to its uint16 representation or errors.
+func parseVersion(v string) (uint16, error) {
+	parseU8 := func(name, s string) (uint8, error) {
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			return 0, fmt.Errorf("error parsing %s number: %v", name, err)
+		}
+		if n < 0 || n > 255 {
+			return 0, fmt.Errorf("%s is %d, which is not a uint8", name, n)
+		}
+		return uint8(n), nil
+	}
+	parts := strings.Split(v, ".")
+	if len(parts) != 2 {
+		return 0, fmt.Errorf("expect major.minor, got %q", v)
+	}
+	maj, err := parseU8("major", parts[0])
+	if err != nil {
+		return 0, err
+	}
+	min, err := parseU8("minor", parts[1])
+	if err != nil {
+		return 0, err
+	}
+	return (uint16(maj) << 8) | uint16(min), nil
+}
+
+// PolicyToOptions returns an Options object that is represented by a Policy message.
+func PolicyToOptions(policy *cpb.Policy) (*Options, error) {
+	guestPolicy, err := abi.ParseSnpPolicy(policy.GetPolicy())
+	if err != nil {
+		return nil, err
+	}
+	var platformInfo *abi.SnpPlatformInfo
+	if policy.GetPlatformInfo() != nil {
+		platformInfoValue, err := abi.ParseSnpPlatformInfo(policy.GetPlatformInfo().GetValue())
+		if err != nil {
+			return nil, err
+		}
+		platformInfo = &platformInfoValue
+	}
+	var vmpl *int
+	if policy.GetVmpl() != nil {
+		vmplUint32 := policy.GetVmpl().GetValue()
+		if vmplUint32 > 3 {
+			return nil, fmt.Errorf("vmpl is %d. Expect 0-3", vmplUint32)
+		}
+		vmplInt := int(vmplUint32)
+		vmpl = &vmplInt
+	}
+	if policy.GetMinimumBuild() > 255 {
+		return nil, fmt.Errorf("minimum_build is %d. Expect 0-255", policy.GetMinimumBuild())
+	}
+	minVersion, err := parseVersion(policy.GetMinimumVersion())
+	if err != nil {
+		return nil, fmt.Errorf("invalid minimum_version, %q: %v", policy.GetMinimumVersion(), err)
+	}
+	for _, authorKeyHash := range policy.GetTrustedAuthorKeyHashes() {
+		if err := lengthCheck("trusted_author_key_hashes", abi.AuthorKeyDigestSize, authorKeyHash); err != nil {
+			return nil, err
+		}
+	}
+	for _, idKeyHash := range policy.GetTrustedIdKeyHashes() {
+		if err := lengthCheck("trusted_id_key_hashes", abi.IDKeyDigestSize, idKeyHash); err != nil {
+			return nil, err
+		}
+	}
+	parseCerts := func(name string, certs [][]byte) (result []*x509.Certificate, _ error) {
+		for _, certBytes := range certs {
+			cert, err := x509.ParseCertificate(certBytes)
+			if err != nil {
+				return nil, fmt.Errorf("could not parse %s key certificate: %v", name, err)
+			}
+			result = append(result, cert)
+		}
+		return result, nil
+	}
+	authorKeys, err := parseCerts("author", policy.GetTrustedAuthorKeys())
+	if err != nil {
+		return nil, err
+	}
+	idKeys, err := parseCerts("id", policy.GetTrustedIdKeys())
+	if err != nil {
+		return nil, err
+	}
+	opts := &Options{
+		MinimumGuestSvn:           policy.GetMinimumGuestSvn(),
+		GuestPolicy:               guestPolicy,
+		FamilyID:                  policy.GetFamilyId(),
+		ImageID:                   policy.GetImageId(),
+		ReportID:                  policy.GetReportId(),
+		ReportIDMA:                policy.GetReportIdMa(),
+		Measurement:               policy.GetMeasurement(),
+		ReportData:                policy.GetReportData(),
+		PlatformInfo:              platformInfo,
+		MinimumTCB:                kds.DecomposeTCBVersion(kds.TCBVersion(policy.GetMinimumTcb())),
+		MinimumLaunchTCB:          kds.DecomposeTCBVersion(kds.TCBVersion(policy.GetMinimumLaunchTcb())),
+		MinimumBuild:              uint8(policy.GetMinimumBuild()),
+		MinimumVersion:            minVersion,
+		RequireAuthorKey:          policy.GetRequireAuthorKey(),
+		RequireIDBlock:            policy.GetRequireIdBlock(),
+		PermitProvisionalFirmware: policy.GetPermitProvisionalFirmware(),
+		TrustedAuthorKeys:         authorKeys,
+		TrustedAuthorKeyHashes:    policy.GetTrustedAuthorKeyHashes(),
+		TrustedIDKeys:             idKeys,
+		TrustedIDKeyHashes:        policy.GetTrustedIdKeyHashes(),
+		VMPL:                      vmpl,
+	}
+	if err := checkOptionsLengths(opts); err != nil {
+		return nil, err
+	}
+	return opts, nil
 }
 
 // <0 if p0 < p1. 0 if p0 = p1. >0 if p0 > p1.
@@ -321,7 +465,9 @@ func validateKeys(report *spb.Report, options *Options) error {
 		return errors.New("author key missing when required")
 	}
 
-	if !options.RequireIDBlock {
+	// RequireAuthorKey implies RequireIDBlock.
+	idblock := options.RequireAuthorKey || options.RequireIDBlock
+	if !idblock {
 		return nil
 	}
 
@@ -364,6 +510,11 @@ func validateSnpAttestation(report *spb.Report, vcek []byte, options *Options) e
 		return fmt.Errorf("could not get VCEK certificate extensions: %v", err)
 	}
 
+	if report.GetGuestSvn() < options.MinimumGuestSvn {
+		return fmt.Errorf("report's GUEST_SVN %d is less than the required minimum %d",
+			report.GetGuestSvn(), options.MinimumGuestSvn)
+	}
+
 	if err := multierr.Combine(
 		validatePolicy(report.GetPolicy(), options.GuestPolicy),
 		validateVerbatimFields(report, options),
@@ -372,6 +523,10 @@ func validateSnpAttestation(report *spb.Report, vcek []byte, options *Options) e
 		validatePlatformInfo(report.GetPlatformInfo(), options.PlatformInfo),
 		validateKeys(report, options)); err != nil {
 		return err
+	}
+
+	if options.VMPL != nil && uint32(*options.VMPL) != report.GetVmpl() {
+		return fmt.Errorf("report VMPL %d is not %d", report.GetVmpl(), *options.VMPL)
 	}
 
 	// MaskChipId might be 1 for the host, so only check if the the CHIP_ID is not all zeros.

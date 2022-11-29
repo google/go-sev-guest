@@ -30,6 +30,7 @@ import (
 
 	"github.com/google/go-sev-guest/abi"
 	"github.com/google/go-sev-guest/kds"
+	cpb "github.com/google/go-sev-guest/proto/check"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/google/logger"
 	"github.com/pborman/uuid"
@@ -444,7 +445,7 @@ func VcekDER(vcek []byte, ask []byte, ark []byte, options *Options) (*x509.Certi
 	}
 	roots := options.TrustedRoots
 	product := vcekProductMap[exts.ProductName]
-	if roots == nil {
+	if len(roots) == 0 {
 		root := &AMDRootCerts{
 			Product: product,
 			// Require that the root matches embedded root certs.
@@ -519,6 +520,39 @@ type Options struct {
 	TrustedRoots map[string][]*AMDRootCerts
 }
 
+func getTrustedRoots(rot *cpb.RootOfTrust) (map[string][]*AMDRootCerts, error) {
+	result := map[string][]*AMDRootCerts{}
+	for _, path := range rot.CabundlePaths {
+		root := &AMDRootCerts{Product: rot.Product}
+		if err := root.FromKDSCert(path); err != nil {
+			return nil, fmt.Errorf("could not parse CA bundle %q: %v", path, err)
+		}
+		result[rot.Product] = append(result[rot.Product], root)
+	}
+	for _, cabundle := range rot.Cabundles {
+		root := &AMDRootCerts{Product: rot.Product}
+		if err := root.FromKDSCertBytes([]byte(cabundle)); err != nil {
+			return nil, fmt.Errorf("could not parse CA bundle bytes: %v", err)
+		}
+		result[rot.Product] = append(result[rot.Product], root)
+	}
+	return result, nil
+}
+
+// RootOfTrustToOptions translates the RootOfTrust message into the Options type needed
+// for driving an attestation verification.
+func RootOfTrustToOptions(rot *cpb.RootOfTrust) (*Options, error) {
+	trustedRoots, err := getTrustedRoots(rot)
+	if err != nil {
+		return nil, err
+	}
+	return &Options{
+		CheckRevocations:    rot.CheckCrl,
+		DisableCertFetching: rot.DisallowNetwork,
+		TrustedRoots:        trustedRoots,
+	}, nil
+}
+
 // SnpAttestation verifies the protobuf representation of an attestation report's signature based
 // on the report's SignatureAlgo, provided the certificate chain is valid.
 func SnpAttestation(attestation *spb.Attestation, options *Options) error {
@@ -559,7 +593,7 @@ func (n *SimpleHTTPSGetter) Get(url string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	} else if resp.StatusCode >= 300 {
-		return nil, errors.New("failed to retrieve CRL")
+		return nil, fmt.Errorf("failed to retrieve %s", url)
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -637,7 +671,7 @@ func SnpReport(report *spb.Report, options *Options) error {
 	}
 	attestation, err := GetAttestationFromReport(report, options.Getter)
 	if err != nil {
-		return fmt.Errorf("could not recreate attestation from report: %v", err)
+		return fmt.Errorf("could not recreate attestation from report: %w", err)
 	}
 	return SnpAttestation(attestation, options)
 }

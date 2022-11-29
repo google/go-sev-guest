@@ -38,8 +38,7 @@ const (
 )
 
 // Report represents an SEV-SNP ATTESTATION_REPORT, specified in SEV SNP API
-//
-//	documentation https://www.amd.com/system/files/TechDocs/56860.pdf
+//  documentation https://www.amd.com/system/files/TechDocs/56860.pdf
 type Report struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
