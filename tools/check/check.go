@@ -1,3 +1,17 @@
+// Copyright 2022 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // Package main implements a CLI tool for checking SEV-SNP attestation reports.
 package main
 
@@ -11,7 +25,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/golang/protobuf/ptypes/wrappers"
 	"github.com/google/go-sev-guest/abi"
 	checkpb "github.com/google/go-sev-guest/proto/check"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
@@ -360,7 +373,7 @@ func setUInt64Value(value **wrapperspb.UInt64Value, name, flag string) error {
 func setUInt32Value(value **wrapperspb.UInt32Value, name, flag string) error {
 	v, err := getUIntValue(32, name, flag)
 	if v != nil {
-		*value = &wrappers.UInt32Value{Value: uint32(*v)}
+		*value = &wrapperspb.UInt32Value{Value: uint32(*v)}
 	}
 	return err
 }
