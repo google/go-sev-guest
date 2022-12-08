@@ -53,6 +53,10 @@ type AmdSigner struct {
 	Ask  *x509.Certificate
 	Vcek *x509.Certificate
 	Keys *AmdKeys
+	// This identity does not match AMD's notion of an HWID. It is purely to combine expectations of
+	// report data -> KDS URL construction for the fake KDS implementation.
+	HWID [abi.ChipIDSize]byte
+	TCB  kds.TCBVersion
 }
 
 // AmdKeys encapsulates the key chain of ARK through ASK down to VCEK.
@@ -104,6 +108,8 @@ type AmdSignerBuilder struct {
 	ArkCustom        CertOverride
 	AskCustom        CertOverride
 	VcekCustom       CertOverride
+	HWID             [abi.ChipIDSize]byte
+	TCB              kds.TCBVersion
 	// Intermediate built certificates
 	Ark  *x509.Certificate
 	Ask  *x509.Certificate
@@ -316,12 +322,15 @@ func (b *AmdSignerBuilder) CertChain() (*AmdSigner, error) {
 	if err := b.certifyVcek(); err != nil {
 		return nil, fmt.Errorf("vcek creation error: %v", err)
 	}
-	return &AmdSigner{
+	s := &AmdSigner{
 		Ark:  b.Ark,
 		Ask:  b.Ask,
 		Vcek: b.Vcek,
 		Keys: b.Keys,
-	}, nil
+		TCB:  b.TCB,
+	}
+	copy(s.HWID[:], b.HWID[:])
+	return s, nil
 }
 
 // DefaultCertChain creates a test-only certificate chain for a fake attestation signer.

@@ -18,22 +18,14 @@ package client
 import (
 	"testing"
 
-	"flag"
-
 	"github.com/google/go-sev-guest/client"
 	test "github.com/google/go-sev-guest/testing"
 	"github.com/google/go-sev-guest/verify/trust"
 )
 
-var sevGuestPath = flag.String("sev_guest_device_path", "", "Path to Linux SEV guest device (i.e., /dev/sev-guest). Empty value (default) will run tests against a fake.")
-
-func useRealSevGuest() bool {
-	return *sevGuestPath != ""
-}
-
-func getRealSevGuest() (client.Device, error) {
-	result := &client.LinuxDevice{}
-	return result, result.Open(*sevGuestPath)
+// SkipUnmockableTestCase returns whether we have to skip a mocked failure test case on real hardware.
+func SkipUnmockableTestCase(tc *test.TestCase) bool {
+	return !client.UseDefaultSevGuest() && tc.FwErr != 0
 }
 
 // GetSevGuest is a cross-platform testing helper function that retrives the
@@ -42,9 +34,9 @@ func getRealSevGuest() (client.Device, error) {
 // If using a test guest device, this will also produce a fake AMD-SP that produces the signed
 // versions of given attestation reports based on different nonce input. Its returned roots of trust
 // are based on the fake's signing credentials.
-func GetSevGuest(tcs []test.TestCase, opts *test.DeviceOptions, tb testing.TB) (client.Device, map[string][]*trust.AMDRootCerts, map[string][]*trust.AMDRootCerts) {
+func GetSevGuest(tcs []test.TestCase, opts *test.DeviceOptions, tb testing.TB) (client.Device, map[string][]*trust.AMDRootCerts, map[string][]*trust.AMDRootCerts, trust.HTTPSGetter) {
 	tb.Helper()
-	if !useRealSevGuest() {
+	if client.UseDefaultSevGuest() {
 		sevTestDevice, err := test.TcDevice(tcs, opts)
 		if err != nil {
 			tb.Fatalf("failed to create test device: %v", err)
@@ -68,17 +60,21 @@ func GetSevGuest(tcs []test.TestCase, opts *test.DeviceOptions, tb testing.TB) (
 				},
 			},
 		}
-		return sevTestDevice, goodSnpRoot, badSnpRoot
+		fakekds, err := test.FakeKDSFromSigner(sevTestDevice.Signer)
+		if err != nil {
+			tb.Fatalf("failed to create fake KDS from signer: %v", err)
+		}
+		return sevTestDevice, goodSnpRoot, badSnpRoot, fakekds
 	}
 
-	client, err := getRealSevGuest()
+	client, err := client.OpenDevice()
 	if err != nil {
 		tb.Fatalf("Failed to open SEV guest device: %v", err)
 	}
 	badSnpRoot := make(map[string][]*trust.AMDRootCerts)
 	for product, rootCerts := range trust.DefaultRootCerts {
 		// By flipping the ASK and ARK, we ensure that the attestation will never verify.
-		badSnpRoot[product] = []*trust.AMDRootCerts{&trust.AMDRootCerts{
+		badSnpRoot[product] = []*trust.AMDRootCerts{{
 			Product: product,
 			ArkX509: rootCerts.AskX509,
 			AskX509: rootCerts.ArkX509,
@@ -86,5 +82,5 @@ func GetSevGuest(tcs []test.TestCase, opts *test.DeviceOptions, tb testing.TB) (
 			ArkSev:  rootCerts.AskSev,
 		}}
 	}
-	return client, nil, badSnpRoot
+	return client, nil, badSnpRoot, test.GetKDS(tb)
 }

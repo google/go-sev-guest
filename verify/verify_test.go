@@ -30,6 +30,7 @@ import (
 	"github.com/google/go-sev-guest/abi"
 	sg "github.com/google/go-sev-guest/client"
 	"github.com/google/go-sev-guest/kds"
+	pb "github.com/google/go-sev-guest/proto/sevsnp"
 	test "github.com/google/go-sev-guest/testing"
 	testclient "github.com/google/go-sev-guest/testing/client"
 	"github.com/google/go-sev-guest/verify/trust"
@@ -149,6 +150,9 @@ func TestSnpReportSignature(t *testing.T) {
 	}
 	defer d.Close()
 	for _, tc := range tests {
+		if testclient.SkipUnmockableTestCase(&tc) {
+			continue
+		}
 		// Does the Raw report match expectations?
 		raw, err := sg.GetRawReport(d, tc.Input)
 		if err != tc.WantErr {
@@ -392,18 +396,43 @@ func TestCRLRootValidity(t *testing.T) {
 
 func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 	tests := test.TestCases()
-	d, goodRoots, _ := testclient.GetSevGuest(tests, &test.DeviceOptions{Now: time.Now()}, t)
+	d, goodRoots, _, kds := testclient.GetSevGuest(tests, &test.DeviceOptions{Now: time.Now()}, t)
 	defer d.Close()
+	type reportGetter func(sg.Device, [64]byte) (*pb.Attestation, error)
+	reportGetters := []struct {
+		name   string
+		getter reportGetter
+	}{
+		{
+			name:   "GetExtendedReport",
+			getter: sg.GetExtendedReport,
+		},
+		{
+			name: "GetReport",
+			getter: func(d sg.Device, input [64]byte) (*pb.Attestation, error) {
+				report, err := sg.GetReport(d, input)
+				if err != nil {
+					return nil, err
+				}
+				return &pb.Attestation{Report: report}, nil
+			},
+		},
+	}
 	// Trust the test device's root certs.
-	options := &Options{TrustedRoots: goodRoots}
+	options := &Options{TrustedRoots: goodRoots, Getter: kds}
 	for _, tc := range tests {
-		ereport, err := sg.GetExtendedReport(d, tc.Input)
-		if err != tc.WantErr {
-			t.Fatalf("%s: GetExtendedReport(d, %v) = %v, %v. Want err: %v", tc.Name, tc.Input, ereport, err, tc.WantErr)
+		if testclient.SkipUnmockableTestCase(&tc) {
+			continue
 		}
-		if tc.WantErr == nil {
-			if err := SnpAttestation(ereport, options); err != nil {
-				t.Errorf("SnpAttestation(%v) errored unexpectedly: %v", ereport, err)
+		for _, getReport := range reportGetters {
+			ereport, err := getReport.getter(d, tc.Input)
+			if err != tc.WantErr {
+				t.Fatalf("%s: %s(d, %v) = %v, %v. Want err: %v", tc.Name, getReport.name, tc.Input, ereport, err, tc.WantErr)
+			}
+			if tc.WantErr == nil {
+				if err := SnpAttestation(ereport, options); err != nil {
+					t.Errorf("SnpAttestation(%v) errored unexpectedly: %v", ereport, err)
+				}
 			}
 		}
 	}

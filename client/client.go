@@ -15,6 +15,7 @@
 package client
 
 import (
+	"flag"
 	"fmt"
 
 	"github.com/google/go-sev-guest/abi"
@@ -23,11 +24,19 @@ import (
 	"github.com/pkg/errors"
 )
 
+var sevGuestPath = flag.String("sev_guest_device_path", "default",
+	"Path to SEV guest device. If \"default\", uses platform default or a fake if testing.")
+
 // Device encapsulates the possible commands to the AMD SEV guest device.
 type Device interface {
 	Open(path string) error
 	Close() error
 	Ioctl(command uintptr, argument any) (uintptr, error)
+}
+
+// UseDefaultSevGuest returns true iff -sev_guest_device_path=default.
+func UseDefaultSevGuest() bool {
+	return *sevGuestPath == "default"
 }
 
 func message(d Device, command uintptr, req *labi.SnpUserGuestRequest) error {

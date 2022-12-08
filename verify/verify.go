@@ -20,7 +20,6 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	_ "embed"
 	"fmt"
 	"io"
 	"net/http"
@@ -574,6 +573,10 @@ func fillInAttestation(attestation *spb.Attestation, getter trust.HTTPSGetter) e
 	}
 	report := attestation.GetReport()
 	chain := attestation.GetCertificateChain()
+	if chain == nil {
+		chain = &spb.CertificateChain{}
+		attestation.CertificateChain = chain
+	}
 	if len(chain.GetAskCert()) == 0 || len(chain.GetArkCert()) == 0 {
 		askark, err := getter.Get(kds.ProductCertChainURL(product))
 		if err != nil {

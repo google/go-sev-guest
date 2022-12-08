@@ -22,7 +22,11 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"fmt"
+	"net/url"
+	"strconv"
+	"strings"
 
+	"github.com/google/go-sev-guest/abi"
 	"go.uber.org/multierr"
 )
 
@@ -70,7 +74,9 @@ var (
 	vcekUcodeSpl      = vcekOID{major: 3, minor: 8}
 	vcekHwid          = vcekOID{major: 4}
 
-	kdsBaseURL = "https://kdsintf.amd.com"
+	kdsHostname = "kdsintf.amd.com"
+	kdsBaseURL  = "https://" + kdsHostname
+	kdsVcekPath = "/vcek/v1/"
 )
 
 // TCBVersion is a 64-bit bitfield of different security patch levels of AMD firmware and microcode.
@@ -388,4 +394,109 @@ func VCEKCertURL(product string, hwid []byte, tcb TCBVersion) string {
 		parts.SnpSpl,
 		parts.UcodeSpl,
 	)
+}
+
+// VCEKCert represents the attestation report components represented in a KDS VCEK certificate
+// request URL.
+type VCEKCert struct {
+	Product string
+	HWID    []byte
+	TCB     uint64
+}
+
+// parseBaseProductURL returns the product name for a root certificate chain URL if it is one,
+// with the parsed URL that has the product prefix trimmed.
+func parseBaseProductURL(kdsurl string) (string, *url.URL, error) {
+	u, err := url.Parse(kdsurl)
+	if err != nil {
+		return "", nil, fmt.Errorf("invalid AMD KDS URL %q: %v", kdsurl, err)
+	}
+	if u.Scheme != "https" {
+		return "", nil, fmt.Errorf("unexpected AMD KDS URL scheme %q, want \"https\"", u.Scheme)
+	}
+	if u.Host != kdsHostname {
+		return "", nil, fmt.Errorf("unexpected AMD KDS URL host %q, want %q", u.Host, kdsHostname)
+	}
+	if !strings.HasPrefix(u.Path, kdsVcekPath) {
+		return "", nil, fmt.Errorf("unexpected AMD KDS URL path %q, want prefix %q", u.Path, kdsVcekPath)
+	}
+	function := strings.TrimPrefix(u.Path, kdsVcekPath)
+
+	// The following should be product/endpoint
+	pieces := strings.Split(function, "/")
+	if len(pieces) != 2 {
+		return "", nil, fmt.Errorf("url has unexpected endpoint %q not product/endpoint", function)
+	}
+
+	product := pieces[0]
+	// Set the URL's path to the rest of the path without the API or product prefix.
+	u.Path = pieces[1]
+	return product, u, nil
+}
+
+// ParseProductCertChainURL returns the product name for a KDS cert_chain url, or an error if the
+// input is not a KDS cert_chain url.
+func ParseProductCertChainURL(kdsurl string) (string, error) {
+	product, u, err := parseBaseProductURL(kdsurl)
+	if err != nil {
+		return "", err
+	}
+	if u.Path != "cert_chain" {
+		return "", fmt.Errorf("unexpected AMD KDS URL path %q, want \"cert_chain\"", u.Path)
+	}
+	return product, nil
+}
+
+// ParseVCEKCertURL returns the attestation report components represented in the given KDS VCEK
+// certificate request URL.
+func ParseVCEKCertURL(kdsurl string) (VCEKCert, error) {
+	result := VCEKCert{}
+	product, u, err := parseBaseProductURL(kdsurl)
+	if err != nil {
+		return result, err
+	}
+	result.Product = product
+	hwid, err := hex.DecodeString(u.Path)
+	if err != nil {
+		return result, fmt.Errorf("hwid component of KDS URL is not a hex string: %q", u.Path)
+	}
+	if len(hwid) != abi.ChipIDSize {
+		return result, fmt.Errorf("hwid component of KDS URL has size %d, want %d", len(hwid), abi.ChipIDSize)
+	}
+
+	result.HWID = hwid
+
+	values, err := url.ParseQuery(u.RawQuery)
+	if err != nil {
+		return result, fmt.Errorf("invalid AMD KDS URL query %q: %v", u.RawQuery, err)
+	}
+	parts := TCBParts{}
+	for key, valuelist := range values {
+		var setter func(number uint8)
+		switch key {
+		case "blSPL":
+			setter = func(number uint8) { parts.BlSpl = number }
+		case "teeSPL":
+			setter = func(number uint8) { parts.TeeSpl = number }
+		case "snpSPL":
+			setter = func(number uint8) { parts.SnpSpl = number }
+		case "ucodeSPL":
+			setter = func(number uint8) { parts.UcodeSpl = number }
+		default:
+			return result, fmt.Errorf("unexpected KDS VCEK URL argument %q", key)
+		}
+		for _, val := range valuelist {
+			number, err := strconv.Atoi(val)
+			if err != nil || number < 0 || number > 255 {
+				return result, fmt.Errorf("invalid KDS VCEK URL argument value %q, want a value 0-255", val)
+			}
+			setter(uint8(number))
+		}
+	}
+	tcb, err := ComposeTCBParts(parts)
+	if err != nil {
+		return result, fmt.Errorf("invalid AMD KDS TCB arguments: %v", err)
+	}
+	result.TCB = uint64(tcb)
+	return result, nil
 }

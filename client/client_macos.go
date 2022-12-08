@@ -20,6 +20,9 @@ import (
 	"fmt"
 )
 
+// DefaultSevGuestDevicePath is the platform's usual device path to the SEV guest.
+const DefaultSevGuestDevicePath = "unknown"
+
 // MacOSDevice implements the Device interface with Linux ioctls.
 type MacOSDevice struct{}
 
