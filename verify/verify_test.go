@@ -31,6 +31,8 @@ import (
 	sg "github.com/google/go-sev-guest/client"
 	"github.com/google/go-sev-guest/kds"
 	test "github.com/google/go-sev-guest/testing"
+	testclient "github.com/google/go-sev-guest/testing/client"
+	"github.com/google/go-sev-guest/verify/trust"
 )
 
 // These certificates are committed regardless of its expiration date since we adjust the
@@ -61,11 +63,11 @@ func initSigner() {
 func TestEmbeddedCertsAppendixB3Expectations(t *testing.T) {
 	// https://www.amd.com/system/files/TechDocs/55766_SEV-KM_API_Specification.pdf
 	// Appendix B.1
-	for _, root := range DefaultRootCerts {
-		if err := root.ValidateAskSev(); err != nil {
+	for _, root := range trust.DefaultRootCerts {
+		if err := ValidateAskSev(root); err != nil {
 			t.Errorf("Embedded ASK failed validation: %v", err)
 		}
-		if err := root.ValidateArkSev(); err != nil {
+		if err := ValidateArkSev(root); err != nil {
 			t.Errorf("Embedded ARK failed validation: %v", err)
 		}
 	}
@@ -73,16 +75,16 @@ func TestEmbeddedCertsAppendixB3Expectations(t *testing.T) {
 
 func TestFakeCertsKDSExpectations(t *testing.T) {
 	signMu.Do(initSigner)
-	root := AMDRootCerts{
+	root := &trust.AMDRootCerts{
 		Product: product,
 		ArkX509: signer.Ark,
 		AskX509: signer.Ask,
 		// No ArkSev or AskSev intentionally for test certs.
 	}
-	if err := root.ValidateArkX509(); err != nil {
+	if err := ValidateArkX509(root); err != nil {
 		t.Errorf("fake ARK validation error: %v", err)
 	}
-	if err := root.ValidateAskX509(); err != nil {
+	if err := ValidateAskX509(root); err != nil {
 		t.Errorf("fake ASK validation error: %v", err)
 	}
 }
@@ -100,7 +102,7 @@ func TestParseVcekCert(t *testing.T) {
 func TestVerifyVcekCert(t *testing.T) {
 	// This certificate is committed regardless of its expiration date, but we'll adjust the
 	// CurrentTime to compare against so that the validity with respect to time is always true.
-	root := new(AMDRootCerts)
+	root := new(trust.AMDRootCerts)
 	if err := root.FromKDSCertBytes(milanBytes); err != nil {
 		t.Fatalf("could not read Milan certificate file: %v", err)
 	}
@@ -290,8 +292,8 @@ func TestKdsMetadataLogic(t *testing.T) {
 		}
 		// Trust the test-generated root if the test should pass. Otherwise, other root logic
 		// won't get tested.
-		options := &Options{TrustedRoots: map[string][]*AMDRootCerts{
-			"Milan": {&AMDRootCerts{
+		options := &Options{TrustedRoots: map[string][]*trust.AMDRootCerts{
+			"Milan": {&trust.AMDRootCerts{
 				Product: "Milan",
 				ArkX509: newSigner.Ark,
 				AskX509: newSigner.Ask,
@@ -355,7 +357,7 @@ func TestCRLRootValidity(t *testing.T) {
 		},
 		Number: big.NewInt(1),
 	}
-	root := &AMDRootCerts{
+	root := &trust.AMDRootCerts{
 		Product: "Milan",
 		ArkX509: signer.Ark,
 		AskX509: signer.Ask,
@@ -372,39 +374,28 @@ func TestCRLRootValidity(t *testing.T) {
 		},
 	}
 	wantErr := "CRL is not signed by ARK"
-	if err := root.VcekNotRevoked(g2, signer2.Vcek); err == nil || !strings.Contains(err.Error(), wantErr) {
+	if err := VcekNotRevoked(root, g2, signer2.Vcek); err == nil || !strings.Contains(err.Error(), wantErr) {
 		t.Errorf("Bad Root: VcekNotRevoked(%v) did not error as expected. Got %v, want %v", signer.Vcek, err, wantErr)
 	}
 
 	// Finally try checking a VCEK that's signed by a revoked ASK.
-	root2 := &AMDRootCerts{
+	root2 := &trust.AMDRootCerts{
 		Product: "Milan",
 		ArkX509: signer2.Ark,
 		AskX509: signer2.Ask,
 	}
 	wantErr2 := "ASK was revoked at 2022-06-14 12:01:00 +0000 UTC"
-	if err := root2.VcekNotRevoked(g2, signer2.Vcek); err == nil || !strings.Contains(err.Error(), wantErr2) {
+	if err := VcekNotRevoked(root2, g2, signer2.Vcek); err == nil || !strings.Contains(err.Error(), wantErr2) {
 		t.Errorf("Bad ASK: VcekNotRevoked(%v) did not error as expected. Got %v, want %v", signer.Vcek, err, wantErr2)
 	}
 }
 
 func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 	tests := test.TestCases()
-	d, err := test.TcDevice(tests, &test.DeviceOptions{Now: time.Now()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := d.Open("/dev/sev-guest"); err != nil {
-		t.Error(err)
-	}
+	d, goodRoots, _ := testclient.GetSevGuest(tests, &test.DeviceOptions{Now: time.Now()}, t)
 	defer d.Close()
 	// Trust the test device's root certs.
-	options := &Options{TrustedRoots: map[string][]*AMDRootCerts{
-		"Milan": {&AMDRootCerts{
-			Product: "Milan",
-			ArkX509: d.Signer.Ark,
-			AskX509: d.Signer.Ask,
-		}}}}
+	options := &Options{TrustedRoots: goodRoots}
 	for _, tc := range tests {
 		ereport, err := sg.GetExtendedReport(d, tc.Input)
 		if err != tc.WantErr {
