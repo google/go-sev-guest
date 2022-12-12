@@ -39,7 +39,13 @@
 //
 //	echo 'export PATH=$PATH:$GOPATH/bin' >> $HOME/.bashrc
 //	source $HOME/.bashrc
+//
+// If you see 'google/protobuf/wrappers.proto not found', then you need to
+// similarly set your PROTOC_INSTALL_DIR environment variable to the protoc
+// installation directory which should have the "well-known types" in the
+// include subdirectory.
 package proto
 
-//go:generate protoc --go_out=. --go_opt=module=github.com/google/go-sev-guest/proto check.proto
+//go:generate protoc -I$PROTOC_INSTALL_DIR/include -I=. --go_out=. --go_opt=module=github.com/google/go-sev-guest/proto check.proto
+//go:generate protoc --go_out=. --go_opt=module=github.com/google/go-sev-guest/proto fakekds.proto
 //go:generate protoc --go_out=. --go_opt=module=github.com/google/go-sev-guest/proto sevsnp.proto

@@ -24,6 +24,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// defaultSevGuestDevicePath is the platform's usual device path to the SEV guest.
+const defaultSevGuestDevicePath = "/dev/sev-guest"
+
 // LinuxDevice implements the Device interface with Linux ioctls.
 type LinuxDevice struct {
 	fd int
@@ -43,7 +46,11 @@ func (d *LinuxDevice) Open(path string) error {
 // OpenDevice opens the SEV-SNP guest device.
 func OpenDevice() (*LinuxDevice, error) {
 	result := &LinuxDevice{}
-	if err := result.Open("/dev/sev-guest"); err != nil {
+	path := *sevGuestPath
+	if UseDefaultSevGuest() {
+		path = defaultSevGuestDevicePath
+	}
+	if err := result.Open(path); err != nil {
 		return nil, err
 	}
 	return result, nil

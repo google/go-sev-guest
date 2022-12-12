@@ -20,31 +20,19 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	_ "embed"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"sync"
 	"time"
 
 	"github.com/google/go-sev-guest/abi"
 	"github.com/google/go-sev-guest/kds"
 	cpb "github.com/google/go-sev-guest/proto/check"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
-	"github.com/google/logger"
+	"github.com/google/go-sev-guest/verify/trust"
 	"github.com/pborman/uuid"
 	"github.com/pkg/errors"
 	"go.uber.org/multierr"
-)
-
-var (
-	// The ASK and ARK certificates are embedded since they do not have an expiration date. The KDS
-	// documents them having a lifetime of 25 years. The X.509 certificate that this cert's signature
-	// is over cannot be reconstructed from the SEV certificate format. The X.509 certificate with its
-	// expiration dates is at https://kdsintf.amd.com/vcek/v1/Milan/cert_chain
-	//go:embed data/ask_ark_milan.sevcert
-	askArkMilanBytes []byte
 )
 
 const (
@@ -61,105 +49,6 @@ const (
 // The product should inform what product keys we expect the key to be certified by.
 var vcekProductMap = map[string]string{
 	"Milan-B0": "Milan",
-}
-
-// AMDRootCerts encapsulates the certificates that represent root of trust in AMD.
-type AMDRootCerts struct {
-	// Product is the expected CPU product name, e.g., Milan, Turin, Genoa.
-	Product string
-	// AskX509 is an X.509 certificate for the AMD SEV signing key (ASK)
-	AskX509 *x509.Certificate
-	// ArkX509 is an X.509 certificate for the AMD root key (ARK).
-	ArkX509 *x509.Certificate
-	// AskSev is the AMD certificate representation of the AMD signing key that certifies
-	// versioned chip endoresement keys. If present, the information must match AskX509.
-	AskSev *abi.AskCert
-	// ArkSev is the AMD certificate representation of the self-signed AMD root key that
-	// certifies the AMD signing key. If present, the information must match ArkX509.
-	ArkSev *abi.AskCert
-	// Protects concurrent updates to CRL.
-	mu sync.Mutex
-	// CRL is the certificate revocation list for this AMD product. Populated once, only when a
-	// revocation is checked.
-	CRL *x509.RevocationList
-}
-
-// DefaultRootCerts holds AMD's SEV API certificate format for ASK and ARK keys as published here
-// https://developer.amd.com/wp-content/resources/ask_ark_milan.cert
-var DefaultRootCerts map[string]*AMDRootCerts
-
-// Unmarshal populates ASK and ARK certificates from AMD SEV format certificates in data.
-func (r *AMDRootCerts) Unmarshal(data []byte) error {
-	ask, index, err := abi.ParseAskCert(data)
-	if err != nil {
-		return fmt.Errorf("could not parse ASK certificate in SEV certificate format: %v", err)
-	}
-	r.AskSev = ask
-	ark, _, err := abi.ParseAskCert(data[index:])
-	if err != nil {
-		return fmt.Errorf("could not parse ARK certificate in SEV certificate format: %v", err)
-	}
-	r.ArkSev = ark
-	return nil
-}
-
-// FromDER populates the AMDRootCerts from DER-formatted certificates for both the ASK and the ARK.
-func (r *AMDRootCerts) FromDER(ask []byte, ark []byte) error {
-	askCert, err := x509.ParseCertificate(ask)
-	if err != nil {
-		return fmt.Errorf("could not parse ASK certificate: %v", err)
-	}
-	r.AskX509 = askCert
-
-	arkCert, err := x509.ParseCertificate(ark)
-	if err != nil {
-		logger.Errorf("could not parse ARK certificate: %v", err)
-	}
-	r.ArkX509 = arkCert
-	return nil
-}
-
-// FromKDSCertBytes populates r's AskX509 and ArkX509 certificates from the two PEM-encoded
-// certificates in data. This is the format the Key Distribution Service (KDS) uses, e.g.,
-// https://kdsintf.amd.com/vcek/v1/Milan/cert_chain
-func (r *AMDRootCerts) FromKDSCertBytes(data []byte) error {
-	ask, ark, err := kds.ParseProductCertChain(data)
-	if err != nil {
-		return err
-	}
-	return r.FromDER(ask, ark)
-}
-
-// FromKDSCert populates r's AskX509 and ArkX509 certificates from the certificate format AMD's Key
-// Distribution Service (KDS) uses, e.g., https://kdsintf.amd.com/vcek/v1/Milan/cert_chain
-func (r *AMDRootCerts) FromKDSCert(path string) error {
-	certBytes, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	return r.FromKDSCertBytes(certBytes)
-}
-
-// X509Options returns the ASK and ARK as the only intermediate and root certificates of an x509
-// verification options object, or nil if either key's x509 certificate is not present in r.
-func (r *AMDRootCerts) X509Options() *x509.VerifyOptions {
-	if r.AskX509 == nil || r.ArkX509 == nil {
-		return nil
-	}
-	roots := x509.NewCertPool()
-	roots.AddCert(r.ArkX509)
-	intermediates := x509.NewCertPool()
-	intermediates.AddCert(r.AskX509)
-	return &x509.VerifyOptions{Roots: roots, Intermediates: intermediates}
-}
-
-// Parse ASK, ARK certificates from the embedded AMD certificate file.
-func init() {
-	milanCerts := new(AMDRootCerts)
-	milanCerts.Unmarshal(askArkMilanBytes)
-	DefaultRootCerts = map[string]*AMDRootCerts{
-		"Milan": milanCerts,
-	}
 }
 
 func askVerifiedBy(signee, signer *abi.AskCert, signeeName, signerName string) error {
@@ -234,18 +123,7 @@ func validateAmdLocation(name pkix.Name, role string) error {
 	return nil
 }
 
-func validateCRLlink(x *x509.Certificate, product, role string) error {
-	url := fmt.Sprintf("https://kdsintf.amd.com/vcek/v1/%s/crl", product)
-	if len(x.CRLDistributionPoints) != 1 {
-		return fmt.Errorf("%s has %d CRL distribution points, want 1", role, len(x.CRLDistributionPoints))
-	}
-	if x.CRLDistributionPoints[0] != url {
-		return fmt.Errorf("%s CRL distribution point is '%s', want '%s'", role, x.CRLDistributionPoints[0], url)
-	}
-	return nil
-}
-
-func (r *AMDRootCerts) validateRootX509(x *x509.Certificate, version int, role, cn string) error {
+func validateRootX509(product string, x *x509.Certificate, version int, role, cn string) error {
 	// Additionally check that the X.509 cert's public key matches the SEV format cert.
 	if x == nil {
 		return fmt.Errorf("no X.509 certificate for %s", role)
@@ -263,20 +141,20 @@ func (r *AMDRootCerts) validateRootX509(x *x509.Certificate, version int, role, 
 	if cn != "" && x.Subject.CommonName != cn {
 		return fmt.Errorf("%s common-name is %s. Expected %s", role, x.Subject.CommonName, cn)
 	}
-	return validateCRLlink(x, r.Product, role)
+	return validateCRLlink(x, product, role)
 }
 
 // ValidateAskX509 checks expected metadata about the ASK X.509 certificate. It does not verify the
 // cryptographic signatures.
-func (r *AMDRootCerts) ValidateAskX509() error {
+func ValidateAskX509(r *trust.AMDRootCerts) error {
 	if r == nil {
-		r = DefaultRootCerts["Milan"]
+		r = trust.DefaultRootCerts["Milan"]
 	}
 	var cn string
 	if r.Product != "" {
 		cn = fmt.Sprintf("SEV-%s", r.Product)
 	}
-	if err := r.validateRootX509(r.AskX509, askX509Version, "ASK", cn); err != nil {
+	if err := validateRootX509(r.Product, r.AskX509, askX509Version, "ASK", cn); err != nil {
 		return err
 	}
 	if r.AskSev != nil {
@@ -287,15 +165,15 @@ func (r *AMDRootCerts) ValidateAskX509() error {
 
 // ValidateArkX509 checks expected metadata about the ARK X.509 certificate. It does not verify the
 // cryptographic signatures.
-func (r *AMDRootCerts) ValidateArkX509() error {
+func ValidateArkX509(r *trust.AMDRootCerts) error {
 	if r == nil {
-		r = DefaultRootCerts["Milan"]
+		r = trust.DefaultRootCerts["Milan"]
 	}
 	var cn string
 	if r.Product != "" {
 		cn = fmt.Sprintf("ARK-%s", r.Product)
 	}
-	if err := r.validateRootX509(r.ArkX509, arkX509Version, "ARK", cn); err != nil {
+	if err := validateRootX509(r.Product, r.ArkX509, arkX509Version, "ARK", cn); err != nil {
 		return err
 	}
 	if r.ArkSev != nil {
@@ -319,28 +197,28 @@ func validateRootSev(subject, issuer *abi.AskCert, version, keyUsage uint32, sub
 
 // ValidateAskSev checks ASK SEV format certificate validity according to AMD SEV API Appendix B.3
 // This covers steps 1, 2, and 5
-func (r *AMDRootCerts) ValidateAskSev() error {
+func ValidateAskSev(r *trust.AMDRootCerts) error {
 	if r == nil {
-		r = DefaultRootCerts["Milan"]
+		r = trust.DefaultRootCerts["Milan"]
 	}
 	return validateRootSev(r.AskSev, r.ArkSev, askVersion, askKeyUsage, "ASK", "ARK")
 }
 
 // ValidateArkSev checks ARK certificate validity according to AMD SEV API Appendix B.3
 // This covers steps 5, 6, 9, and 11.
-func (r *AMDRootCerts) ValidateArkSev() error {
+func ValidateArkSev(r *trust.AMDRootCerts) error {
 	if r == nil {
-		r = DefaultRootCerts["Milan"]
+		r = trust.DefaultRootCerts["Milan"]
 	}
 	return validateRootSev(r.ArkSev, r.ArkSev, arkVersion, arkKeyUsage, "ARK", "ARK")
 }
 
 // ValidateX509 will validate the x509 certificates of the ASK and ARK.
-func (r *AMDRootCerts) ValidateX509() error {
-	if err := r.ValidateArkX509(); err != nil {
+func ValidateX509(r *trust.AMDRootCerts) error {
+	if err := ValidateArkX509(r); err != nil {
 		return fmt.Errorf("ARK validation error: %v", err)
 	}
-	if err := r.ValidateAskX509(); err != nil {
+	if err := ValidateAskX509(r); err != nil {
 		return fmt.Errorf("ASK validation error: %v", err)
 	}
 	return nil
@@ -358,13 +236,93 @@ func ValidateVcekCertSubject(subject pkix.Name) error {
 }
 
 // ValidateVcekCertIssuer checks KDS-specified values of the issuer metadata of the AMD certificate.
-func (r *AMDRootCerts) ValidateVcekCertIssuer(issuer pkix.Name) error {
+func ValidateVcekCertIssuer(r *trust.AMDRootCerts, issuer pkix.Name) error {
 	if err := validateAmdLocation(issuer, "VCEK issuer"); err != nil {
 		return err
 	}
 	cn := fmt.Sprintf("SEV-%s", r.Product)
 	if issuer.CommonName != cn {
 		return fmt.Errorf("VCEK certificate issuer common name %s not expected. Expected %s", issuer.CommonName, cn)
+	}
+	return nil
+}
+
+// CRLUnavailableErr represents a problem with fetching the CRL from the network.
+// This type is special to allow for easy "fail open" semantics for CRL unavailability. See
+// Adam Langley's write-up on CRLs and network unreliability
+// https://www.imperialviolet.org/2014/04/19/revchecking.html
+type CRLUnavailableErr struct {
+	error
+}
+
+// GetCrlAndCheckRoot downloads the given cert's CRL from one of the distribution points and
+// verifies that the CRL is valid and doesn't revoke an intermediate key.
+func GetCrlAndCheckRoot(r *trust.AMDRootCerts, getter trust.HTTPSGetter) (*x509.RevocationList, error) {
+	r.Mu.Lock()
+	defer r.Mu.Unlock()
+	if r.CRL != nil && time.Now().Before(r.CRL.NextUpdate) {
+		return r.CRL, nil
+	}
+	var errs error
+	for _, url := range r.AskX509.CRLDistributionPoints {
+		bytes, err := getter.Get(url)
+		if err != nil {
+			errs = multierr.Append(errs, err)
+			continue
+		}
+		crl, err := x509.ParseRevocationList(bytes)
+		if err != nil {
+			errs = multierr.Append(errs, err)
+			continue
+		}
+		r.CRL = crl
+		if err := verifyCRL(r); err != nil {
+			return nil, err
+		}
+		return r.CRL, nil
+	}
+	return nil, CRLUnavailableErr{multierr.Append(errs, errors.New("could not fetch product CRL"))}
+}
+
+// verifyCRL checks that the VCEK CRL is signed by the ARK. Must be called after r.CRL is set and while
+// r.Mu is held.
+func verifyCRL(r *trust.AMDRootCerts) error {
+	if r.CRL == nil {
+		return errors.New("internal error: CRL not set")
+	}
+	if r.ArkX509 == nil {
+		return errors.New("missing ARK x509 certificate to check CRL validity")
+	}
+	if r.ArkX509 == nil {
+		return errors.New("missing ASK x509 certificate to check intermediate key validity")
+	}
+	if err := r.CRL.CheckSignatureFrom(r.ArkX509); err != nil {
+		return fmt.Errorf("CRL is not signed by ARK: %v", err)
+	}
+	for _, bad := range r.CRL.RevokedCertificates {
+		if r.AskX509.SerialNumber.Cmp(bad.SerialNumber) == 0 {
+			return fmt.Errorf("ASK was revoked at %v", bad.RevocationTime)
+		}
+		// From offline discussions with AMD, we don't expect them to ever explicitly revoke a VCEK
+		// since TCB numbers serve the purpose of superceding previous certificates.
+	}
+	return nil
+}
+
+// VcekNotRevoked will consult the online CRL listed in the VCEK certificate for whether this cert
+// has been revoked. Returns nil if not revoked, error on any problem.
+func VcekNotRevoked(r *trust.AMDRootCerts, getter trust.HTTPSGetter, cert *x509.Certificate) error {
+	_, err := GetCrlAndCheckRoot(r, getter)
+	return err
+}
+
+func validateCRLlink(x *x509.Certificate, product, role string) error {
+	url := fmt.Sprintf("https://kdsintf.amd.com/vcek/v1/%s/crl", product)
+	if len(x.CRLDistributionPoints) != 1 {
+		return fmt.Errorf("%s has %d CRL distribution points, want 1", role, len(x.CRLDistributionPoints))
+	}
+	if x.CRLDistributionPoints[0] != url {
+		return fmt.Errorf("%s CRL distribution point is '%s', want '%s'", role, x.CRLDistributionPoints[0], url)
 	}
 	return nil
 }
@@ -420,8 +378,8 @@ func validateVcekCertificateProductNonspecific(cert *x509.Certificate) (*kds.Vce
 	return exts, nil
 }
 
-func (r *AMDRootCerts) validateVcekCertificateProductSpecifics(cert *x509.Certificate) error {
-	if err := r.ValidateVcekCertIssuer(cert.Issuer); err != nil {
+func validateVcekCertificateProductSpecifics(r *trust.AMDRootCerts, cert *x509.Certificate) error {
+	if err := ValidateVcekCertIssuer(r, cert.Issuer); err != nil {
 		return err
 	}
 	if err := cert.CheckSignatureFrom(r.AskX509); err != nil {
@@ -434,7 +392,7 @@ func (r *AMDRootCerts) validateVcekCertificateProductSpecifics(cert *x509.Certif
 // VcekDER checks that the VCEK certificate matches expected fields
 // from the KDS specification and also that its certificate chain matches
 // hardcoded trusted root certificates from AMD.
-func VcekDER(vcek []byte, ask []byte, ark []byte, options *Options) (*x509.Certificate, *AMDRootCerts, error) {
+func VcekDER(vcek []byte, ask []byte, ark []byte, options *Options) (*x509.Certificate, *trust.AMDRootCerts, error) {
 	vcekCert, err := x509.ParseCertificate(vcek)
 	if err != nil {
 		return nil, nil, fmt.Errorf("could not interpret VCEK DER bytes: %v", err)
@@ -446,25 +404,25 @@ func VcekDER(vcek []byte, ask []byte, ark []byte, options *Options) (*x509.Certi
 	roots := options.TrustedRoots
 	product := vcekProductMap[exts.ProductName]
 	if len(roots) == 0 {
-		root := &AMDRootCerts{
+		root := &trust.AMDRootCerts{
 			Product: product,
 			// Require that the root matches embedded root certs.
-			AskSev: DefaultRootCerts[product].AskSev,
-			ArkSev: DefaultRootCerts[product].ArkSev,
+			AskSev: trust.DefaultRootCerts[product].AskSev,
+			ArkSev: trust.DefaultRootCerts[product].ArkSev,
 		}
 		if err := root.FromDER(ask, ark); err != nil {
 			return nil, nil, err
 		}
-		if err := root.ValidateX509(); err != nil {
+		if err := ValidateX509(root); err != nil {
 			return nil, nil, err
 		}
-		roots = map[string][]*AMDRootCerts{
+		roots = map[string][]*trust.AMDRootCerts{
 			product: {root},
 		}
 	}
 	var lastErr error
 	for _, productRoot := range roots[product] {
-		if err := productRoot.validateVcekCertificateProductSpecifics(vcekCert); err != nil {
+		if err := validateVcekCertificateProductSpecifics(productRoot, vcekCert); err != nil {
 			lastErr = err
 			continue
 		}
@@ -513,24 +471,24 @@ type Options struct {
 	DisableCertFetching bool
 	// Getter takes a URL and returns the body of its contents. By default uses http.Get and returns
 	// the body.
-	Getter HTTPSGetter
+	Getter trust.HTTPSGetter
 	// TrustedRoots specifies the ARK and ASK certificates to trust when checking the VCEK. If nil,
 	// then verification will fall back on embedded AMD-published root certificates.
 	// Maps the product name to an array of allowed roots.
-	TrustedRoots map[string][]*AMDRootCerts
+	TrustedRoots map[string][]*trust.AMDRootCerts
 }
 
-func getTrustedRoots(rot *cpb.RootOfTrust) (map[string][]*AMDRootCerts, error) {
-	result := map[string][]*AMDRootCerts{}
+func getTrustedRoots(rot *cpb.RootOfTrust) (map[string][]*trust.AMDRootCerts, error) {
+	result := map[string][]*trust.AMDRootCerts{}
 	for _, path := range rot.CabundlePaths {
-		root := &AMDRootCerts{Product: rot.Product}
+		root := &trust.AMDRootCerts{Product: rot.Product}
 		if err := root.FromKDSCert(path); err != nil {
 			return nil, fmt.Errorf("could not parse CA bundle %q: %v", path, err)
 		}
 		result[rot.Product] = append(result[rot.Product], root)
 	}
 	for _, cabundle := range rot.Cabundles {
-		root := &AMDRootCerts{Product: rot.Product}
+		root := &trust.AMDRootCerts{Product: rot.Product}
 		if err := root.FromKDSCertBytes([]byte(cabundle)); err != nil {
 			return nil, fmt.Errorf("could not parse CA bundle bytes: %v", err)
 		}
@@ -572,16 +530,11 @@ func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 		if getter == nil {
 			getter = &SimpleHTTPSGetter{}
 		}
-		if err := root.VcekNotRevoked(getter, vcek); err != nil {
+		if err := VcekNotRevoked(root, getter, vcek); err != nil {
 			return err
 		}
 	}
 	return SnpProtoReportSignature(attestation.GetReport(), vcek)
-}
-
-// HTTPSGetter represents the ability to fetch data from the internet from an HTTP URL.
-type HTTPSGetter interface {
-	Get(url string) ([]byte, error)
 }
 
 // SimpleHTTPSGetter implements the HTTPSGetter interface with http.Get.
@@ -612,7 +565,7 @@ type AttestationRecreationErr struct {
 
 // fillInAttestation uses AMD's KDS to populate any empty certificate field in the attestation's
 // certificate chain.
-func fillInAttestation(attestation *spb.Attestation, getter HTTPSGetter) error {
+func fillInAttestation(attestation *spb.Attestation, getter trust.HTTPSGetter) error {
 	// TODO(Issue #11): Determine the product a report was fetched from, or make this an option.
 	product := "Milan"
 	if getter == nil {
@@ -620,6 +573,10 @@ func fillInAttestation(attestation *spb.Attestation, getter HTTPSGetter) error {
 	}
 	report := attestation.GetReport()
 	chain := attestation.GetCertificateChain()
+	if chain == nil {
+		chain = &spb.CertificateChain{}
+		attestation.CertificateChain = chain
+	}
 	if len(chain.GetAskCert()) == 0 || len(chain.GetArkCert()) == 0 {
 		askark, err := getter.Get(kds.ProductCertChainURL(product))
 		if err != nil {
@@ -651,7 +608,7 @@ func fillInAttestation(attestation *spb.Attestation, getter HTTPSGetter) error {
 // GetAttestationFromReport uses AMD's Key Distribution Service (KDS) to download the certificate
 // chain for the VCEK that supposedly signed the given report, and returns the Attestation
 // representation of their combination. If getter is nil, uses Golang's http.Get.
-func GetAttestationFromReport(report *spb.Report, getter HTTPSGetter) (*spb.Attestation, error) {
+func GetAttestationFromReport(report *spb.Report, getter trust.HTTPSGetter) (*spb.Attestation, error) {
 	result := &spb.Attestation{
 		Report:           report,
 		CertificateChain: &spb.CertificateChain{},
@@ -685,72 +642,4 @@ func RawSnpReport(rawReport []byte, options *Options) error {
 		return fmt.Errorf("could not interpret report bytes: %v", err)
 	}
 	return SnpReport(report, options)
-}
-
-// CRLUnavailableErr represents a problem with fetching the CRL from the network.
-// This type is special to allow for easy "fail open" semantics for CRL unavailability. See
-// Adam Langley's write-up on CRLs and network unreliability
-// https://www.imperialviolet.org/2014/04/19/revchecking.html
-type CRLUnavailableErr struct {
-	error
-}
-
-// GetCrlAndCheckRoot downloads the given cert's CRL from one of the distribution points and
-// verifies that the CRL is valid and doesn't revoke an intermediate key.
-func (r *AMDRootCerts) GetCrlAndCheckRoot(getter HTTPSGetter) (*x509.RevocationList, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.CRL != nil && time.Now().Before(r.CRL.NextUpdate) {
-		return r.CRL, nil
-	}
-	var errs error
-	for _, url := range r.AskX509.CRLDistributionPoints {
-		bytes, err := getter.Get(url)
-		if err != nil {
-			errs = multierr.Append(errs, err)
-			continue
-		}
-		crl, err := x509.ParseRevocationList(bytes)
-		if err != nil {
-			errs = multierr.Append(errs, err)
-			continue
-		}
-		r.CRL = crl
-		if err := r.verifyCRL(); err != nil {
-			return nil, err
-		}
-		return r.CRL, nil
-	}
-	return nil, CRLUnavailableErr{multierr.Append(errs, errors.New("could not fetch product CRL"))}
-}
-
-// verifyCRL checks that the VCEK CRL is signed by the ARK. Must be called after r.CRL is set.
-func (r *AMDRootCerts) verifyCRL() error {
-	if r.CRL == nil {
-		return errors.New("internal error: CRL not set")
-	}
-	if r.ArkX509 == nil {
-		return errors.New("missing ARK x509 certificate to check CRL validity")
-	}
-	if r.ArkX509 == nil {
-		return errors.New("missing ASK x509 certificate to check intermediate key validity")
-	}
-	if err := r.CRL.CheckSignatureFrom(r.ArkX509); err != nil {
-		return fmt.Errorf("CRL is not signed by ARK: %v", err)
-	}
-	for _, bad := range r.CRL.RevokedCertificates {
-		if r.AskX509.SerialNumber.Cmp(bad.SerialNumber) == 0 {
-			return fmt.Errorf("ASK was revoked at %v", bad.RevocationTime)
-		}
-		// From offline discussions with AMD, we don't expect them to ever explicitly revoke a VCEK
-		// since TCB numbers serve the purpose of superceding previous certificates.
-	}
-	return nil
-}
-
-// VcekNotRevoked will consult the online CRL listed in the VCEK certificate for whether this cert
-// has been revoked. Returns nil if not revoked, error on any problem.
-func (r *AMDRootCerts) VcekNotRevoked(getter HTTPSGetter, cert *x509.Certificate) error {
-	_, err := r.GetCrlAndCheckRoot(getter)
-	return err
 }
