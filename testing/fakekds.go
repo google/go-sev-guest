@@ -18,6 +18,7 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/pem"
+	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -30,12 +31,17 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+var testUseKDS = flag.Bool("test_use_kds", false, "If true, tests will attempt to retrieve certificates from AMD KDS")
+
 // The Milan product certificate bundle is only embedded for tests rather than in the main library
 // since it's generally bad practice to embed certificates that can expire directly into a software
 // project. Production uses should be providing their own certificates.
 //
 //go:embed "milan.pem"
 var milanCerts []byte
+
+// Insert your own KDS cache here with go:embed.
+var internalKDSCache []byte
 
 // FakeKDS implements the verify.HTTPSGetter interface to provide certificates like AMD KDS, but
 // with certificates cached in a protobuf.
@@ -128,13 +134,12 @@ func (f *FakeKDS) Get(url string) ([]byte, error) {
 // GetKDS returns an HTTPSGetter that can produce the expected certificates for a given URL in the
 // test environment.
 func GetKDS(t testing.TB) trust.HTTPSGetter {
-	// Insert your own KDS cache here.
-	/*
-	   fakeKds := &FakeKDS{Certs: &kpb.Certificates{}}
-	   if err := proto.Unmarshal(internalKdsCache, fakeKds.Certs); err != nil {
-	   	t.Fatalf("could not unmarshal embedded FakeKDS file: %v", err)
-	   }
-	   return fakeKds
-	*/
-	return nil
+	if *testUseKDS {
+		return trust.DefaultHTTPSGetter()
+	}
+	fakeKds := &FakeKDS{Certs: &kpb.Certificates{}}
+	if err := proto.Unmarshal(internalKDSCache, fakeKds.Certs); err != nil {
+		t.Fatalf("could not unmarshal embedded FakeKDS file: %v", err)
+	}
+	return fakeKds
 }

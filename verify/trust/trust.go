@@ -19,8 +19,11 @@ import (
 	"crypto/x509"
 	_ "embed"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/google/go-sev-guest/abi"
 	"github.com/google/go-sev-guest/kds"
@@ -65,6 +68,62 @@ type AMDRootCerts struct {
 // Used particularly for fetching certificates.
 type HTTPSGetter interface {
 	Get(url string) ([]byte, error)
+}
+
+// SimpleHTTPSGetter implements the HTTPSGetter interface with http.Get.
+type SimpleHTTPSGetter struct{}
+
+// Get uses http.Get to return the HTTPS response body as a byte array.
+func (n *SimpleHTTPSGetter) Get(url string) ([]byte, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	} else if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("failed to retrieve %s", url)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	resp.Body.Close()
+	return body, nil
+}
+
+// RetryHTTPSGetter is a meta-HTTPS getter that will retry on failure a given number of times.
+type RetryHTTPSGetter struct {
+	// Retries is how many times to retry on failure.
+	Retries int
+	// RetryRate is how long to wait between tries.
+	RetryRate time.Duration
+	// Getter is the non-retrying way of getting a URL.
+	Getter HTTPSGetter
+}
+
+// Get fetches the body of the URL, retrying a given amount of times on failure.
+func (n *RetryHTTPSGetter) Get(url string) ([]byte, error) {
+	i := n.Retries
+	for {
+		body, err := n.Getter.Get(url)
+		if err == nil {
+			return body, nil
+		}
+		if i <= 0 {
+			return nil, err
+		}
+		i--
+		time.Sleep(n.RetryRate)
+	}
+}
+
+// DefaultHTTPSGetter returns the library's default getter implementation. It will
+// retry slowly due to the AMD KDS's rate limiting.
+func DefaultHTTPSGetter() HTTPSGetter {
+	return &RetryHTTPSGetter{
+		Retries:   10,
+		RetryRate: 2 * time.Second,
+		Getter:    &SimpleHTTPSGetter{},
+	}
 }
 
 // Unmarshal populates ASK and ARK certificates from AMD SEV format certificates in data.
