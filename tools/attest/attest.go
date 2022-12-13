@@ -20,7 +20,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"os"
 
 	"github.com/google/go-sev-guest/abi"
@@ -158,17 +157,17 @@ func main() {
 	}
 
 	if !(*outform == "bin" || *outform == "proto" || *outform == "textproto") {
-		log.Fatalf("-outform is %s. Expect \"bin\", \"proto\", or \"textproto\"",
+		logger.Fatalf("-outform is %s. Expect \"bin\", \"proto\", or \"textproto\"",
 			*outform)
 	}
 
 	if *vmpl < 0 || *vmpl > 3 {
-		log.Fatalf("-vmpl is %d. Expect 0-3.", *vmpl)
+		logger.Fatalf("-vmpl is %d. Expect 0-3.", *vmpl)
 	}
 
 	outwriter, filetoclose, err := outWriter()
 	if err != nil {
-		log.Fatal(err)
+		logger.Fatal(err)
 	}
 	defer func() {
 		if filetoclose != nil {
@@ -178,18 +177,18 @@ func main() {
 
 	device, err := client.OpenDevice()
 	if err != nil {
-		log.Fatal(err)
+		logger.Fatal(err)
 	}
 	defer device.Close()
 	var reportData64 [abi.ReportDataSize]byte
 	copy(reportData64[:], reportData)
 	if *extended {
 		if err := outputExtendedReport(device, reportData64, outwriter); err != nil {
-			log.Fatal(err)
+			logger.Fatal(err)
 		}
 	} else {
 		if err := outputReport(device, reportData64, outwriter); err != nil {
-			log.Fatal(err)
+			logger.Fatal(err)
 		}
 	}
 }
