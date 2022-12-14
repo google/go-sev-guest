@@ -22,6 +22,7 @@ import (
 	"encoding/asn1"
 	"math/big"
 	"math/rand"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -34,6 +35,7 @@ import (
 	test "github.com/google/go-sev-guest/testing"
 	testclient "github.com/google/go-sev-guest/testing/client"
 	"github.com/google/go-sev-guest/verify/trust"
+	"github.com/google/logger"
 )
 
 // These certificates are committed regardless of its expiration date since we adjust the
@@ -59,6 +61,11 @@ func initSigner() {
 		panic(err)
 	}
 	signer = newSigner
+}
+
+func TestMain(m *testing.M) {
+	logger.Init("VerifyTestLog", false, false, os.Stderr)
+	os.Exit(m.Run())
 }
 
 func TestEmbeddedCertsAppendixB3Expectations(t *testing.T) {
