@@ -24,6 +24,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/go-sev-guest/abi"
 	checkpb "github.com/google/go-sev-guest/proto/check"
@@ -31,6 +32,7 @@ import (
 	"github.com/google/go-sev-guest/tools/lib/cmdline"
 	"github.com/google/go-sev-guest/validate"
 	"github.com/google/go-sev-guest/verify"
+	"github.com/google/go-sev-guest/verify/trust"
 	"github.com/google/logger"
 	"go.uber.org/multierr"
 	"google.golang.org/protobuf/encoding/prototext"
@@ -102,6 +104,8 @@ var (
 	// Optional Bool.
 	checkcrl       = flag.String("check_crl", "", "Download and check the CRL for revoked certificates.")
 	network        = flag.String("network", "", "If true, then permitted to download necessary files for verification.")
+	retries        = flag.Int("retries", 10, "Number of times to retry a failed HTTP request.")
+	retryRate      = flag.Duration("retry_rate", 2*time.Second, "Duration to wait between HTTP request retries.")
 	requireauthor  = flag.String("require_author_key", "", "Require that AUTHOR_KEY_EN is 1.")
 	requireidblock = flag.String("require_idblock", "", "Require that the VM was launch with an ID_BLOCK signed by a trusted id key or author key")
 	provisional    = flag.String("provisional", "", "Permit provisional firmware (i.e., committed values may be less than current values).")
@@ -507,6 +511,11 @@ func main() {
 	sopts, err := verify.RootOfTrustToOptions(config.RootOfTrust)
 	if err != nil {
 		die(err)
+	}
+	sopts.Getter = &trust.RetryHTTPSGetter{
+		Retries:   *retries,
+		RetryRate: *retryRate,
+		Getter:    &trust.SimpleHTTPSGetter{},
 	}
 	if err := verify.SnpAttestation(attestation, sopts); err != nil {
 		// Make the exit code more helpful when there are network errors

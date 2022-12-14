@@ -21,8 +21,6 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"fmt"
-	"io"
-	"net/http"
 	"time"
 
 	"github.com/google/go-sev-guest/abi"
@@ -528,33 +526,13 @@ func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 	if options != nil && options.CheckRevocations {
 		getter := options.Getter
 		if getter == nil {
-			getter = &SimpleHTTPSGetter{}
+			getter = trust.DefaultHTTPSGetter()
 		}
 		if err := VcekNotRevoked(root, getter, vcek); err != nil {
 			return err
 		}
 	}
 	return SnpProtoReportSignature(attestation.GetReport(), vcek)
-}
-
-// SimpleHTTPSGetter implements the HTTPSGetter interface with http.Get.
-type SimpleHTTPSGetter struct{}
-
-// Get uses http.Get to return the HTTPS response body as a byte array.
-func (n *SimpleHTTPSGetter) Get(url string) ([]byte, error) {
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, err
-	} else if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("failed to retrieve %s", url)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	resp.Body.Close()
-	return body, nil
 }
 
 // AttestationRecreationErr represents a problem with fetching or interpreting associated
@@ -569,7 +547,7 @@ func fillInAttestation(attestation *spb.Attestation, getter trust.HTTPSGetter) e
 	// TODO(Issue #11): Determine the product a report was fetched from, or make this an option.
 	product := "Milan"
 	if getter == nil {
-		getter = &SimpleHTTPSGetter{}
+		getter = trust.DefaultHTTPSGetter()
 	}
 	report := attestation.GetReport()
 	chain := attestation.GetCertificateChain()
