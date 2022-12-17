@@ -34,21 +34,10 @@ import (
 	pb "github.com/google/go-sev-guest/proto/sevsnp"
 	test "github.com/google/go-sev-guest/testing"
 	testclient "github.com/google/go-sev-guest/testing/client"
+	"github.com/google/go-sev-guest/verify/testdata"
 	"github.com/google/go-sev-guest/verify/trust"
 	"github.com/google/logger"
 )
-
-// These certificates are committed regardless of its expiration date since we adjust the
-// CurrentTime to compare against so that the validity with respect to time is always true.
-//
-//go:embed testdata/vcek.testcer
-var vcekBytes []byte
-
-//go:embed testdata/milan.testcer
-var milanBytes []byte
-
-//go:embed testdata/attestation.bin
-var attestationBytes []byte
 
 const product = "Milan"
 
@@ -98,7 +87,7 @@ func TestFakeCertsKDSExpectations(t *testing.T) {
 }
 
 func TestParseVcekCert(t *testing.T) {
-	cert, err := x509.ParseCertificate(vcekBytes)
+	cert, err := x509.ParseCertificate(testdata.VcekBytes)
 	if err != nil {
 		t.Errorf("could not parse valid VCEK certificate: %v", err)
 	}
@@ -111,10 +100,10 @@ func TestVerifyVcekCert(t *testing.T) {
 	// This certificate is committed regardless of its expiration date, but we'll adjust the
 	// CurrentTime to compare against so that the validity with respect to time is always true.
 	root := new(trust.AMDRootCerts)
-	if err := root.FromKDSCertBytes(milanBytes); err != nil {
+	if err := root.FromKDSCertBytes(testdata.MilanBytes); err != nil {
 		t.Fatalf("could not read Milan certificate file: %v", err)
 	}
-	vcek, err := x509.ParseCertificate(vcekBytes)
+	vcek, err := x509.ParseCertificate(testdata.VcekBytes)
 	if err != nil {
 		t.Errorf("could not parse valid VCEK certificate: %v", err)
 	}
@@ -450,12 +439,12 @@ func TestRealAttestationVerification(t *testing.T) {
 	copy(nonce[:], []byte{1, 2, 3, 4, 5})
 	getter := &test.Getter{
 		Responses: map[string][]byte{
-			"https://kdsintf.amd.com/vcek/v1/Milan/cert_chain": milanBytes,
+			"https://kdsintf.amd.com/vcek/v1/Milan/cert_chain": testdata.MilanBytes,
 			// Use the VCEK's hwID and known TCB values to specify the URL its VCEK cert would be fetched from.
-			"https://kdsintf.amd.com/vcek/v1/Milan/3ac3fe21e13fb0990eb28a802e3fb6a29483a6b0753590c951bdd3b8e53786184ca39e359669a2b76a1936776b564ea464cdce40c05f63c9b610c5068b006b5d?blSPL=2&teeSPL=0&snpSPL=5&ucodeSPL=68": vcekBytes,
+			"https://kdsintf.amd.com/vcek/v1/Milan/3ac3fe21e13fb0990eb28a802e3fb6a29483a6b0753590c951bdd3b8e53786184ca39e359669a2b76a1936776b564ea464cdce40c05f63c9b610c5068b006b5d?blSPL=2&teeSPL=0&snpSPL=5&ucodeSPL=68": testdata.VcekBytes,
 		},
 	}
-	if err := RawSnpReport(attestationBytes, &Options{Getter: getter}); err != nil {
+	if err := RawSnpReport(testdata.AttestationBytes, &Options{Getter: getter}); err != nil {
 		t.Error(err)
 	}
 }
