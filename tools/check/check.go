@@ -104,8 +104,8 @@ var (
 	// Optional Bool.
 	checkcrl       = flag.String("check_crl", "", "Download and check the CRL for revoked certificates.")
 	network        = flag.String("network", "", "If true, then permitted to download necessary files for verification.")
-	retries        = flag.Int("retries", 10, "Number of times to retry a failed HTTP request.")
-	retryRate      = flag.Duration("retry_rate", 2*time.Second, "Duration to wait between HTTP request retries.")
+	timeout        = flag.Duration("timeout", 2*time.Minute, "Duration to continue to retry failed HTTP requests.")
+	maxRetryDelay  = flag.Duration("max_retry_delay", 30*time.Second, "Maximum Duration to wait between HTTP request retries.")
 	requireauthor  = flag.String("require_author_key", "", "Require that AUTHOR_KEY_EN is 1.")
 	requireidblock = flag.String("require_idblock", "", "Require that the VM was launch with an ID_BLOCK signed by a trusted id key or author key")
 	provisional    = flag.String("provisional", "", "Permit provisional firmware (i.e., committed values may be less than current values).")
@@ -513,9 +513,9 @@ func main() {
 		die(err)
 	}
 	sopts.Getter = &trust.RetryHTTPSGetter{
-		Retries:   *retries,
-		RetryRate: *retryRate,
-		Getter:    &trust.SimpleHTTPSGetter{},
+		Timeout:       *timeout,
+		MaxRetryDelay: *maxRetryDelay,
+		Getter:        &trust.SimpleHTTPSGetter{},
 	}
 	if err := verify.SnpAttestation(attestation, sopts); err != nil {
 		// Make the exit code more helpful when there are network errors
