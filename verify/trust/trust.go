@@ -16,6 +16,7 @@
 package trust
 
 import (
+	"context"
 	"crypto/x509"
 	_ "embed"
 	"fmt"
@@ -92,27 +93,34 @@ func (n *SimpleHTTPSGetter) Get(url string) ([]byte, error) {
 
 // RetryHTTPSGetter is a meta-HTTPS getter that will retry on failure a given number of times.
 type RetryHTTPSGetter struct {
-	// Retries is how many times to retry on failure.
-	Retries int
-	// RetryRate is how long to wait between tries.
-	RetryRate time.Duration
+	// Timeout is how long to retry before failure.
+	Timeout time.Duration
+	// MaxRetryDelay is the maximum amount of time to wait between retries.
+	MaxRetryDelay time.Duration
 	// Getter is the non-retrying way of getting a URL.
 	Getter HTTPSGetter
 }
 
 // Get fetches the body of the URL, retrying a given amount of times on failure.
 func (n *RetryHTTPSGetter) Get(url string) ([]byte, error) {
-	i := n.Retries
+	delay := 2 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), n.Timeout)
 	for {
 		body, err := n.Getter.Get(url)
 		if err == nil {
+			cancel()
 			return body, nil
 		}
-		if i <= 0 {
-			return nil, err
+		delay = delay + delay
+		if delay > n.MaxRetryDelay {
+			delay = n.MaxRetryDelay
 		}
-		i--
-		time.Sleep(n.RetryRate)
+		select {
+		case <-ctx.Done():
+			cancel()
+			return nil, fmt.Errorf("timeout") // context cancelled
+		case <-time.After(delay): // wait to retry
+		}
 	}
 }
 
@@ -120,9 +128,9 @@ func (n *RetryHTTPSGetter) Get(url string) ([]byte, error) {
 // retry slowly due to the AMD KDS's rate limiting.
 func DefaultHTTPSGetter() HTTPSGetter {
 	return &RetryHTTPSGetter{
-		Retries:   10,
-		RetryRate: 2 * time.Second,
-		Getter:    &SimpleHTTPSGetter{},
+		Timeout:       2 * time.Minute,
+		MaxRetryDelay: 30 * time.Second,
+		Getter:        &SimpleHTTPSGetter{},
 	}
 }
 
