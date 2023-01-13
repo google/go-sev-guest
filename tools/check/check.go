@@ -28,7 +28,9 @@ import (
 
 	"github.com/google/go-sev-guest/abi"
 	checkpb "github.com/google/go-sev-guest/proto/check"
+	kpb "github.com/google/go-sev-guest/proto/fakekds"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
+	"github.com/google/go-sev-guest/testing"
 	"github.com/google/go-sev-guest/tools/lib/cmdline"
 	"github.com/google/go-sev-guest/validate"
 	"github.com/google/go-sev-guest/verify"
@@ -123,7 +125,8 @@ var (
 	product   = flag.String("product", "", "The AMD product name for the chip that generated the attestation report.")
 	cabundles = flag.String("product_key_path", "",
 		"Colon-separated paths to CA bundles for the AMD product. Must be in PEM format, ASK, then ARK certificates. If unset, uses embedded root certificates.")
-	verbose = flag.Bool("v", false, "Enable verbose logging.")
+	verbose     = flag.Bool("v", false, "Enable verbose logging.")
+	testKdsFile = flag.String("kdsdatabase", "", "Path to a fakekds.Certificates binary cache of AMD KDS")
 
 	config = &checkpb.Config{
 		RootOfTrust: &checkpb.RootOfTrust{},
@@ -304,6 +307,13 @@ func parseConfig(path string) error {
 	if err != nil {
 		return fmt.Errorf("could not deserialize %q: %v", path, err)
 	}
+	// Populate fields that should not be nil
+	if config.RootOfTrust == nil {
+		config.RootOfTrust = &checkpb.RootOfTrust{}
+	}
+	if config.Policy == nil {
+		config.Policy = &checkpb.Policy{}
+	}
 	return nil
 }
 
@@ -384,7 +394,8 @@ func setUInt32Value(value **wrapperspb.UInt32Value, name, flag string) error {
 
 func setString(dest *string, name, flag string, defaultValue string) {
 	if flag == "" {
-		if !override() {
+		// Empty strings are not expected valid values, so override.
+		if !override() || *dest == "" {
 			*dest = defaultValue
 		}
 	} else {
@@ -516,6 +527,17 @@ func main() {
 		Timeout:       *timeout,
 		MaxRetryDelay: *maxRetryDelay,
 		Getter:        &trust.SimpleHTTPSGetter{},
+	}
+	if *testKdsFile != "" {
+		b, err := os.ReadFile(*testKdsFile)
+		if err != nil {
+			die(fmt.Errorf("could not read %q: %v", *testKdsFile, err))
+		}
+		kds := &testing.FakeKDS{Certs: &kpb.Certificates{}}
+		sopts.Getter = kds
+		if err := proto.Unmarshal(b, kds.Certs); err != nil {
+			die(fmt.Errorf("could not unmarshal KDS database: %v", err))
+		}
 	}
 	if err := verify.SnpAttestation(attestation, sopts); err != nil {
 		// Make the exit code more helpful when there are network errors
