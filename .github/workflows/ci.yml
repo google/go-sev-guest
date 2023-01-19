@@ -44,10 +44,10 @@ jobs:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           version: "3.12.4"
       - name: Install protoc-gen-go
-        run: go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.27.1
+        run: go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.28.1
       - name: Check Protobuf Generation
         run: |
-          go generate ./... 
+          go generate ./...
           git diff -G'^[^/]' --exit-code
       - name: Generate all protobufs
         run: go generate ./...

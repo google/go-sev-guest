@@ -65,6 +65,10 @@ message CertificateChain {
 
   // The AMD Root key certificate (signs the ASK cert).
   bytes ark_cert = 3;
+
+  // A certificate the host may inject to endorse the measurement of the
+  // firmware.
+  bytes firmware_cert = 4;
 }
 
 message Attestation {
