@@ -44,7 +44,7 @@ func initDevice() {
 	now := time.Date(2022, time.May, 3, 9, 0, 0, 0, time.UTC)
 	for _, tc := range test.TestCases() {
 		// Don't test faked errors when running real hardware tests.
-		if !UseDefaultSevGuest() && tc.WantErr != nil {
+		if !UseDefaultSevGuest() && tc.WantErr != "" {
 			continue
 		}
 		tests = append(tests, tc)
@@ -137,11 +137,11 @@ func TestOpenGetReportClose(t *testing.T) {
 
 		// Does the proto report match expectations?
 		got, err := GetReport(device, tc.Input)
-		if err != tc.WantErr {
+		if !test.Match(err, tc.WantErr) {
 			t.Fatalf("GetReport(device, %v) = %v, %v. Want err: %v", tc.Input, got, err, tc.WantErr)
 		}
 
-		if tc.WantErr == nil {
+		if tc.WantErr == "" {
 			cleanReport(got)
 			want := reportProto
 			want.Signature = got.Signature // Zeros were placeholders.
@@ -156,10 +156,10 @@ func TestOpenGetRawExtendedReportClose(t *testing.T) {
 	devMu.Do(initDevice)
 	for _, tc := range tests {
 		raw, certs, err := GetRawExtendedReport(device, tc.Input)
-		if err != tc.WantErr {
+		if !test.Match(err, tc.WantErr) {
 			t.Fatalf("%s: GetRawExtendedReport(device, %v) = %v, %v, %v. Want err: %v", tc.Name, tc.Input, raw, certs, err, tc.WantErr)
 		}
-		if tc.WantErr == nil {
+		if tc.WantErr == "" {
 			if err := cleanRawReport(raw); err != nil {
 				t.Fatal(err)
 			}
@@ -189,10 +189,10 @@ func TestOpenGetExtendedReportClose(t *testing.T) {
 	devMu.Do(initDevice)
 	for _, tc := range tests {
 		ereport, err := GetExtendedReport(device, tc.Input)
-		if err != tc.WantErr {
+		if !test.Match(err, tc.WantErr) {
 			t.Fatalf("%s: GetExtendedReport(device, %v) = %v, %v. Want err: %v", tc.Name, tc.Input, ereport, err, tc.WantErr)
 		}
-		if tc.WantErr == nil {
+		if tc.WantErr == "" {
 			reportProto := &spb.Report{}
 			if err := prototext.Unmarshal([]byte(tc.OutputProto), reportProto); err != nil {
 				t.Fatalf("test failure: %v", err)

@@ -134,7 +134,7 @@ type TestCase struct {
 	OutputProto string
 	FwErr       abi.SevFirmwareStatus
 	EsResult    labi.EsResult
-	WantErr     error
+	WantErr     string
 }
 
 // TestCases returns common test cases for get_report.
@@ -158,7 +158,7 @@ func TestCases() []TestCase {
 			Name:    "fw oom",
 			Input:   userZeros11,
 			FwErr:   abi.ResourceLimit,
-			WantErr: abi.SevFirmwareErr{Status: abi.ResourceLimit},
+			WantErr: (&abi.SevFirmwareErr{Status: abi.ResourceLimit}).Error(),
 		},
 	}
 }
