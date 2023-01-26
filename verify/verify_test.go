@@ -23,7 +23,6 @@ import (
 	"math/big"
 	"math/rand"
 	"os"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -151,10 +150,10 @@ func TestSnpReportSignature(t *testing.T) {
 		}
 		// Does the Raw report match expectations?
 		raw, err := sg.GetRawReport(d, tc.Input)
-		if err != tc.WantErr {
+		if !test.Match(err, tc.WantErr) {
 			t.Fatalf("GetRawReport(d, %v) = %v, %v. Want err: %v", tc.Input, raw, err, tc.WantErr)
 		}
-		if tc.WantErr == nil {
+		if tc.WantErr == "" {
 			got := abi.SignedComponent(raw)
 			want := abi.SignedComponent(tc.Output[:])
 			if !bytes.Equal(got, want) {
@@ -303,14 +302,8 @@ func TestKdsMetadataLogic(t *testing.T) {
 			options = &Options{}
 		}
 		vcek, _, err := VcekDER(newSigner.Vcek.Raw, newSigner.Ask.Raw, newSigner.Ark.Raw, options)
-		if err == nil && tc.wantErr != "" {
-			t.Errorf("%s: VcekDER(...) = %+v did not error as expected.", tc.name, vcek)
-		}
-		if err != nil && tc.wantErr == "" {
-			t.Errorf("%s: VcekDER(...) errored unexpectedly: %v", tc.name, err)
-		}
-		if err != nil && tc.wantErr != "" && !strings.Contains(err.Error(), tc.wantErr) {
-			t.Errorf("%s: VcekDER(...) did not error as expected. Got %v, want %s", tc.name, err, tc.wantErr)
+		if !test.Match(err, tc.wantErr) {
+			t.Errorf("%s: VcekDER(...) = %+v, %v did not error as expected. Want %q", tc.name, vcek, err, tc.wantErr)
 		}
 	}
 }
@@ -374,7 +367,7 @@ func TestCRLRootValidity(t *testing.T) {
 		},
 	}
 	wantErr := "CRL is not signed by ARK"
-	if err := VcekNotRevoked(root, g2, signer2.Vcek); err == nil || !strings.Contains(err.Error(), wantErr) {
+	if err := VcekNotRevoked(root, g2, signer2.Vcek); !test.Match(err, wantErr) {
 		t.Errorf("Bad Root: VcekNotRevoked(%v) did not error as expected. Got %v, want %v", signer.Vcek, err, wantErr)
 	}
 
@@ -385,7 +378,7 @@ func TestCRLRootValidity(t *testing.T) {
 		AskX509: signer2.Ask,
 	}
 	wantErr2 := "ASK was revoked at 2022-06-14 12:01:00 +0000 UTC"
-	if err := VcekNotRevoked(root2, g2, signer2.Vcek); err == nil || !strings.Contains(err.Error(), wantErr2) {
+	if err := VcekNotRevoked(root2, g2, signer2.Vcek); !test.Match(err, wantErr2) {
 		t.Errorf("Bad ASK: VcekNotRevoked(%v) did not error as expected. Got %v, want %v", signer.Vcek, err, wantErr2)
 	}
 }
@@ -422,10 +415,10 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 		}
 		for _, getReport := range reportGetters {
 			ereport, err := getReport.getter(d, tc.Input)
-			if err != tc.WantErr {
+			if !test.Match(err, tc.WantErr) {
 				t.Fatalf("%s: %s(d, %v) = %v, %v. Want err: %v", tc.Name, getReport.name, tc.Input, ereport, err, tc.WantErr)
 			}
-			if tc.WantErr == nil {
+			if tc.WantErr == "" {
 				if err := SnpAttestation(ereport, options); err != nil {
 					t.Errorf("SnpAttestation(%v) errored unexpectedly: %v", ereport, err)
 				}

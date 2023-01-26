@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -80,7 +81,7 @@ func TestParseProductBaseURL(t *testing.T) {
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
 			gotProduct, gotURL, err := parseBaseProductURL(tc.url)
-			if (err != nil && err.Error() != tc.wantErr) || (err == nil && tc.wantErr != "") {
+			if (err == nil && tc.wantErr != "") || (err != nil && !strings.Contains(err.Error(), tc.wantErr)) {
 				t.Fatalf("parseBaseProductURL(%q) = _, _, %v, want %q", tc.url, err, tc.wantErr)
 			}
 			if err == nil {
@@ -144,7 +145,7 @@ func TestParseVCEKCertURL(t *testing.T) {
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := ParseVCEKCertURL(tc.url)
-			if (err != nil && err.Error() != tc.wantErr) || (err == nil && tc.wantErr != "") {
+			if (err == nil && tc.wantErr != "") || (err != nil && !strings.Contains(err.Error(), tc.wantErr)) {
 				t.Fatalf("ParseVCEKCertURL(%q) = _, %v, want %q", tc.url, err, tc.wantErr)
 			}
 			if err == nil {
