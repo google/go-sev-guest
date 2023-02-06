@@ -42,16 +42,24 @@ var (
 	// expiration dates is at https://kdsintf.amd.com/vcek/v1/Milan/cert_chain
 	//go:embed ask_ark_milan.sevcert
 	askArkMilanBytes []byte
+
+	// A cache of product certificate KDS results per product.
+	prodCacheMu      sync.Mutex
+	productCertCache map[string]*ProductCerts
 )
+
+// ProductCerts contains the root key and signing key devoted to a given product line.
+type ProductCerts struct {
+	Ask *x509.Certificate
+	Ark *x509.Certificate
+}
 
 // AMDRootCerts encapsulates the certificates that represent root of trust in AMD.
 type AMDRootCerts struct {
 	// Product is the expected CPU product name, e.g., Milan, Turin, Genoa.
 	Product string
-	// AskX509 is an X.509 certificate for the AMD SEV signing key (ASK)
-	AskX509 *x509.Certificate
-	// ArkX509 is an X.509 certificate for the AMD root key (ARK).
-	ArkX509 *x509.Certificate
+	// ProductCerts contains the root key and signing key devoted to a given product line.
+	ProductCerts *ProductCerts
 	// AskSev is the AMD certificate representation of the AMD signing key that certifies
 	// versioned chip endoresement keys. If present, the information must match AskX509.
 	AskSev *abi.AskCert
@@ -69,6 +77,16 @@ type AMDRootCerts struct {
 // Used particularly for fetching certificates.
 type HTTPSGetter interface {
 	Get(url string) ([]byte, error)
+}
+
+// AttestationRecreationErr represents a problem with fetching or interpreting associated
+// certificates for a given attestation report. This is typically due to network unreliability.
+type AttestationRecreationErr struct {
+	Msg string
+}
+
+func (e *AttestationRecreationErr) Error() string {
+	return e.Msg
 }
 
 // SimpleHTTPSGetter implements the HTTPSGetter interface with http.Get.
@@ -149,26 +167,26 @@ func (r *AMDRootCerts) Unmarshal(data []byte) error {
 	return nil
 }
 
-// FromDER populates the AMDRootCerts from DER-formatted certificates for both the ASK and the ARK.
-func (r *AMDRootCerts) FromDER(ask []byte, ark []byte) error {
+// FromDER populates the ProductCerts from DER-formatted certificates for both the ASK and the ARK.
+func (r *ProductCerts) FromDER(ask []byte, ark []byte) error {
 	askCert, err := x509.ParseCertificate(ask)
 	if err != nil {
 		return fmt.Errorf("could not parse ASK certificate: %v", err)
 	}
-	r.AskX509 = askCert
+	r.Ask = askCert
 
 	arkCert, err := x509.ParseCertificate(ark)
 	if err != nil {
 		logger.Errorf("could not parse ARK certificate: %v", err)
 	}
-	r.ArkX509 = arkCert
+	r.Ark = arkCert
 	return nil
 }
 
 // FromKDSCertBytes populates r's AskX509 and ArkX509 certificates from the two PEM-encoded
 // certificates in data. This is the format the Key Distribution Service (KDS) uses, e.g.,
 // https://kdsintf.amd.com/vcek/v1/Milan/cert_chain
-func (r *AMDRootCerts) FromKDSCertBytes(data []byte) error {
+func (r *ProductCerts) FromKDSCertBytes(data []byte) error {
 	ask, ark, err := kds.ParseProductCertChain(data)
 	if err != nil {
 		return err
@@ -178,7 +196,7 @@ func (r *AMDRootCerts) FromKDSCertBytes(data []byte) error {
 
 // FromKDSCert populates r's AskX509 and ArkX509 certificates from the certificate format AMD's Key
 // Distribution Service (KDS) uses, e.g., https://kdsintf.amd.com/vcek/v1/Milan/cert_chain
-func (r *AMDRootCerts) FromKDSCert(path string) error {
+func (r *ProductCerts) FromKDSCert(path string) error {
 	certBytes, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -188,15 +206,95 @@ func (r *AMDRootCerts) FromKDSCert(path string) error {
 
 // X509Options returns the ASK and ARK as the only intermediate and root certificates of an x509
 // verification options object, or nil if either key's x509 certificate is not present in r.
-func (r *AMDRootCerts) X509Options() *x509.VerifyOptions {
-	if r.AskX509 == nil || r.ArkX509 == nil {
+func (r *ProductCerts) X509Options() *x509.VerifyOptions {
+	if r.Ask == nil || r.Ark == nil {
 		return nil
 	}
 	roots := x509.NewCertPool()
-	roots.AddCert(r.ArkX509)
+	roots.AddCert(r.Ark)
 	intermediates := x509.NewCertPool()
-	intermediates.AddCert(r.AskX509)
+	intermediates.AddCert(r.Ask)
 	return &x509.VerifyOptions{Roots: roots, Intermediates: intermediates}
+}
+
+// ClearProductCertCache clears the product certificate cache. This is useful for testing with
+// multiple roots of trust.
+func ClearProductCertCache() {
+	prodCacheMu.Lock()
+	productCertCache = nil
+	prodCacheMu.Unlock()
+}
+
+// GetProductChain returns the ASK and ARK certificates of the given product, either from getter
+// or from a cache of the results from the last successful call.
+func GetProductChain(product string, getter HTTPSGetter) (*ProductCerts, error) {
+	if productCertCache == nil {
+		prodCacheMu.Lock()
+		productCertCache = make(map[string]*ProductCerts)
+		prodCacheMu.Unlock()
+	}
+	result, ok := productCertCache[product]
+	if !ok {
+		logger.Infof("Getting product cert chain for %s", product)
+		askark, err := getter.Get(kds.ProductCertChainURL(product))
+		if err != nil {
+			return nil, &AttestationRecreationErr{
+				Msg: fmt.Sprintf("could not download ASK and ARK certificates: %v", err),
+			}
+		}
+		logger.Infof("Product chain in %s", string(askark))
+		ask, ark, err := kds.ParseProductCertChain(askark)
+		if err != nil {
+			// Treat a bad parse as a network error since it's likely due to an incomplete transfer.
+			return nil, &AttestationRecreationErr{Msg: fmt.Sprintf("could not parse root cert_chain: %v", err)}
+		}
+		askCert, err := x509.ParseCertificate(ask)
+		if err != nil {
+			return nil, &AttestationRecreationErr{Msg: fmt.Sprintf("could not parse ASK cert: %v", err)}
+		}
+		arkCert, err := x509.ParseCertificate(ark)
+		if err != nil {
+			return nil, &AttestationRecreationErr{Msg: fmt.Sprintf("could not parse ARK cert: %v", err)}
+		}
+		result = &ProductCerts{Ask: askCert, Ark: arkCert}
+		prodCacheMu.Lock()
+		productCertCache[product] = result
+		prodCacheMu.Unlock()
+	}
+	return result, nil
+}
+
+// Forward all the ProductCerts operations from the AMDRootCerts struct to follow the
+// Law of Demeter.
+
+// FromDER populates the AMDRootCerts from DER-formatted certificates for both the ASK and the ARK.
+func (r *AMDRootCerts) FromDER(ask []byte, ark []byte) error {
+	r.ProductCerts = &ProductCerts{}
+	return r.ProductCerts.FromDER(ask, ark)
+}
+
+// FromKDSCertBytes populates r's AskX509 and ArkX509 certificates from the two PEM-encoded
+// certificates in data. This is the format the Key Distribution Service (KDS) uses, e.g.,
+// https://kdsintf.amd.com/vcek/v1/Milan/cert_chain
+func (r *AMDRootCerts) FromKDSCertBytes(data []byte) error {
+	r.ProductCerts = &ProductCerts{}
+	return r.ProductCerts.FromKDSCertBytes(data)
+}
+
+// FromKDSCert populates r's AskX509 and ArkX509 certificates from the certificate format AMD's Key
+// Distribution Service (KDS) uses, e.g., https://kdsintf.amd.com/vcek/v1/Milan/cert_chain
+func (r *AMDRootCerts) FromKDSCert(path string) error {
+	r.ProductCerts = &ProductCerts{}
+	return r.ProductCerts.FromKDSCert(path)
+}
+
+// X509Options returns the ASK and ARK as the only intermediate and root certificates of an x509
+// verification options object, or nil if either key's x509 certificate is not present in r.
+func (r *AMDRootCerts) X509Options() *x509.VerifyOptions {
+	if r.ProductCerts == nil {
+		return nil
+	}
+	return r.ProductCerts.X509Options()
 }
 
 // Parse ASK, ARK certificates from the embedded AMD certificate file.

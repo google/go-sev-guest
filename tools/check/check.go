@@ -34,6 +34,7 @@ import (
 	"github.com/google/go-sev-guest/tools/lib/cmdline"
 	"github.com/google/go-sev-guest/validate"
 	"github.com/google/go-sev-guest/verify"
+	"github.com/google/go-sev-guest/verify/testdata"
 	"github.com/google/go-sev-guest/verify/trust"
 	"github.com/google/logger"
 	"go.uber.org/multierr"
@@ -533,7 +534,10 @@ func main() {
 		if err != nil {
 			die(fmt.Errorf("could not read %q: %v", *testKdsFile, err))
 		}
-		kds := &testing.FakeKDS{Certs: &kpb.Certificates{}}
+		kds := &testing.FakeKDS{
+			Certs:       &kpb.Certificates{},
+			RootBundles: map[string]string{"Milan": string(testdata.MilanBytes)},
+		}
 		sopts.Getter = kds
 		if err := proto.Unmarshal(b, kds.Certs); err != nil {
 			die(fmt.Errorf("could not unmarshal KDS database: %v", err))
@@ -547,10 +551,12 @@ func main() {
 			if err == nil {
 				return false
 			}
-			if errors.As(err, &verify.AttestationRecreationErr{}) {
+			var certNetworkErr *trust.AttestationRecreationErr
+			var crlNetworkErr *verify.CRLUnavailableErr
+			if errors.As(err, &certNetworkErr) {
 				exitCode = exitCerts
 				return true
-			} else if errors.As(err, &verify.CRLUnavailableErr{}) {
+			} else if errors.As(err, &crlNetworkErr) {
 				exitCode = exitCrl
 				return true
 			}
