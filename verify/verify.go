@@ -152,11 +152,11 @@ func ValidateAskX509(r *trust.AMDRootCerts) error {
 	if r.Product != "" {
 		cn = fmt.Sprintf("SEV-%s", r.Product)
 	}
-	if err := validateRootX509(r.Product, r.AskX509, askX509Version, "ASK", cn); err != nil {
+	if err := validateRootX509(r.Product, r.ProductCerts.Ask, askX509Version, "ASK", cn); err != nil {
 		return err
 	}
 	if r.AskSev != nil {
-		return crossCheckSevX509(r.AskSev, r.AskX509)
+		return crossCheckSevX509(r.AskSev, r.ProductCerts.Ask)
 	}
 	return nil
 }
@@ -171,11 +171,11 @@ func ValidateArkX509(r *trust.AMDRootCerts) error {
 	if r.Product != "" {
 		cn = fmt.Sprintf("ARK-%s", r.Product)
 	}
-	if err := validateRootX509(r.Product, r.ArkX509, arkX509Version, "ARK", cn); err != nil {
+	if err := validateRootX509(r.Product, r.ProductCerts.Ark, arkX509Version, "ARK", cn); err != nil {
 		return err
 	}
 	if r.ArkSev != nil {
-		return crossCheckSevX509(r.ArkSev, r.ArkX509)
+		return crossCheckSevX509(r.ArkSev, r.ProductCerts.Ark)
 	}
 	return nil
 }
@@ -262,7 +262,7 @@ func GetCrlAndCheckRoot(r *trust.AMDRootCerts, getter trust.HTTPSGetter) (*x509.
 		return r.CRL, nil
 	}
 	var errs error
-	for _, url := range r.AskX509.CRLDistributionPoints {
+	for _, url := range r.ProductCerts.Ask.CRLDistributionPoints {
 		bytes, err := getter.Get(url)
 		if err != nil {
 			errs = multierr.Append(errs, err)
@@ -288,17 +288,17 @@ func verifyCRL(r *trust.AMDRootCerts) error {
 	if r.CRL == nil {
 		return errors.New("internal error: CRL not set")
 	}
-	if r.ArkX509 == nil {
+	if r.ProductCerts.Ark == nil {
 		return errors.New("missing ARK x509 certificate to check CRL validity")
 	}
-	if r.ArkX509 == nil {
+	if r.ProductCerts.Ark == nil {
 		return errors.New("missing ASK x509 certificate to check intermediate key validity")
 	}
-	if err := r.CRL.CheckSignatureFrom(r.ArkX509); err != nil {
+	if err := r.CRL.CheckSignatureFrom(r.ProductCerts.Ark); err != nil {
 		return fmt.Errorf("CRL is not signed by ARK: %v", err)
 	}
 	for _, bad := range r.CRL.RevokedCertificates {
-		if r.AskX509.SerialNumber.Cmp(bad.SerialNumber) == 0 {
+		if r.ProductCerts.Ask.SerialNumber.Cmp(bad.SerialNumber) == 0 {
 			return fmt.Errorf("ASK was revoked at %v", bad.RevocationTime)
 		}
 		// From offline discussions with AMD, we don't expect them to ever explicitly revoke a VCEK
@@ -380,8 +380,8 @@ func validateVcekCertificateProductSpecifics(r *trust.AMDRootCerts, cert *x509.C
 	if err := ValidateVcekCertIssuer(r, cert.Issuer); err != nil {
 		return err
 	}
-	if err := cert.CheckSignatureFrom(r.AskX509); err != nil {
-		return fmt.Errorf("error verifying VCEK certificate: %v (%v)", err, r.AskX509.IsCA)
+	if err := cert.CheckSignatureFrom(r.ProductCerts.Ask); err != nil {
+		return fmt.Errorf("error verifying VCEK certificate: %v (%v)", err, r.ProductCerts.Ask.IsCA)
 	}
 	// VCEK is not expected to have a CRL link.
 	return nil
@@ -535,12 +535,6 @@ func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 	return SnpProtoReportSignature(attestation.GetReport(), vcek)
 }
 
-// AttestationRecreationErr represents a problem with fetching or interpreting associated
-// certificates for a given attestation report. This is typically due to network unreliability.
-type AttestationRecreationErr struct {
-	error
-}
-
 // fillInAttestation uses AMD's KDS to populate any empty certificate field in the attestation's
 // certificate chain.
 func fillInAttestation(attestation *spb.Attestation, getter trust.HTTPSGetter) error {
@@ -556,27 +550,25 @@ func fillInAttestation(attestation *spb.Attestation, getter trust.HTTPSGetter) e
 		attestation.CertificateChain = chain
 	}
 	if len(chain.GetAskCert()) == 0 || len(chain.GetArkCert()) == 0 {
-		askark, err := getter.Get(kds.ProductCertChainURL(product))
+		askark, err := trust.GetProductChain(product, getter)
 		if err != nil {
-			return AttestationRecreationErr{fmt.Errorf("could not download ASK and ARK certificates: %v", err)}
+			return err
 		}
-		ask, ark, err := kds.ParseProductCertChain(askark)
-		if err != nil {
-			// Treat a bad parse as a network error since it's likely due to an incomplete transfer.
-			return AttestationRecreationErr{fmt.Errorf("could not parse root cert_chain: %v", err)}
-		}
+
 		if len(chain.GetAskCert()) == 0 {
-			chain.AskCert = ask
+			chain.AskCert = askark.Ask.Raw
 		}
 		if len(chain.GetArkCert()) == 0 {
-			chain.ArkCert = ark
+			chain.ArkCert = askark.Ark.Raw
 		}
 	}
 	if len(chain.GetVcekCert()) == 0 {
 		vcekURL := kds.VCEKCertURL(product, report.GetChipId(), kds.TCBVersion(report.GetCurrentTcb()))
 		vcek, err := getter.Get(vcekURL)
 		if err != nil {
-			return AttestationRecreationErr{fmt.Errorf("could not download VCEK certificate: %v", err)}
+			return &trust.AttestationRecreationErr{
+				Msg: fmt.Sprintf("could not download VCEK certificate: %v", err),
+			}
 		}
 		chain.VcekCert = vcek
 	}

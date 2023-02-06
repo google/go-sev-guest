@@ -71,10 +71,13 @@ func TestEmbeddedCertsAppendixB3Expectations(t *testing.T) {
 
 func TestFakeCertsKDSExpectations(t *testing.T) {
 	signMu.Do(initSigner)
+	trust.ClearProductCertCache()
 	root := &trust.AMDRootCerts{
 		Product: product,
-		ArkX509: signer.Ark,
-		AskX509: signer.Ask,
+		ProductCerts: &trust.ProductCerts{
+			Ark: signer.Ark,
+			Ask: signer.Ask,
+		},
 		// No ArkSev or AskSev intentionally for test certs.
 	}
 	if err := ValidateArkX509(root); err != nil {
@@ -125,10 +128,10 @@ func TestVerifyVcekCert(t *testing.T) {
 	if !chains[0][0].Equal(vcek) {
 		t.Errorf("VCEK verification chain did not start with the VCEK certificate: %v", chains[0][0])
 	}
-	if !chains[0][1].Equal(root.AskX509) {
+	if !chains[0][1].Equal(root.ProductCerts.Ask) {
 		t.Errorf("VCEK verification chain did not step to with the ASK certificate: %v", chains[0][1])
 	}
-	if !chains[0][2].Equal(root.ArkX509) {
+	if !chains[0][2].Equal(root.ProductCerts.Ark) {
 		t.Errorf("VCEK verification chain did not end with the ARK certificate: %v", chains[0][2])
 	}
 }
@@ -168,6 +171,7 @@ func TestSnpReportSignature(t *testing.T) {
 
 func TestKdsMetadataLogic(t *testing.T) {
 	signMu.Do(initSigner)
+	trust.ClearProductCertCache()
 	asn1Zero, _ := asn1.Marshal(0)
 	productName, _ := asn1.Marshal("Cookie-B0")
 	var hwid [64]byte
@@ -294,8 +298,10 @@ func TestKdsMetadataLogic(t *testing.T) {
 		options := &Options{TrustedRoots: map[string][]*trust.AMDRootCerts{
 			"Milan": {&trust.AMDRootCerts{
 				Product: "Milan",
-				ArkX509: newSigner.Ark,
-				AskX509: newSigner.Ask,
+				ProductCerts: &trust.ProductCerts{
+					Ark: newSigner.Ark,
+					Ask: newSigner.Ask,
+				},
 			}},
 		}}
 		if tc.wantErr != "" {
@@ -311,6 +317,7 @@ func TestKdsMetadataLogic(t *testing.T) {
 func TestCRLRootValidity(t *testing.T) {
 	// Tests that the CRL is signed by the ARK.
 	signMu.Do(initSigner)
+	trust.ClearProductCertCache()
 	now := time.Date(2022, time.June, 14, 12, 0, 0, 0, time.UTC)
 
 	ark2, err := test.DefaultArk()
@@ -352,8 +359,10 @@ func TestCRLRootValidity(t *testing.T) {
 	}
 	root := &trust.AMDRootCerts{
 		Product: "Milan",
-		ArkX509: signer.Ark,
-		AskX509: signer.Ask,
+		ProductCerts: &trust.ProductCerts{
+			Ark: signer.Ark,
+			Ask: signer.Ask,
+		},
 	}
 
 	// Now try signing a CRL with a different root that certifies Vcek with a different serial number.
@@ -374,8 +383,10 @@ func TestCRLRootValidity(t *testing.T) {
 	// Finally try checking a VCEK that's signed by a revoked ASK.
 	root2 := &trust.AMDRootCerts{
 		Product: "Milan",
-		ArkX509: signer2.Ark,
-		AskX509: signer2.Ask,
+		ProductCerts: &trust.ProductCerts{
+			Ark: signer2.Ark,
+			Ask: signer2.Ask,
+		},
 	}
 	wantErr2 := "ASK was revoked at 2022-06-14 12:01:00 +0000 UTC"
 	if err := VcekNotRevoked(root2, g2, signer2.Vcek); !test.Match(err, wantErr2) {
@@ -384,6 +395,7 @@ func TestCRLRootValidity(t *testing.T) {
 }
 
 func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
+	trust.ClearProductCertCache()
 	tests := test.TestCases()
 	d, goodRoots, _, kds := testclient.GetSevGuest(tests, &test.DeviceOptions{Now: time.Now()}, t)
 	defer d.Close()
@@ -428,6 +440,7 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 }
 
 func TestRealAttestationVerification(t *testing.T) {
+	trust.ClearProductCertCache()
 	var nonce [64]byte
 	copy(nonce[:], []byte{1, 2, 3, 4, 5})
 	getter := &test.Getter{

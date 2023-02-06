@@ -45,8 +45,10 @@ func GetSevGuest(tcs []test.TestCase, opts *test.DeviceOptions, tb testing.TB) (
 			"Milan": {
 				{
 					Product: "Milan",
-					AskX509: sevTestDevice.Signer.Ask,
-					ArkX509: sevTestDevice.Signer.Ark,
+					ProductCerts: &trust.ProductCerts{
+						Ask: sevTestDevice.Signer.Ask,
+						Ark: sevTestDevice.Signer.Ark,
+					},
 				},
 			},
 		}
@@ -54,9 +56,11 @@ func GetSevGuest(tcs []test.TestCase, opts *test.DeviceOptions, tb testing.TB) (
 			"Milan": {
 				{
 					Product: "Milan",
-					// Backwards, oops
-					AskX509: sevTestDevice.Signer.Ark,
-					ArkX509: sevTestDevice.Signer.Ask,
+					ProductCerts: &trust.ProductCerts{
+						// Backwards, oops
+						Ask: sevTestDevice.Signer.Ark,
+						Ark: sevTestDevice.Signer.Ask,
+					},
 				},
 			},
 		}
@@ -76,10 +80,12 @@ func GetSevGuest(tcs []test.TestCase, opts *test.DeviceOptions, tb testing.TB) (
 		// By flipping the ASK and ARK, we ensure that the attestation will never verify.
 		badSnpRoot[product] = []*trust.AMDRootCerts{{
 			Product: product,
-			ArkX509: rootCerts.AskX509,
-			AskX509: rootCerts.ArkX509,
-			AskSev:  rootCerts.ArkSev,
-			ArkSev:  rootCerts.AskSev,
+			ProductCerts: &trust.ProductCerts{
+				Ark: rootCerts.ProductCerts.Ask,
+				Ask: rootCerts.ProductCerts.Ark,
+			},
+			AskSev: rootCerts.ArkSev,
+			ArkSev: rootCerts.AskSev,
 		}}
 	}
 	return client, nil, badSnpRoot, test.GetKDS(tb)

@@ -547,10 +547,12 @@ func main() {
 			if err == nil {
 				return false
 			}
-			if errors.As(err, &verify.AttestationRecreationErr{}) {
+			var certNetworkErr *trust.AttestationRecreationErr
+			var crlNetworkErr *verify.CRLUnavailableErr
+			if errors.As(err, &certNetworkErr) {
 				exitCode = exitCerts
 				return true
-			} else if errors.As(err, &verify.CRLUnavailableErr{}) {
+			} else if errors.As(err, &crlNetworkErr) {
 				exitCode = exitCrl
 				return true
 			}
