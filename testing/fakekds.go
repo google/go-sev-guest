@@ -33,6 +33,12 @@ import (
 
 var testUseKDS = flag.Bool("test_use_kds", false, "If true, tests will attempt to retrieve certificates from AMD KDS")
 
+// TestUseKDS returns whether tests should use the network to connect the live AMD Key Distribution
+// service.
+func TestUseKDS() bool {
+	return *testUseKDS
+}
+
 // The Milan product certificate bundle is only embedded for tests rather than in the main library
 // since it's generally bad practice to embed certificates that can expire directly into a software
 // project. Production uses should be providing their own certificates.
@@ -47,13 +53,16 @@ var internalKDSCache []byte
 // with certificates cached in a protobuf.
 type FakeKDS struct {
 	Certs *kpb.Certificates
-	// Two CERTIFICATE PEMs for ASK, then ARK.
-	RootBundle string
+	// Two CERTIFICATE PEMs for ASK, then ARK, per product
+	RootBundles map[string]string
 }
 
 // FakeKDSFromFile returns a FakeKDS from a path to a serialized fakekds.Certificates message.
 func FakeKDSFromFile(path string) (*FakeKDS, error) {
-	result := &FakeKDS{Certs: &kpb.Certificates{}}
+	result := &FakeKDS{
+		Certs:       &kpb.Certificates{},
+		RootBundles: map[string]string{"Milan": string(milanCerts)},
+	}
 
 	contents, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
@@ -89,8 +98,8 @@ func FakeKDSFromSigner(signer *AmdSigner) (*FakeKDS, error) {
 		return nil, fmt.Errorf("could not encode root certificates: %v", err)
 	}
 	return &FakeKDS{
-		Certs:      certs,
-		RootBundle: b.String(),
+		Certs:       certs,
+		RootBundles: map[string]string{"Milan": b.String()},
 	}, nil
 }
 
@@ -111,10 +120,11 @@ func (f *FakeKDS) Get(url string) ([]byte, error) {
 	// If a root cert request, return the embedded default root certs.
 	product, err := kds.ParseProductCertChainURL(url)
 	if err == nil {
-		if product == "Milan" {
-			return milanCerts, nil
+		bundle, ok := f.RootBundles[product]
+		if !ok {
+			return nil, fmt.Errorf("no embedded CA bundle for product %q", product)
 		}
-		return nil, fmt.Errorf("no embedded CA bundle for product %q", product)
+		return []byte(bundle), nil
 	}
 	vcek, err := kds.ParseVCEKCertURL(url)
 	if err != nil {
@@ -122,11 +132,11 @@ func (f *FakeKDS) Get(url string) ([]byte, error) {
 	}
 	certs := FindChipTcbCerts(f.Certs, vcek.HWID)
 	if certs == nil {
-		return nil, fmt.Errorf("no certificate found at %q", url)
+		return nil, fmt.Errorf("no certificate found at %q (unknown HWID %v)", url, vcek.HWID)
 	}
 	certbytes, ok := certs[vcek.TCB]
 	if !ok {
-		return nil, fmt.Errorf("no certificate found at %q", url)
+		return nil, fmt.Errorf("no certificate found at %q (host present, bad TCB %v)", url, vcek.TCB)
 	}
 	return certbytes, nil
 }
@@ -137,7 +147,10 @@ func GetKDS(t testing.TB) trust.HTTPSGetter {
 	if *testUseKDS {
 		return trust.DefaultHTTPSGetter()
 	}
-	fakeKds := &FakeKDS{Certs: &kpb.Certificates{}}
+	fakeKds := &FakeKDS{
+		Certs:       &kpb.Certificates{},
+		RootBundles: map[string]string{"Milan": string(milanCerts)},
+	}
 	if err := proto.Unmarshal(internalKDSCache, fakeKds.Certs); err != nil {
 		t.Fatalf("could not unmarshal embedded FakeKDS file: %v", err)
 	}
