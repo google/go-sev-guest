@@ -16,6 +16,7 @@
 package client
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/google/go-sev-guest/client"
@@ -75,18 +76,26 @@ func GetSevGuest(tcs []test.TestCase, opts *test.DeviceOptions, tb testing.TB) (
 	if err != nil {
 		tb.Fatalf("Failed to open SEV guest device: %v", err)
 	}
+	kdsImpl := test.GetKDS(tb)
+
 	badSnpRoot := make(map[string][]*trust.AMDRootCerts)
 	for product, rootCerts := range trust.DefaultRootCerts {
+		// Supplement the defaults with the missing x509 certificates.
+		pc, err := trust.GetProductChain(product, kdsImpl)
+		if err != nil {
+			tb.Fatalf("failed to get product chain for %q: %v", product, err)
+		}
+		fmt.Printf("Making bad root %s %v", product, rootCerts)
 		// By flipping the ASK and ARK, we ensure that the attestation will never verify.
 		badSnpRoot[product] = []*trust.AMDRootCerts{{
 			Product: product,
 			ProductCerts: &trust.ProductCerts{
-				Ark: rootCerts.ProductCerts.Ask,
-				Ask: rootCerts.ProductCerts.Ark,
+				Ark: pc.Ask,
+				Ask: pc.Ark,
 			},
 			AskSev: rootCerts.ArkSev,
 			ArkSev: rootCerts.AskSev,
 		}}
 	}
-	return client, nil, badSnpRoot, test.GetKDS(tb)
+	return client, nil, badSnpRoot, kdsImpl
 }
