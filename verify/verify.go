@@ -28,6 +28,7 @@ import (
 	cpb "github.com/google/go-sev-guest/proto/check"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/google/go-sev-guest/verify/trust"
+	"github.com/google/logger"
 	"github.com/pborman/uuid"
 	"github.com/pkg/errors"
 	"go.uber.org/multierr"
@@ -380,7 +381,7 @@ func validateVcekCertificateProductSpecifics(r *trust.AMDRootCerts, cert *x509.C
 	if err := ValidateVcekCertIssuer(r, cert.Issuer); err != nil {
 		return err
 	}
-	if err := cert.CheckSignatureFrom(r.ProductCerts.Ask); err != nil {
+	if _, err := cert.Verify(*r.X509Options()); err != nil {
 		return fmt.Errorf("error verifying VCEK certificate: %v (%v)", err, r.ProductCerts.Ask.IsCA)
 	}
 	// VCEK is not expected to have a CRL link.
@@ -402,6 +403,7 @@ func VcekDER(vcek []byte, ask []byte, ark []byte, options *Options) (*x509.Certi
 	roots := options.TrustedRoots
 	product := vcekProductMap[exts.ProductName]
 	if len(roots) == 0 {
+		logger.Warning("Using embedded AMD certificates for SEV-SNP attestation root of trust")
 		root := &trust.AMDRootCerts{
 			Product: product,
 			// Require that the root matches embedded root certs.
@@ -512,6 +514,9 @@ func RootOfTrustToOptions(rot *cpb.RootOfTrust) (*Options, error) {
 // SnpAttestation verifies the protobuf representation of an attestation report's signature based
 // on the report's SignatureAlgo, provided the certificate chain is valid.
 func SnpAttestation(attestation *spb.Attestation, options *Options) error {
+	if options == nil {
+		return fmt.Errorf("options cannot be nil")
+	}
 	// Make sure we have the whole certificate chain if we're allowed.
 	if !options.DisableCertFetching {
 		if err := fillInAttestation(attestation, options.Getter); err != nil {
