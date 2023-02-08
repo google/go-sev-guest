@@ -58,9 +58,9 @@ func GetSevGuest(tcs []test.TestCase, opts *test.DeviceOptions, tb testing.TB) (
 				{
 					Product: "Milan",
 					ProductCerts: &trust.ProductCerts{
-						// Backwards, oops
+						// No ASK, oops.
 						Ask: sevTestDevice.Signer.Ark,
-						Ark: sevTestDevice.Signer.Ask,
+						Ark: sevTestDevice.Signer.Ark,
 					},
 				},
 			},
@@ -86,11 +86,11 @@ func GetSevGuest(tcs []test.TestCase, opts *test.DeviceOptions, tb testing.TB) (
 			tb.Fatalf("failed to get product chain for %q: %v", product, err)
 		}
 		fmt.Printf("Making bad root %s %v", product, rootCerts)
-		// By flipping the ASK and ARK, we ensure that the attestation will never verify.
+		// By removing the ASK intermediate, we ensure that the attestation will never verify.
 		badSnpRoot[product] = []*trust.AMDRootCerts{{
 			Product: product,
 			ProductCerts: &trust.ProductCerts{
-				Ark: pc.Ask,
+				Ark: pc.Ark,
 				Ask: pc.Ark,
 			},
 			AskSev: rootCerts.ArkSev,

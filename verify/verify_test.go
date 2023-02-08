@@ -397,7 +397,7 @@ func TestCRLRootValidity(t *testing.T) {
 func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 	trust.ClearProductCertCache()
 	tests := test.TestCases()
-	d, goodRoots, _, kds := testclient.GetSevGuest(tests, &test.DeviceOptions{Now: time.Now()}, t)
+	d, goodRoots, badRoots, kds := testclient.GetSevGuest(tests, &test.DeviceOptions{Now: time.Now()}, t)
 	defer d.Close()
 	type reportGetter func(sg.Device, [64]byte) (*pb.Attestation, error)
 	reportGetters := []struct {
@@ -421,6 +421,7 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 	}
 	// Trust the test device's root certs.
 	options := &Options{TrustedRoots: goodRoots, Getter: kds}
+	badOptions := &Options{TrustedRoots: badRoots, Getter: kds}
 	for _, tc := range tests {
 		if testclient.SkipUnmockableTestCase(&tc) {
 			continue
@@ -433,6 +434,10 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 			if tc.WantErr == "" {
 				if err := SnpAttestation(ereport, options); err != nil {
 					t.Errorf("SnpAttestation(%v) errored unexpectedly: %v", ereport, err)
+				}
+				wantBad := "error verifying VCEK certificate"
+				if err := SnpAttestation(ereport, badOptions); !test.Match(err, wantBad) {
+					t.Errorf("SnpAttestation(_) bad root test errored unexpectedly: %v, want %s", err, wantBad)
 				}
 			}
 		}
