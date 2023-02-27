@@ -48,6 +48,10 @@ var (
 	productCertCache map[string]*ProductCerts
 )
 
+// Communication with AMD suggests repeat requests of the same arguments will
+// be throttled to once per 10 seconds.
+const initialDelay = 10 * time.Second
+
 // ProductCerts contains the root key and signing key devoted to a given product line.
 type ProductCerts struct {
 	Ask *x509.Certificate
@@ -121,7 +125,7 @@ type RetryHTTPSGetter struct {
 
 // Get fetches the body of the URL, retrying a given amount of times on failure.
 func (n *RetryHTTPSGetter) Get(url string) ([]byte, error) {
-	delay := 2 * time.Second
+	delay := initialDelay
 	ctx, cancel := context.WithTimeout(context.Background(), n.Timeout)
 	for {
 		body, err := n.Getter.Get(url)
