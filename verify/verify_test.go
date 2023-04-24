@@ -20,6 +20,7 @@ import (
 	"crypto/x509/pkix"
 	_ "embed"
 	"encoding/asn1"
+	"fmt"
 	"math/big"
 	"math/rand"
 	"os"
@@ -109,12 +110,12 @@ func TestVerifyVcekCert(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not parse valid VCEK certificate: %v", err)
 	}
-	opts := root.X509Options()
+	now := time.Date(2022, time.September, 24, 1, 0, 0, 0, time.UTC)
+	opts := root.X509Options(now)
 	if opts == nil {
 		t.Fatalf("root x509 certificates missing: %v", root)
 	}
 	// This time is within the 25 year lifespan of the Milan product.
-	opts.CurrentTime = time.Date(2022, time.September, 24, 1, 0, 0, 0, time.UTC)
 	chains, err := vcek.Verify(*opts)
 	if err != nil {
 		t.Errorf("could not verify VCEK certificate: %v", err)
@@ -376,7 +377,7 @@ func TestCRLRootValidity(t *testing.T) {
 		},
 	}
 	wantErr := "CRL is not signed by ARK"
-	if err := VcekNotRevoked(root, g2, signer2.Vcek); !test.Match(err, wantErr) {
+	if err := VcekNotRevoked(root, signer2.Vcek, &Options{Getter: g2}); !test.Match(err, wantErr) {
 		t.Errorf("Bad Root: VcekNotRevoked(%v) did not error as expected. Got %v, want %v", signer.Vcek, err, wantErr)
 	}
 
@@ -389,8 +390,99 @@ func TestCRLRootValidity(t *testing.T) {
 		},
 	}
 	wantErr2 := "ASK was revoked at 2022-06-14 12:01:00 +0000 UTC"
-	if err := VcekNotRevoked(root2, g2, signer2.Vcek); !test.Match(err, wantErr2) {
+	if err := VcekNotRevoked(root2, signer2.Vcek, &Options{Getter: g2}); !test.Match(err, wantErr2) {
 		t.Errorf("Bad ASK: VcekNotRevoked(%v) did not error as expected. Got %v, want %v", signer.Vcek, err, wantErr2)
+	}
+}
+
+func TestClockSkew(t *testing.T) {
+	if !sg.UseDefaultSevGuest() {
+		t.Skip("Skipping certificate skew test for hardware device testing")
+	}
+	// Tests that the CRL is signed by the ARK.
+	trust.ClearProductCertCache()
+	staticNow := time.Date(2022, time.June, 14, 12, 0, 0, 0, time.UTC)
+	skewSigner := func(t *testing.T, now time.Time, skew time.Duration) *test.AmdSigner {
+		future := now.Add(skew)
+		sb := &test.AmdSignerBuilder{
+			Product:          "Milan",
+			ArkCreationTime:  future,
+			AskCreationTime:  future,
+			VcekCreationTime: future,
+		}
+		signer2, err := sb.CertChain()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return signer2
+	}
+	var nonce [64]byte
+
+	tcs := []struct {
+		name      string
+		now       time.Time
+		skew      time.Duration
+		threshold time.Duration
+		wantErr   string
+	}{
+		{
+			name:      "happy path",
+			now:       staticNow,
+			skew:      50 * time.Millisecond,
+			threshold: time.Second,
+		},
+
+		{
+			name:      "Too new",
+			skew:      5 * time.Second,
+			now:       staticNow,
+			threshold: time.Second,
+			wantErr: fmt.Sprintf("%s Last error: %s: current time %v is before %v",
+				"VCEK could not be verified by any trusted roots.",
+				"error verifying VCEK certificate: x509: certificate has expired or is not yet valid",
+				staticNow.Format(time.RFC3339), staticNow.Add(5*time.Second).Format(time.RFC3339)),
+		},
+		{
+			name: "happy path (system)",
+			// At the cost of a longer test, allow for computation to take much longer
+			// than one should expect it to take to avoid test flakes.
+			skew:      10 * time.Second,
+			threshold: 15 * time.Second,
+		},
+		{
+			name:      "Too new (system)",
+			skew:      10 * time.Second,
+			threshold: time.Second,
+			wantErr:   "x509: certificate has expired or is not yet valid",
+		},
+	}
+	testData := test.TestCases()
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			realNow := tc.now
+			if realNow.IsZero() {
+				realNow = time.Now()
+			}
+			signer2 := skewSigner(t, realNow, tc.skew)
+			dopts := &test.DeviceOptions{Now: realNow, Signer: signer2}
+			d, goodRoots, _, getter := testclient.GetSevGuest(testData, dopts, t)
+			// Sign the zero report for verification.
+			report, err := sg.GetReport(d, nonce)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Verify the report with a skewed certificate.
+			err = SnpReport(report, &Options{
+				Getter:                getter,
+				KDSClockSkewThreshold: tc.threshold,
+				TrustedRoots:          goodRoots,
+				Now:                   tc.now,
+			})
+			if !test.Match(err, tc.wantErr) {
+				t.Fatalf("SnpReport(report, {KDSClockSkewThreshold: %v}) = %v. Want err: %v", tc.threshold, err, tc.wantErr)
+			}
+		})
 	}
 }
 

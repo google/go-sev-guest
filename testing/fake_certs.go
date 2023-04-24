@@ -313,6 +313,13 @@ func (b *AmdSignerBuilder) CertChain() (*AmdSigner, error) {
 	if b.Product == "" {
 		b.Product = "Milan" // For terse tests.
 	}
+	if b.Keys == nil {
+		keys, err := DefaultAmdKeys()
+		if err != nil {
+			return nil, err
+		}
+		b.Keys = keys
+	}
 	if err := b.certifyArk(); err != nil {
 		return nil, fmt.Errorf("ark creation error: %v", err)
 	}

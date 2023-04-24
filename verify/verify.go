@@ -256,10 +256,14 @@ type CRLUnavailableErr struct {
 
 // GetCrlAndCheckRoot downloads the given cert's CRL from one of the distribution points and
 // verifies that the CRL is valid and doesn't revoke an intermediate key.
-func GetCrlAndCheckRoot(r *trust.AMDRootCerts, getter trust.HTTPSGetter) (*x509.RevocationList, error) {
+func GetCrlAndCheckRoot(r *trust.AMDRootCerts, opts *Options) (*x509.RevocationList, error) {
 	r.Mu.Lock()
 	defer r.Mu.Unlock()
-	if r.CRL != nil && time.Now().Before(r.CRL.NextUpdate) {
+	getter := opts.Getter
+	if getter == nil {
+		getter = trust.DefaultHTTPSGetter()
+	}
+	if r.CRL != nil && opts.Now.Before(r.CRL.NextUpdate) {
 		return r.CRL, nil
 	}
 	var errs error
@@ -310,8 +314,8 @@ func verifyCRL(r *trust.AMDRootCerts) error {
 
 // VcekNotRevoked will consult the online CRL listed in the VCEK certificate for whether this cert
 // has been revoked. Returns nil if not revoked, error on any problem.
-func VcekNotRevoked(r *trust.AMDRootCerts, getter trust.HTTPSGetter, cert *x509.Certificate) error {
-	_, err := GetCrlAndCheckRoot(r, getter)
+func VcekNotRevoked(r *trust.AMDRootCerts, _ *x509.Certificate, options *Options) error {
+	_, err := GetCrlAndCheckRoot(r, options)
 	return err
 }
 
@@ -377,11 +381,11 @@ func validateVcekCertificateProductNonspecific(cert *x509.Certificate) (*kds.Vce
 	return exts, nil
 }
 
-func validateVcekCertificateProductSpecifics(r *trust.AMDRootCerts, cert *x509.Certificate) error {
+func validateVcekCertificateProductSpecifics(r *trust.AMDRootCerts, cert *x509.Certificate, opts *Options) error {
 	if err := ValidateVcekCertIssuer(r, cert.Issuer); err != nil {
 		return err
 	}
-	if _, err := cert.Verify(*r.X509Options()); err != nil {
+	if _, err := cert.Verify(*r.X509Options(opts.Now)); err != nil {
 		return fmt.Errorf("error verifying VCEK certificate: %v (%v)", err, r.ProductCerts.Ask.IsCA)
 	}
 	// VCEK is not expected to have a CRL link.
@@ -422,7 +426,7 @@ func VcekDER(vcek []byte, ask []byte, ark []byte, options *Options) (*x509.Certi
 	}
 	var lastErr error
 	for _, productRoot := range roots[product] {
-		if err := validateVcekCertificateProductSpecifics(productRoot, vcekCert); err != nil {
+		if err := validateVcekCertificateProductSpecifics(productRoot, vcekCert, options); err != nil {
 			lastErr = err
 			continue
 		}
@@ -472,10 +476,25 @@ type Options struct {
 	// Getter takes a URL and returns the body of its contents. By default uses http.Get and returns
 	// the body.
 	Getter trust.HTTPSGetter
+	// KDSClockSkewThreshold is the length of time permitted to wait for a certificate from KDS to
+	// become valid. The host and KDS servers' clocks may be skewed such that a VCEK certificate
+	// may have been "certified in the future".
+	KDSClockSkewThreshold time.Duration
+	// Now is the time at which to verify the validity of certificates. If unset, uses time.Now().
+	Now time.Time
 	// TrustedRoots specifies the ARK and ASK certificates to trust when checking the VCEK. If nil,
 	// then verification will fall back on embedded AMD-published root certificates.
 	// Maps the product name to an array of allowed roots.
 	TrustedRoots map[string][]*trust.AMDRootCerts
+}
+
+// DefaultOptions returns a useful default verification option setting
+func DefaultOptions() *Options {
+	return &Options{
+		Getter:                trust.DefaultHTTPSGetter(),
+		KDSClockSkewThreshold: 5 * time.Minute,
+		Now:                   time.Now(),
+	}
 }
 
 func getTrustedRoots(rot *cpb.RootOfTrust) (map[string][]*trust.AMDRootCerts, error) {
@@ -519,7 +538,7 @@ func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 	}
 	// Make sure we have the whole certificate chain if we're allowed.
 	if !options.DisableCertFetching {
-		if err := fillInAttestation(attestation, options.Getter); err != nil {
+		if err := fillInAttestation(attestation, options); err != nil {
 			return err
 		}
 	}
@@ -529,22 +548,57 @@ func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 		return err
 	}
 	if options != nil && options.CheckRevocations {
-		getter := options.Getter
-		if getter == nil {
-			getter = trust.DefaultHTTPSGetter()
-		}
-		if err := VcekNotRevoked(root, getter, vcek); err != nil {
+		if err := VcekNotRevoked(root, vcek, options); err != nil {
 			return err
 		}
 	}
 	return SnpProtoReportSignature(attestation.GetReport(), vcek)
 }
 
+// waitForClockSkew allows a fresh certificate to be NotBefore a future time if that time is within
+// a threshold of acceptable clock skew between the host and KDS.
+func waitForClockSkew(certRaw []byte, opts *Options) error {
+	cert, err := x509.ParseCertificate(certRaw)
+	if err != nil {
+		return err
+	}
+	now := opts.Now
+	// KDS hasn't returned a certificate from the future. No wait needed.
+	if now.After(cert.NotBefore) {
+		return nil
+	}
+	// Follow the x509 convention that zero means to use system time.
+	realNow := now
+	if realNow.IsZero() {
+		realNow = time.Now()
+	}
+
+	// The certificate is from the future. If within the accepted threshold, then
+	// either wait for the system clock to catch up or flub the Now value, depending
+	// on what the user specified for Now.
+	skew := cert.NotBefore.Sub(realNow)
+	// Wait for the host to catch up if within the threshold, otherwise verification
+	// will fail when comparing time.Now() against cert.NotBefore.
+	if skew <= opts.KDSClockSkewThreshold {
+		if now.IsZero() {
+			// The system time is used for verification, so wait until the future
+			// time of NotBefore before continuing.
+			time.Sleep(skew)
+		} else {
+			// The Now value won't be interpreted as time.Now() since it's not zero, but
+			// the threshold is acceptable to bump up the Now option for verification.
+			opts.Now = cert.NotBefore
+		}
+	}
+	return nil
+}
+
 // fillInAttestation uses AMD's KDS to populate any empty certificate field in the attestation's
 // certificate chain.
-func fillInAttestation(attestation *spb.Attestation, getter trust.HTTPSGetter) error {
+func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 	// TODO(Issue #11): Determine the product a report was fetched from, or make this an option.
 	product := "Milan"
+	getter := options.Getter
 	if getter == nil {
 		getter = trust.DefaultHTTPSGetter()
 	}
@@ -576,6 +630,7 @@ func fillInAttestation(attestation *spb.Attestation, getter trust.HTTPSGetter) e
 			}
 		}
 		chain.VcekCert = vcek
+		return waitForClockSkew(vcek, options)
 	}
 	return nil
 }
@@ -583,12 +638,12 @@ func fillInAttestation(attestation *spb.Attestation, getter trust.HTTPSGetter) e
 // GetAttestationFromReport uses AMD's Key Distribution Service (KDS) to download the certificate
 // chain for the VCEK that supposedly signed the given report, and returns the Attestation
 // representation of their combination. If getter is nil, uses Golang's http.Get.
-func GetAttestationFromReport(report *spb.Report, getter trust.HTTPSGetter) (*spb.Attestation, error) {
+func GetAttestationFromReport(report *spb.Report, options *Options) (*spb.Attestation, error) {
 	result := &spb.Attestation{
 		Report:           report,
 		CertificateChain: &spb.CertificateChain{},
 	}
-	if err := fillInAttestation(result, getter); err != nil {
+	if err := fillInAttestation(result, options); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -601,7 +656,7 @@ func SnpReport(report *spb.Report, options *Options) error {
 	if options.DisableCertFetching {
 		return errors.New("cannot verify attestation report without fetching certificates")
 	}
-	attestation, err := GetAttestationFromReport(report, options.Getter)
+	attestation, err := GetAttestationFromReport(report, options)
 	if err != nil {
 		return fmt.Errorf("could not recreate attestation from report: %w", err)
 	}
