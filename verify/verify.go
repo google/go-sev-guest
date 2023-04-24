@@ -116,10 +116,7 @@ func validateAmdLocation(name pkix.Name, role string) error {
 	if err := checkSingletonList(name.Organization, "organization", "organizations", "Advanced Micro Devices"); err != nil {
 		return err
 	}
-	if err := checkSingletonList(name.OrganizationalUnit, "organizational unit", "organizational uints", "Engineering"); err != nil {
-		return err
-	}
-	return nil
+	return checkSingletonList(name.OrganizationalUnit, "organizational unit", "organizational uints", "Engineering")
 }
 
 func validateRootX509(product string, x *x509.Certificate, version int, role, cn string) error {
