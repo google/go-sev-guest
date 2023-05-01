@@ -42,7 +42,7 @@ type Device struct {
 }
 
 // Open changes the mock device's state to open.
-func (d *Device) Open(path string) error {
+func (d *Device) Open(_ string) error {
 	if d.isOpen {
 		return errors.New("device already open")
 	}
@@ -107,7 +107,7 @@ func DerivedKeyRequestToString(req *labi.SnpDerivedKeyReqABI) string {
 	return fmt.Sprintf("%x %x %x %x %x", req.RootKeySelect, req.GuestFieldSelect, req.Vmpl, req.GuestSVN, req.TCBVersion)
 }
 
-func (d *Device) getDerivedKey(req *labi.SnpDerivedKeyReqABI, rsp *labi.SnpDerivedKeyRespABI, fwErr *uint64) (uintptr, error) {
+func (d *Device) getDerivedKey(req *labi.SnpDerivedKeyReqABI, rsp *labi.SnpDerivedKeyRespABI, _ *uint64) (uintptr, error) {
 	if len(d.Keys) == 0 {
 		return 0, errors.New("test error: no keys")
 	}

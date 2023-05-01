@@ -246,7 +246,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		attestation, err := verify.GetAttestationFromReport(report, getter)
+		attestation, err := verify.GetAttestationFromReport(report, &verify.Options{Getter: getter})
 		if err != nil {
 			t.Fatal(err)
 		}

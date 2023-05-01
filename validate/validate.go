@@ -103,7 +103,7 @@ func lengthCheck(name string, length int, value []byte) error {
 }
 
 func checkOptionsLengths(opts *Options) error {
-	if err := multierr.Combine(
+	return multierr.Combine(
 		lengthCheck("family_id", abi.FamilyIDSize, opts.FamilyID),
 		lengthCheck("image_id", abi.ImageIDSize, opts.ImageID),
 		lengthCheck("report_data", abi.ReportDataSize, opts.ReportData),
@@ -111,10 +111,7 @@ func checkOptionsLengths(opts *Options) error {
 		lengthCheck("host_data", abi.HostDataSize, opts.HostData),
 		lengthCheck("report_id", abi.ReportIDSize, opts.ReportID),
 		lengthCheck("report_id_ma", abi.ReportIDMASize, opts.ReportIDMA),
-		lengthCheck("chip_id", abi.ChipIDSize, opts.ChipID)); err != nil {
-		return err
-	}
-	return nil
+		lengthCheck("chip_id", abi.ChipIDSize, opts.ChipID))
 }
 
 // Converts "maj.min" to its uint16 representation or errors.

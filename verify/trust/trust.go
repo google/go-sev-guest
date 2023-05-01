@@ -210,7 +210,7 @@ func (r *ProductCerts) FromKDSCert(path string) error {
 
 // X509Options returns the ASK and ARK as the only intermediate and root certificates of an x509
 // verification options object, or nil if either key's x509 certificate is not present in r.
-func (r *ProductCerts) X509Options() *x509.VerifyOptions {
+func (r *ProductCerts) X509Options(now time.Time) *x509.VerifyOptions {
 	if r.Ask == nil || r.Ark == nil {
 		return nil
 	}
@@ -218,7 +218,7 @@ func (r *ProductCerts) X509Options() *x509.VerifyOptions {
 	roots.AddCert(r.Ark)
 	intermediates := x509.NewCertPool()
 	intermediates.AddCert(r.Ask)
-	return &x509.VerifyOptions{Roots: roots, Intermediates: intermediates}
+	return &x509.VerifyOptions{Roots: roots, Intermediates: intermediates, CurrentTime: now}
 }
 
 // ClearProductCertCache clears the product certificate cache. This is useful for testing with
@@ -239,14 +239,13 @@ func GetProductChain(product string, getter HTTPSGetter) (*ProductCerts, error) 
 	}
 	result, ok := productCertCache[product]
 	if !ok {
-		logger.Infof("Getting product cert chain for %s", product)
 		askark, err := getter.Get(kds.ProductCertChainURL(product))
 		if err != nil {
 			return nil, &AttestationRecreationErr{
 				Msg: fmt.Sprintf("could not download ASK and ARK certificates: %v", err),
 			}
 		}
-		logger.Infof("Product chain in %s", string(askark))
+
 		ask, ark, err := kds.ParseProductCertChain(askark)
 		if err != nil {
 			// Treat a bad parse as a network error since it's likely due to an incomplete transfer.
@@ -294,11 +293,11 @@ func (r *AMDRootCerts) FromKDSCert(path string) error {
 
 // X509Options returns the ASK and ARK as the only intermediate and root certificates of an x509
 // verification options object, or nil if either key's x509 certificate is not present in r.
-func (r *AMDRootCerts) X509Options() *x509.VerifyOptions {
+func (r *AMDRootCerts) X509Options(now time.Time) *x509.VerifyOptions {
 	if r.ProductCerts == nil {
 		return nil
 	}
-	return r.ProductCerts.X509Options()
+	return r.ProductCerts.X509Options(now)
 }
 
 // Parse ASK, ARK certificates from the embedded AMD certificate file.

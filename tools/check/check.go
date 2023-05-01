@@ -393,7 +393,7 @@ func setUInt32Value(value **wrapperspb.UInt32Value, name, flag string) error {
 	return err
 }
 
-func setString(dest *string, name, flag string, defaultValue string) {
+func setString(dest *string, _, flag string, defaultValue string) {
 	if flag == "" {
 		// Empty strings are not expected valid values, so override.
 		if !override() || *dest == "" {
@@ -435,7 +435,7 @@ func populateRootOfTrust() error {
 func populateConfig() error {
 	policy := config.Policy
 
-	setHashes := func(dest *[][]byte, name, flag string) error {
+	setHashes := func(dest *[][]byte, _, flag string) error {
 		if flag != "" {
 			hashes, err := parseHashes(flag)
 			if err != nil {
@@ -445,7 +445,7 @@ func populateConfig() error {
 		}
 		return nil
 	}
-	setCertBytes := func(dest *[][]byte, name, flag string) error {
+	setCertBytes := func(dest *[][]byte, _, flag string) error {
 		if flag != "" {
 			bytes, err := getCertBytes(flag)
 			if err != nil {

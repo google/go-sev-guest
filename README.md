@@ -80,7 +80,7 @@ the ASK (intermediate signing key). The default option is to not check the CRL.
 Example expected invocation:
 
 ```
-verify.SnpAttestation(myAttestation, &verify.Options{})
+verify.SnpAttestation(myAttestation, verify.DefaultOptions())
 ```
 
 #### `Options` type
