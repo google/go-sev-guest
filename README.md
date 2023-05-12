@@ -62,7 +62,7 @@ requirements for certificate well-formedness come from the AMD Key Distribution
 Service (KDS) specification.
 
 This library embeds AMD's root and SEV intermediate keys
-([AMD source](https://developer.amd.com/wp-content/resources/ask_ark_milan.cert))
+([AMD source](https://download.amd.com/developer/eula/sev/ask_ark_milan.cert))
 for the
 [KDS product_name=Milan cert_chain](https://kdsintf.amd.com/vcek/v1/Milan/cert_chain)
 in the AMD SEV certificate format to cross check against any certificate chain
