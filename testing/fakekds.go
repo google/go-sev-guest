@@ -16,7 +16,6 @@ package testing
 
 import (
 	"bytes"
-	_ "embed"
 	"encoding/pem"
 	"flag"
 	"fmt"
@@ -26,6 +25,7 @@ import (
 
 	"github.com/google/go-sev-guest/kds"
 	kpb "github.com/google/go-sev-guest/proto/fakekds"
+	"github.com/google/go-sev-guest/verify/testdata"
 	"github.com/google/go-sev-guest/verify/trust"
 	"go.uber.org/multierr"
 	"google.golang.org/protobuf/proto"
@@ -61,29 +61,32 @@ func TestUseKDS() bool {
 	return *testUseKDS || testKds.value == "amd"
 }
 
-// The Milan product certificate bundle is only embedded for tests rather than in the main library
-// since it's generally bad practice to embed certificates that can expire directly into a software
-// project. Production uses should be providing their own certificates.
-//
-//go:embed "milan.pem"
-var milanCerts []byte
-
 // Insert your own KDS cache here with go:embed.
 var internalKDSCache []byte
+
+// RootBundle represents the two different CA bundles that the KDS can
+// return.
+type RootBundle struct {
+	VcekBundle string
+	VlekBundle string
+}
 
 // FakeKDS implements the verify.HTTPSGetter interface to provide certificates like AMD KDS, but
 // with certificates cached in a protobuf.
 type FakeKDS struct {
 	Certs *kpb.Certificates
-	// Two CERTIFICATE PEMs for ASK, then ARK, per product
-	RootBundles map[string]string
+	// Two CERTIFICATE PEMs for ASK, then ARK or ASVK then ARK, per product
+	RootBundles map[string]RootBundle
 }
 
 // FakeKDSFromFile returns a FakeKDS from a path to a serialized fakekds.Certificates message.
 func FakeKDSFromFile(path string) (*FakeKDS, error) {
 	result := &FakeKDS{
-		Certs:       &kpb.Certificates{},
-		RootBundles: map[string]string{"Milan": string(milanCerts)},
+		Certs: &kpb.Certificates{},
+		RootBundles: map[string]RootBundle{"Milan": {
+			VcekBundle: string(testdata.MilanVcekBytes),
+			VlekBundle: string(testdata.MilanVlekBytes),
+		}},
 	}
 
 	contents, err := os.ReadFile(path)
@@ -117,11 +120,26 @@ func FakeKDSFromSigner(signer *AmdSigner) (*FakeKDS, error) {
 		pem.Encode(b, &pem.Block{Type: "CERTIFICATE", Bytes: signer.Ask.Raw}),
 		pem.Encode(b, &pem.Block{Type: "CERTIFICATE", Bytes: signer.Ark.Raw}),
 	); err != nil {
-		return nil, fmt.Errorf("could not encode root certificates: %v", err)
+		return nil, fmt.Errorf("could not encode VCEK root certificates: %v", err)
+	}
+	vcekBundle := b.String()
+	var vlekBundle string
+	if signer.Asvk != nil {
+		b := &strings.Builder{}
+		if err := multierr.Combine(
+			pem.Encode(b, &pem.Block{Type: "CERTIFICATE", Bytes: signer.Asvk.Raw}),
+			pem.Encode(b, &pem.Block{Type: "CERTIFICATE", Bytes: signer.Ark.Raw}),
+		); err != nil {
+			return nil, fmt.Errorf("could not encode VLEK root certificates: %v", err)
+		}
+		vlekBundle = b.String()
 	}
 	return &FakeKDS{
-		Certs:       certs,
-		RootBundles: map[string]string{"Milan": b.String()},
+		Certs: certs,
+		RootBundles: map[string]RootBundle{"Milan": {
+			VcekBundle: vcekBundle,
+			VlekBundle: vlekBundle,
+		}},
 	}, nil
 }
 
@@ -140,13 +158,20 @@ func FindChipTcbCerts(database *kpb.Certificates, chipID []byte) map[uint64][]by
 // database.
 func (f *FakeKDS) Get(url string) ([]byte, error) {
 	// If a root cert request, return the embedded default root certs.
-	product, err := kds.ParseProductCertChainURL(url)
+	product, key, err := kds.ParseProductCertChainURL(url)
 	if err == nil {
-		bundle, ok := f.RootBundles[product]
+		bundles, ok := f.RootBundles[product]
 		if !ok {
 			return nil, fmt.Errorf("no embedded CA bundle for product %q", product)
 		}
-		return []byte(bundle), nil
+		switch key {
+		case kds.VcekCertFunction:
+			return []byte(bundles.VcekBundle), nil
+		case kds.VlekCertFunction:
+			return []byte(bundles.VlekBundle), nil
+		default:
+			return nil, fmt.Errorf("internal: unsupperted key type for fake bundles: %q", key)
+		}
 	}
 	vcek, err := kds.ParseVCEKCertURL(url)
 	if err != nil {
@@ -170,8 +195,11 @@ func GetKDS(t testing.TB) trust.HTTPSGetter {
 		return trust.DefaultHTTPSGetter()
 	}
 	fakeKds := &FakeKDS{
-		Certs:       &kpb.Certificates{},
-		RootBundles: map[string]string{"Milan": string(milanCerts)},
+		Certs: &kpb.Certificates{},
+		RootBundles: map[string]RootBundle{"Milan": {
+			VcekBundle: string(testdata.MilanVcekBytes),
+			VlekBundle: string(testdata.MilanVlekBytes),
+		}},
 	}
 	// Provide nothing if --test_kds=none.
 	if testKds.value == "none" {

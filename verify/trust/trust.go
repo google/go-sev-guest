@@ -24,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,7 +44,7 @@ var (
 	// is over cannot be reconstructed from the SEV certificate format. The X.509 certificate with its
 	// expiration dates is at https://kdsintf.amd.com/vcek/v1/Milan/cert_chain
 	//go:embed ask_ark_milan.sevcert
-	askArkMilanBytes []byte
+	askArkMilanVcekBytes []byte
 
 	// A cache of product certificate KDS results per product.
 	prodCacheMu      sync.Mutex
@@ -56,8 +57,9 @@ const initialDelay = 10 * time.Second
 
 // ProductCerts contains the root key and signing key devoted to a given product line.
 type ProductCerts struct {
-	Ask *x509.Certificate
-	Ark *x509.Certificate
+	Ask  *x509.Certificate
+	Asvk *x509.Certificate
+	Ark  *x509.Certificate
 }
 
 // AMDRootCerts encapsulates the certificates that represent root of trust in AMD.
@@ -164,7 +166,7 @@ func DefaultHTTPSGetter() HTTPSGetter {
 func (r *AMDRootCerts) Unmarshal(data []byte) error {
 	ask, index, err := abi.ParseAskCert(data)
 	if err != nil {
-		return fmt.Errorf("could not parse ASK certificate in SEV certificate format: %v", err)
+		return fmt.Errorf("could not parse intermediate ASK certificate in SEV certificate format: %v", err)
 	}
 	r.AskSev = ask
 	ark, _, err := abi.ParseAskCert(data[index:])
@@ -189,13 +191,17 @@ func ParseCert(cert []byte) (*x509.Certificate, error) {
 	return x509.ParseCertificate(raw)
 }
 
-// Decode populates the ProductCerts from DER-formatted certificates for both the ASK and the ARK.
+// Decode populates the ProductCerts from DER-formatted certificates for both the AS[V]K and the ARK.
 func (r *ProductCerts) Decode(ask []byte, ark []byte) error {
-	askCert, err := ParseCert(ask)
+	ica, err := ParseCert(ask)
 	if err != nil {
-		return fmt.Errorf("could not parse ASK certificate: %v", err)
+		return fmt.Errorf("could not parse intermediate certificate: %v", err)
 	}
-	r.Ask = askCert
+	if strings.HasPrefix(ica.Subject.CommonName, "SEV-VLEK") {
+		r.Asvk = ica
+	} else {
+		r.Ask = ica
+	}
 
 	arkCert, err := ParseCert(ark)
 	if err != nil {
@@ -226,16 +232,28 @@ func (r *ProductCerts) FromKDSCert(path string) error {
 	return r.FromKDSCertBytes(certBytes)
 }
 
-// X509Options returns the ASK and ARK as the only intermediate and root certificates of an x509
+// X509Options returns the AS[V]K and ARK as the only intermediate and root certificates of an x509
 // verification options object, or nil if either key's x509 certificate is not present in r.
-func (r *ProductCerts) X509Options(now time.Time) *x509.VerifyOptions {
-	if r.Ask == nil || r.Ark == nil {
+// The choice between ASK and ASVK is determined bey key.
+func (r *ProductCerts) X509Options(now time.Time, key abi.ReportSigner) *x509.VerifyOptions {
+	if r.Ark == nil {
 		return nil
 	}
 	roots := x509.NewCertPool()
 	roots.AddCert(r.Ark)
 	intermediates := x509.NewCertPool()
-	intermediates.AddCert(r.Ask)
+	switch key {
+	case abi.VcekReportSigner:
+		if r.Ask == nil {
+			return nil
+		}
+		intermediates.AddCert(r.Ask)
+	case abi.VlekReportSigner:
+		if r.Asvk == nil {
+			return nil
+		}
+		intermediates.AddCert(r.Asvk)
+	}
 	return &x509.VerifyOptions{Roots: roots, Intermediates: intermediates, CurrentTime: now}
 }
 
@@ -249,7 +267,7 @@ func ClearProductCertCache() {
 
 // GetProductChain returns the ASK and ARK certificates of the given product, either from getter
 // or from a cache of the results from the last successful call.
-func GetProductChain(product string, getter HTTPSGetter) (*ProductCerts, error) {
+func GetProductChain(product string, s abi.ReportSigner, getter HTTPSGetter) (*ProductCerts, error) {
 	if productCertCache == nil {
 		prodCacheMu.Lock()
 		productCertCache = make(map[string]*ProductCerts)
@@ -257,7 +275,7 @@ func GetProductChain(product string, getter HTTPSGetter) (*ProductCerts, error) 
 	}
 	result, ok := productCertCache[product]
 	if !ok {
-		askark, err := getter.Get(kds.ProductCertChainURL(product))
+		askark, err := getter.Get(kds.ProductCertChainURL(s, product))
 		if err != nil {
 			return nil, &AttestationRecreationErr{
 				Msg: fmt.Sprintf("could not download ASK and ARK certificates: %v", err),
@@ -309,19 +327,20 @@ func (r *AMDRootCerts) FromKDSCert(path string) error {
 	return r.ProductCerts.FromKDSCert(path)
 }
 
-// X509Options returns the ASK and ARK as the only intermediate and root certificates of an x509
+// X509Options returns the AS[V]K and ARK as the only intermediate and root certificates of an x509
 // verification options object, or nil if either key's x509 certificate is not present in r.
-func (r *AMDRootCerts) X509Options(now time.Time) *x509.VerifyOptions {
+// Choice between ASK and ASVK is determined by key.
+func (r *AMDRootCerts) X509Options(now time.Time, key abi.ReportSigner) *x509.VerifyOptions {
 	if r.ProductCerts == nil {
 		return nil
 	}
-	return r.ProductCerts.X509Options(now)
+	return r.ProductCerts.X509Options(now, key)
 }
 
 // Parse ASK, ARK certificates from the embedded AMD certificate file.
 func init() {
 	milanCerts := new(AMDRootCerts)
-	milanCerts.Unmarshal(askArkMilanBytes)
+	milanCerts.Unmarshal(askArkMilanVcekBytes)
 	DefaultRootCerts = map[string]*AMDRootCerts{
 		"Milan": milanCerts,
 	}

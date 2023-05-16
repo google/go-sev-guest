@@ -102,10 +102,13 @@ const (
 	VcekGUID = "63da758d-e664-4564-adc5-f4b93be8accd"
 	// VlekGUID is the Versioned Loaded Endorsement Key GUID
 	VlekGUID = "a8074bc2-a25a-483e-aae6-39c045a0b8a1"
-	// AskGUID is the AMD signing Key GUID
+	// AskGUID is the AMD signing Key GUID. Used for the ASVK as well.
 	AskGUID = "4ab7b379-bbac-4fe4-a02f-05aef327c782"
 	// ArkGUID is the AMD Root Key GUID
 	ArkGUID = "c0b406a4-a803-4952-9743-3fb6014cd0ae"
+	// AsvkGUID may not be defined, but we'd like it to be, so that
+	// a single machine can use both VCEK and VLEK report signing.
+	AsvkGUID = "00000000-0000-0000-0000-000000000000"
 
 	// ExpectedReportVersion is set by the SNP API specification
 	// https://www.amd.com/system/files/TechDocs/56860.pdf
@@ -184,9 +187,8 @@ func ParseSnpPolicy(guestPolicy uint64) (SnpPolicy, error) {
 	if guestPolicy&uint64(1<<policyReserved1bit) == 0 {
 		return result, fmt.Errorf("policy[%d] is reserved, must be 1, got 0", policyReserved1bit)
 	}
-	validMask := uint64((1 << 21) - 1)
-	if guestPolicy&^validMask != 0 {
-		return result, fmt.Errorf("policy[63:21] are reserved mbz, got 0x%x", guestPolicy)
+	if err := mbz64(guestPolicy, "policy", 63, 21); err != nil {
+		return result, err
 	}
 	result.ABIMinor = uint8(guestPolicy & 0xff)
 	result.ABIMajor = uint8((guestPolicy >> 8) & 0xff)
@@ -293,6 +295,14 @@ func mbz(data []uint8, lo, hi int) error {
 	return nil
 }
 
+// Checks a must-be-zero range of a uint64 between bits hi down to lo inclusive.
+func mbz64(data uint64, base string, hi, lo int) error {
+	if (data>>lo)&((1<<(hi-lo+1))-1) != 0 {
+		return fmt.Errorf("mbz range %s[0x%x:0x%x] not all zero: %x", base, lo, hi, data)
+	}
+	return nil
+}
+
 // ReportToSignatureDER returns the signature component of an attestation report in DER format for
 // use in x509 verification.
 func ReportToSignatureDER(report []byte) ([]byte, error) {
@@ -335,6 +345,86 @@ func SignatureAlgo(report []byte) uint32 {
 	return binary.LittleEndian.Uint32(signatureAlgoSlice(report))
 }
 
+// ReportSigner represents which kind of key is expected to have signed the attestation report
+type ReportSigner uint8
+
+const (
+	// VcekReportSigner is the SIGNING_KEY value for if the VCEK signed the attestation report.
+	VcekReportSigner ReportSigner = iota
+	// VlekReportSigner is the SIGNING_KEY value for if the VLEK signed the attestation report.
+	VlekReportSigner
+	endorseReserved2
+	endorseReserved3
+	endorseReserved4
+	endorseReserved5
+	endorseReserved6
+	// NoneReportSigner is the SIGNING_KEY value for if the attestation report is not signed.
+	NoneReportSigner
+)
+
+// SignerInfo represents information about the signing circumstances for the attestation report.
+type SignerInfo struct {
+	// SigningKey represents kind of key by which a report was signed.
+	SigningKey ReportSigner
+	// MaskChipKey is true if the host chose to enable CHIP_ID masking, to cause the report's CHIP_ID
+	// to be all zeros.
+	MaskChipKey bool
+	// AuthorKeyEn is true if the VM is launched with an IDBLOCK that includes an author key.
+	AuthorKeyEn bool
+}
+
+// String returns a ReportSigner string rendering.
+func (k ReportSigner) String() string {
+	switch k {
+	case VcekReportSigner:
+		return "VCEK"
+	case VlekReportSigner:
+		return "VLEK"
+	case NoneReportSigner:
+		return "None"
+	default:
+		return fmt.Sprintf("UNKNOWN(%d)", byte(k))
+	}
+}
+
+// ParseSignerInfo interprets report[0x48:0x4c] into its component pieces and errors
+// on non-zero mbz fields.
+func ParseSignerInfo(signerInfo uint32) (result SignerInfo, err error) {
+	info64 := uint64(signerInfo)
+	if err = mbz64(info64, "data[0x48:0x4C]", 31, 5); err != nil {
+		return result, err
+	}
+	result.SigningKey = ReportSigner((signerInfo >> 2) & 7)
+	if result.SigningKey > VlekReportSigner && result.SigningKey < NoneReportSigner {
+		return result, fmt.Errorf("signing_key values 2-6 are reserved. Got %v", result.SigningKey)
+	}
+	result.MaskChipKey = (signerInfo & 2) != 0
+	result.AuthorKeyEn = (signerInfo & 1) != 0
+	return result, nil
+}
+
+// ComposeSignerInfo returns the uint32 value expected to populate the attestation report byte range
+// 0x48:0x4C.
+func ComposeSignerInfo(signerInfo SignerInfo) uint32 {
+	var result uint32
+	if signerInfo.AuthorKeyEn {
+		result |= 1
+	}
+	if signerInfo.MaskChipKey {
+		result |= 2
+	}
+	result |= uint32(signerInfo.SigningKey) << 2
+	return result
+}
+
+// ReportSignerInfo returns the signer info component of a SEV-SNP raw report.
+func ReportSignerInfo(data []byte) (uint32, error) {
+	if len(data) < 0x4C {
+		return 0, fmt.Errorf("report too small: %d", len(data))
+	}
+	return binary.LittleEndian.Uint32(data[0x48:0x4C]), nil
+}
+
 // ReportToProto creates a pb.Report from the little-endian AMD SEV-SNP attestation report byte
 // array in SEV SNP ABI format for ATTESTATION_REPORT.
 func ReportToProto(data []uint8) (*pb.Report, error) {
@@ -357,11 +447,11 @@ func ReportToProto(data []uint8) (*pb.Report, error) {
 	r.CurrentTcb = binary.LittleEndian.Uint64(data[0x38:0x40])
 	r.PlatformInfo = binary.LittleEndian.Uint64(data[0x40:0x48])
 
-	reservedAuthor := binary.LittleEndian.Uint32(data[0x48:0x4C])
-	if reservedAuthor&0xffffffe0 != 0 {
-		return nil, fmt.Errorf("mbz bits at offset 0x48 not zero: 0x%08x", reservedAuthor&0xffffffe0)
+	signerInfo, err := ParseSignerInfo(binary.LittleEndian.Uint32(data[0x48:0x4C]))
+	if err != nil {
+		return nil, err
 	}
-	r.AuthorKeyEn = reservedAuthor
+	r.SignerInfo = ComposeSignerInfo(signerInfo)
 	if err := mbz(data, 0x4C, 0x50); err != nil {
 		return nil, err
 	}
@@ -480,11 +570,10 @@ func ReportToAbiBytes(r *pb.Report) ([]byte, error) {
 	binary.LittleEndian.PutUint64(data[0x38:0x40], r.CurrentTcb)
 	binary.LittleEndian.PutUint64(data[0x40:0x48], r.PlatformInfo)
 
-	var reservedAuthor uint32
-	if r.AuthorKeyEn == 1 {
-		reservedAuthor |= 0x01
+	if _, err := ParseSignerInfo(r.SignerInfo); err != nil {
+		return nil, err
 	}
-	binary.LittleEndian.PutUint32(data[0x48:0x4C], reservedAuthor)
+	binary.LittleEndian.PutUint32(data[0x48:0x4C], r.SignerInfo)
 	copy(data[0x50:0x90], r.ReportData[:])
 	copy(data[0x90:0xC0], r.Measurement[:])
 	copy(data[0xC0:0xE0], r.HostData[:])
@@ -680,12 +769,17 @@ func (c *CertTable) GetByGUIDString(guid string) ([]byte, error) {
 // so missing certificates aren't an error. If certificates are missing, you can
 // choose to fetch them yourself by calling verify.GetAttestationFromReport.
 func (c *CertTable) Proto() *pb.CertificateChain {
-	var vcek, ask, ark []byte
-	var err error
-	vcek, err = c.GetByGUIDString(VcekGUID)
-	if err != nil {
-		logger.Warningf("Warning: VCEK certificate not found in data pages: %v", err)
+	var vcek, vlek, ask, ark []byte
+	var err, cerr, lerr error
+	// Whereas a host is permitted to populate its certificate chain blob with both a VCEK and VLEK
+	// certificate, doing so is unusual since the choice of VCEK vs VLEK is an infrastructural choice.
+	// To keep the implementation clean, we don't pun vcek and vlek in the same field.
+	vcek, cerr = c.GetByGUIDString(VcekGUID)
+	vlek, lerr = c.GetByGUIDString(VlekGUID)
+	if cerr != nil && lerr != nil {
+		logger.Warning("Warning: Neither VCEK nor VLEK certificate found in data pages")
 	}
+
 	ask, err = c.GetByGUIDString(AskGUID)
 	if err != nil {
 		logger.Warningf("ASK certificate not found in data pages: %v", err)
@@ -697,6 +791,7 @@ func (c *CertTable) Proto() *pb.CertificateChain {
 	firmware, _ := c.GetByGUIDString(gce.FirmwareCertGUID)
 	return &pb.CertificateChain{
 		VcekCert:     vcek,
+		VlekCert:     vlek,
 		AskCert:      ask,
 		ArkCert:      ark,
 		FirmwareCert: firmware,

@@ -25,7 +25,7 @@ import (
 )
 
 func TestCertificatesParse(t *testing.T) {
-	signer, err := DefaultCertChain("Milan", time.Now())
+	signer, err := DefaultTestOnlyCertChain("Milan", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,17 +38,25 @@ func TestCertificatesParse(t *testing.T) {
 		t.Fatal(err)
 	}
 	var hasVcek bool
+	var hasVlek bool
 	var hasAsk bool
+	var hasAsvk bool
 	var hasArk bool
-	if len(entries) != 3 {
-		t.Errorf("ParseSnpCertTableHeader(_) returned %d entries, want 3", len(entries))
+	if len(entries) != 5 {
+		t.Errorf("ParseSnpCertTableHeader(_) returned %d entries, want 5", len(entries))
 	}
 	for _, entry := range entries {
+		if uuid.Equal(entry.GUID, uuid.Parse(abi.VlekGUID)) {
+			hasVlek = true
+		}
 		if uuid.Equal(entry.GUID, uuid.Parse(abi.VcekGUID)) {
 			hasVcek = true
 		}
 		if uuid.Equal(entry.GUID, uuid.Parse(abi.AskGUID)) {
 			hasAsk = true
+		}
+		if uuid.Equal(entry.GUID, uuid.Parse(abi.AsvkGUID)) {
+			hasAsvk = true
 		}
 		if uuid.Equal(entry.GUID, uuid.Parse(abi.ArkGUID)) {
 			hasArk = true
@@ -58,6 +66,9 @@ func TestCertificatesParse(t *testing.T) {
 			t.Errorf("could not parse certificate of %v: %v", entry.GUID, err)
 		}
 	}
+	if !hasVlek {
+		t.Errorf("fake certs missing VLEK")
+	}
 	if !hasVcek {
 		t.Errorf("fake certs missing VCEK")
 	}
@@ -66,6 +77,9 @@ func TestCertificatesParse(t *testing.T) {
 	}
 	if !hasArk {
 		t.Errorf("fake certs missing ARK")
+	}
+	if !hasAsvk {
+		t.Errorf("fake certs missing ASVK")
 	}
 	if _, err := kds.VcekCertificateExtensions(signer.Vcek); err != nil {
 		t.Errorf("could not parse generated VCEK extensions: %v", err)

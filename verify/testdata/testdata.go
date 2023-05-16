@@ -25,10 +25,15 @@ import _ "embed"
 //go:embed vcek.testcer
 var VcekBytes []byte
 
-// MilanBytes is the Milan product cert_chain as issued by the AMD KDS.
+// MilanVcekBytes is the Milan product vcek cert_chain as issued by the AMD KDS.
 //
 //go:embed milan.testcer
-var MilanBytes []byte
+var MilanVcekBytes []byte
+
+// MilanVlekBytes is the Milan product vlek cert_chain as issued by the AMD KDS.
+//
+//go:embed milanvlek.testcer
+var MilanVlekBytes []byte
 
 // AttestationBytes is an example attestation report from a VM that was
 // launched without an ID_BLOCK.

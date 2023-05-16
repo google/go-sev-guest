@@ -535,8 +535,11 @@ func main() {
 			die(fmt.Errorf("could not read %q: %v", *testKdsFile, err))
 		}
 		kds := &testing.FakeKDS{
-			Certs:       &kpb.Certificates{},
-			RootBundles: map[string]string{"Milan": string(testdata.MilanBytes)},
+			Certs: &kpb.Certificates{},
+			RootBundles: map[string]testing.RootBundle{"Milan": {
+				VcekBundle: string(testdata.MilanVcekBytes),
+				VlekBundle: string(testdata.MilanVlekBytes),
+			}},
 		}
 		sopts.Getter = kds
 		if err := proto.Unmarshal(b, kds.Certs); err != nil {

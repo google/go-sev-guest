@@ -177,7 +177,13 @@ func TestOpenGetRawExtendedReportClose(t *testing.T) {
 			}
 			if UseDefaultSevGuest() {
 				tcdev := device.(*test.Device)
-				if err := tcdev.Signer.Vcek.CheckSignature(x509.ECDSAWithSHA384, got, der); err != nil {
+				infoRaw, _ := abi.ReportSignerInfo(raw)
+				info, _ := abi.ParseSignerInfo(infoRaw)
+				reportSigner := tcdev.Signer.Vcek
+				if info.SigningKey == abi.VlekReportSigner {
+					reportSigner = tcdev.Signer.Vlek
+				}
+				if err := reportSigner.CheckSignature(x509.ECDSAWithSHA384, got, der); err != nil {
 					t.Errorf("signature with test keys did not verify: %v", err)
 				}
 			}

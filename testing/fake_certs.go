@@ -41,6 +41,7 @@ import (
 const (
 	arkExpirationYears  = 25
 	askExpirationYears  = 25
+	asvkExpirationYears = 25
 	vcekExpirationYears = 7
 	arkRsaBits          = 4096
 	askRsaBits          = 4096
@@ -51,7 +52,9 @@ const (
 type AmdSigner struct {
 	Ark  *x509.Certificate
 	Ask  *x509.Certificate
+	Asvk *x509.Certificate
 	Vcek *x509.Certificate
+	Vlek *x509.Certificate
 	Keys *AmdKeys
 	// This identity does not match AMD's notion of an HWID. It is purely to combine expectations of
 	// report data -> KDS URL construction for the fake KDS implementation.
@@ -63,7 +66,9 @@ type AmdSigner struct {
 type AmdKeys struct {
 	Ark  *rsa.PrivateKey
 	Ask  *rsa.PrivateKey
+	Asvk *rsa.PrivateKey
 	Vcek *ecdsa.PrivateKey
+	Vlek *ecdsa.PrivateKey
 }
 
 var insecureRandomness = rand.New(rand.NewSource(0xc0de))
@@ -71,9 +76,24 @@ var insecureRandomness = rand.New(rand.NewSource(0xc0de))
 // Sign takes a chunk of bytes, signs it with VcekPriv, and returns the R, S pair for the signature
 // in little endian format.
 func (s *AmdSigner) Sign(toSign []byte) (*big.Int, *big.Int, error) {
+	info, err := abi.ReportSignerInfo(toSign)
+	if err != nil {
+		return nil, nil, err
+	}
+	si, err := abi.ParseSignerInfo(info)
+	if err != nil {
+		return nil, nil, err
+	}
+	var key *ecdsa.PrivateKey
+	switch si.SigningKey {
+	case abi.VcekReportSigner:
+		key = s.Keys.Vcek
+	case abi.VlekReportSigner:
+		key = s.Keys.Vlek
+	}
 	h := crypto.SHA384.New()
 	h.Write(toSign)
-	R, S, err := ecdsa.Sign(insecureRandomness, s.Keys.Vcek, h.Sum(nil))
+	R, S, err := ecdsa.Sign(insecureRandomness, key, h.Sum(nil))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -104,16 +124,23 @@ type AmdSignerBuilder struct {
 	Product          string
 	ArkCreationTime  time.Time
 	AskCreationTime  time.Time
+	AsvkCreationTime time.Time
 	VcekCreationTime time.Time
+	VlekCreationTime time.Time
 	ArkCustom        CertOverride
 	AskCustom        CertOverride
+	AsvkCustom       CertOverride
 	VcekCustom       CertOverride
+	VlekCustom       CertOverride
+	CSPID            string
 	HWID             [abi.ChipIDSize]byte
 	TCB              kds.TCBVersion
 	// Intermediate built certificates
 	Ark  *x509.Certificate
 	Ask  *x509.Certificate
+	Asvk *x509.Certificate
 	Vcek *x509.Certificate
+	Vlek *x509.Certificate
 }
 
 func amdPkixName(commonName string, serialNumber string) pkix.Name {
@@ -128,17 +155,42 @@ func amdPkixName(commonName string, serialNumber string) pkix.Name {
 	}
 }
 
-func unsignedArkOrAsk(issuerRole, subjectRole, productName string, issuerSerialNumber string, creationTime time.Time, expirationYears int) *x509.Certificate {
+func arkName(product, serialNumber string) pkix.Name {
+	return amdPkixName(fmt.Sprintf("ARK-%s", product), serialNumber)
+}
+
+func askName(product, serialNumber string) pkix.Name {
+	return amdPkixName(fmt.Sprintf("SEV-%s", product), serialNumber)
+}
+
+func asvkName(product, serialNumber string) pkix.Name {
+	return amdPkixName(fmt.Sprintf("SEV-VLEK-%s", product), serialNumber)
+}
+
+func (b *AmdSignerBuilder) unsignedRoot(arkName pkix.Name, key abi.ReportSigner, subjectSerial *big.Int, creationTime time.Time, expirationYears int) *x509.Certificate {
+	var subject pkix.Name
+	issuer := arkName
 	cert := &x509.Certificate{}
+	crl := kds.CrlLinkByKey(b.Product, key)
+	sn := fmt.Sprintf("%x", subjectSerial)
+	switch key {
+	case abi.VcekReportSigner:
+		subject = askName(b.Product, sn)
+	case abi.VlekReportSigner:
+		subject = asvkName(b.Product, sn)
+	case abi.NoneReportSigner:
+		crl = kds.CrlLinkByKey(b.Product, abi.VcekReportSigner)
+		subject = arkName
+	}
 	cert.NotBefore = creationTime
 	cert.NotAfter = creationTime.Add(time.Duration(365*24*expirationYears) * time.Hour)
 	cert.SignatureAlgorithm = x509.SHA384WithRSAPSS
 	cert.PublicKeyAlgorithm = x509.RSA
 	cert.Version = 3
-	cert.SerialNumber = big.NewInt(0xc0dec0de)
-	cert.Issuer = amdPkixName(fmt.Sprintf("%s-%s", issuerRole, productName), issuerSerialNumber)
-	cert.Subject = amdPkixName(fmt.Sprintf("%s-%s", subjectRole, productName), fmt.Sprintf("%x", cert.SerialNumber))
-	cert.CRLDistributionPoints = []string{fmt.Sprintf("https://kdsintf.amd.com/vcek/v1/%s/crl", productName)}
+	cert.SerialNumber = subjectSerial
+	cert.Issuer = issuer
+	cert.Subject = subject
+	cert.CRLDistributionPoints = []string{crl}
 	cert.IsCA = true
 	cert.BasicConstraintsValid = true
 	return cert
@@ -194,6 +246,11 @@ func DefaultAsk() (*rsa.PrivateKey, error) {
 	return privateKey, nil
 }
 
+// DefaultAsvk returns a new RSA key with the expected size for an ASVK.
+func DefaultAsvk() (*rsa.PrivateKey, error) {
+	return DefaultAsk()
+}
+
 // DefaultVcek returns a new ECDSA key on the expected curve for a VCEK.
 func DefaultVcek() (*ecdsa.PrivateKey, error) {
 	privateKey, err := ecdsa.GenerateKey(elliptic.P384(), insecureRandomness)
@@ -201,6 +258,11 @@ func DefaultVcek() (*ecdsa.PrivateKey, error) {
 		return nil, err
 	}
 	return privateKey, nil
+}
+
+// DefaultVlek returns a new ECDSA key on the expected curve for a VLEK.
+func DefaultVlek() (*ecdsa.PrivateKey, error) {
+	return DefaultVcek()
 }
 
 // DefaultAmdKeys returns a key set for ARK, ASK, and VCEK with the expected key type and size.
@@ -213,16 +275,25 @@ func DefaultAmdKeys() (*AmdKeys, error) {
 	if err != nil {
 		return nil, err
 	}
+	asvk, err := DefaultAsvk()
+	if err != nil {
+		return nil, err
+	}
 	vcek, err := DefaultVcek()
 	if err != nil {
 		return nil, err
 	}
-	return &AmdKeys{Ark: ark, Ask: ask, Vcek: vcek}, nil
+	vlek, err := DefaultVlek()
+	if err != nil {
+		return nil, err
+	}
+	return &AmdKeys{Ark: ark, Ask: ask, Vcek: vcek, Vlek: vlek, Asvk: asvk}, nil
 }
 
 func (b *AmdSignerBuilder) certifyArk() error {
-	cert := unsignedArkOrAsk(
-		"ARK", "ARK", b.Product, "0xc0dec0de", b.ArkCreationTime, arkExpirationYears)
+	sn := big.NewInt(0xc0dec0de)
+	name := arkName(b.Product, fmt.Sprintf("%x", sn))
+	cert := b.unsignedRoot(name, abi.NoneReportSigner, sn, b.ArkCreationTime, arkExpirationYears)
 	cert.KeyUsage = x509.KeyUsageCertSign | x509.KeyUsageCRLSign
 
 	b.ArkCustom.override(cert)
@@ -236,8 +307,10 @@ func (b *AmdSignerBuilder) certifyArk() error {
 	return err
 }
 
+// must be called after certifyArk
 func (b *AmdSignerBuilder) certifyAsk() error {
-	cert := unsignedArkOrAsk("ARK", "SEV", b.Product, b.Ark.Subject.SerialNumber, b.AskCreationTime, askExpirationYears)
+	sn := big.NewInt(0xc0dec0de)
+	cert := b.unsignedRoot(b.Ark.Subject, abi.VcekReportSigner, sn, b.AskCreationTime, askExpirationYears)
 	cert.KeyUsage = x509.KeyUsageCertSign
 
 	b.AskCustom.override(cert)
@@ -254,11 +327,37 @@ func (b *AmdSignerBuilder) certifyAsk() error {
 	return err
 }
 
-// CustomVcekExtensions returns an array of extensions following the KDS specification
+// must be called after certifyArk
+func (b *AmdSignerBuilder) certifyAsvk() error {
+	sn := big.NewInt(0xc0dec0de)
+	cert := b.unsignedRoot(b.Ark.Subject, abi.VlekReportSigner, sn, b.AsvkCreationTime, asvkExpirationYears)
+	cert.KeyUsage = x509.KeyUsageCertSign
+
+	b.AsvkCustom.override(cert)
+
+	caBytes, err := x509.CreateCertificate(insecureRandomness, cert, b.Ark, b.Keys.Asvk.Public(), b.Keys.Ark)
+	if err != nil {
+		return fmt.Errorf("could not create a certificate from %v: %v", cert, err)
+	}
+	asvkcert, err := x509.ParseCertificate(caBytes)
+	if err != nil {
+		return err
+	}
+	b.Asvk = asvkcert
+	return err
+}
+
+// CustomExtensions returns an array of extensions following the KDS specification
 // for the given values.
-func CustomVcekExtensions(tcb kds.TCBParts, hwid [64]byte) []pkix.Extension {
+func CustomExtensions(tcb kds.TCBParts, hwid []byte, cspid string) []pkix.Extension {
+	var productName []byte
 	asn1Zero, _ := asn1.Marshal(0)
-	productName, _ := asn1.MarshalWithParams("Milan-B0", "ia5")
+	if hwid != nil {
+		productName, _ = asn1.MarshalWithParams("Milan-B0", "ia5")
+	} else {
+		// VLEK doesn't have a -stepping component to its productName.
+		productName, _ = asn1.MarshalWithParams("Milan", "ia5")
+	}
 	blSpl, _ := asn1.Marshal(int(tcb.BlSpl))
 	teeSpl, _ := asn1.Marshal(int(tcb.TeeSpl))
 	snpSpl, _ := asn1.Marshal(int(tcb.SnpSpl))
@@ -267,8 +366,7 @@ func CustomVcekExtensions(tcb kds.TCBParts, hwid [64]byte) []pkix.Extension {
 	spl6, _ := asn1.Marshal(int(tcb.Spl6))
 	spl7, _ := asn1.Marshal(int(tcb.Spl7))
 	ucodeSpl, _ := asn1.Marshal(int(tcb.UcodeSpl))
-	asn1Hwid, _ := asn1.Marshal(hwid[:])
-	return []pkix.Extension{
+	exts := []pkix.Extension{
 		{Id: kds.OidStructVersion, Value: asn1Zero},
 		{Id: kds.OidProductName1, Value: productName},
 		{Id: kds.OidBlSpl, Value: blSpl},
@@ -279,24 +377,42 @@ func CustomVcekExtensions(tcb kds.TCBParts, hwid [64]byte) []pkix.Extension {
 		{Id: kds.OidSpl6, Value: spl6},
 		{Id: kds.OidSpl7, Value: spl7},
 		{Id: kds.OidUcodeSpl, Value: ucodeSpl},
-		{Id: kds.OidHwid, Value: asn1Hwid},
+	}
+	if hwid != nil {
+		asn1Hwid, _ := asn1.Marshal(hwid[:])
+		exts = append(exts, pkix.Extension{Id: kds.OidHwid, Value: asn1Hwid})
+	} else {
+		if cspid == "" {
+			cspid = "placeholder"
+		}
+		asn1cspid, _ := asn1.MarshalWithParams(cspid, "ia5")
+		exts = append(exts, pkix.Extension{Id: kds.OidCspID, Value: asn1cspid})
+	}
+	return exts
+}
+
+func (b *AmdSignerBuilder) endorsementKeyPrecert(creationTime time.Time, hwid []byte, serialNumber *big.Int, key abi.ReportSigner) *x509.Certificate {
+	subject := amdPkixName(fmt.Sprintf("SEV-%s", key.String()), "0")
+	subject.SerialNumber = fmt.Sprintf("%x", serialNumber)
+	ica := b.Ask
+	if key == abi.VlekReportSigner {
+		ica = b.Asvk
+	}
+	return &x509.Certificate{
+		Version:            3,
+		SignatureAlgorithm: x509.SHA384WithRSAPSS,
+		PublicKeyAlgorithm: x509.ECDSA,
+		Issuer:             amdPkixName(fmt.Sprintf("SEV-%s", b.Product), ica.Subject.SerialNumber),
+		Subject:            subject,
+		SerialNumber:       serialNumber,
+		NotBefore:          time.Time{},
+		NotAfter:           creationTime.Add(vcekExpirationYears * 365 * 24 * time.Hour),
+		ExtraExtensions:    CustomExtensions(kds.TCBParts{}, hwid, b.CSPID),
 	}
 }
 
 func (b *AmdSignerBuilder) certifyVcek() error {
-	cert := &x509.Certificate{}
-	cert.SignatureAlgorithm = x509.SHA384WithRSAPSS
-	cert.PublicKeyAlgorithm = x509.ECDSA
-	cert.Version = 3
-	cert.Issuer = amdPkixName(fmt.Sprintf("SEV-%s", b.Product), b.Ask.Subject.SerialNumber)
-	cert.Subject = amdPkixName("SEV-VCEK", "0")
-	cert.SerialNumber = big.NewInt(0)
-	cert.Subject.SerialNumber = fmt.Sprintf("%x", cert.SerialNumber)
-	cert.NotBefore = time.Time{}
-	cert.NotAfter = b.VcekCreationTime.Add(vcekExpirationYears * 365 * 24 * time.Hour)
-	var hwid [64]byte
-	cert.ExtraExtensions = CustomVcekExtensions(kds.TCBParts{}, hwid)
-
+	cert := b.endorsementKeyPrecert(b.VcekCreationTime, make([]byte, abi.ChipIDSize), big.NewInt(0), abi.VcekReportSigner)
 	b.VcekCustom.override(cert)
 
 	caBytes, err := x509.CreateCertificate(insecureRandomness, cert, b.Ask, b.Keys.Vcek.Public(), b.Keys.Ask)
@@ -308,8 +424,21 @@ func (b *AmdSignerBuilder) certifyVcek() error {
 	return err
 }
 
-// CertChain creates a test-only certificate chain from the keys and configurables in b.
-func (b *AmdSignerBuilder) CertChain() (*AmdSigner, error) {
+func (b *AmdSignerBuilder) certifyVlek() error {
+	cert := b.endorsementKeyPrecert(b.VlekCreationTime, nil, big.NewInt(0), abi.VlekReportSigner)
+	b.VlekCustom.override(cert)
+
+	caBytes, err := x509.CreateCertificate(insecureRandomness, cert, b.Asvk, b.Keys.Vlek.Public(), b.Keys.Asvk)
+	if err != nil {
+		return fmt.Errorf("could not create a certificate from %v: %v", cert, err)
+	}
+	signed, err := x509.ParseCertificate(caBytes)
+	b.Vlek = signed
+	return err
+}
+
+// TestOnlyCertChain creates a test-only certificate chain from the keys and configurables in b.
+func (b *AmdSignerBuilder) TestOnlyCertChain() (*AmdSigner, error) {
 	if b.Product == "" {
 		b.Product = "Milan" // For terse tests.
 	}
@@ -326,13 +455,23 @@ func (b *AmdSignerBuilder) CertChain() (*AmdSigner, error) {
 	if err := b.certifyAsk(); err != nil {
 		return nil, fmt.Errorf("ask creation error: %v", err)
 	}
+	if err := b.certifyAsvk(); err != nil {
+		return nil, fmt.Errorf("asvk creation error: %v", err)
+	}
 	if err := b.certifyVcek(); err != nil {
 		return nil, fmt.Errorf("vcek creation error: %v", err)
+	}
+	if b.Keys.Vlek != nil {
+		if err := b.certifyVlek(); err != nil {
+			return nil, fmt.Errorf("vlek creation error: %v", err)
+		}
 	}
 	s := &AmdSigner{
 		Ark:  b.Ark,
 		Ask:  b.Ask,
+		Asvk: b.Asvk,
 		Vcek: b.Vcek,
+		Vlek: b.Vlek,
 		Keys: b.Keys,
 		TCB:  b.TCB,
 	}
@@ -340,8 +479,8 @@ func (b *AmdSignerBuilder) CertChain() (*AmdSigner, error) {
 	return s, nil
 }
 
-// DefaultCertChain creates a test-only certificate chain for a fake attestation signer.
-func DefaultCertChain(productName string, creationTime time.Time) (*AmdSigner, error) {
+// DefaultTestOnlyCertChain creates a test-only certificate chain for a fake attestation signer.
+func DefaultTestOnlyCertChain(productName string, creationTime time.Time) (*AmdSigner, error) {
 	keys, err := DefaultAmdKeys()
 	if err != nil {
 		return nil, fmt.Errorf("error generating fake keys: %v", err)
@@ -349,17 +488,20 @@ func DefaultCertChain(productName string, creationTime time.Time) (*AmdSigner, e
 	b := &AmdSignerBuilder{
 		Keys:             keys,
 		Product:          productName,
+		CSPID:            "go-sev-guest",
 		ArkCreationTime:  creationTime,
 		AskCreationTime:  creationTime,
+		AsvkCreationTime: creationTime,
 		VcekCreationTime: creationTime,
+		VlekCreationTime: creationTime,
 	}
-	return b.CertChain()
+	return b.TestOnlyCertChain()
 }
 
 // CertTableBytes outputs the certificates in AMD's ABI format.
 func (s *AmdSigner) CertTableBytes() ([]byte, error) {
 	// Calculate the output size and the offset at which to copy each certificate.
-	headers := make([]abi.CertTableHeaderEntry, 4) // ARK, ASK, VCEK, NULL
+	headers := make([]abi.CertTableHeaderEntry, 6) // ARK, ASK, VCEK, VLEK, ASVK, NULL
 	headers[0].GUID = uuid.Parse(abi.ArkGUID)
 	headers[0].Offset = uint32(len(headers) * abi.CertTableEntrySize)
 	headers[0].Length = uint32(len(s.Ark.Raw))
@@ -372,9 +514,17 @@ func (s *AmdSigner) CertTableBytes() ([]byte, error) {
 	headers[2].Offset = headers[1].Offset + headers[1].Length
 	headers[2].Length = uint32(len(s.Vcek.Raw))
 
+	headers[3].GUID = uuid.Parse(abi.VlekGUID)
+	headers[3].Offset = headers[2].Offset + headers[2].Length
+	headers[3].Length = uint32(len(s.Vlek.Raw))
+
+	headers[4].GUID = uuid.Parse(abi.AsvkGUID)
+	headers[4].Offset = headers[3].Offset + headers[3].Length
+	headers[4].Length = uint32(len(s.Asvk.Raw))
+
 	// Write out the headers and the certificates at the appropriate offsets.
-	result := make([]byte, headers[2].Offset+headers[2].Length)
-	for i, cert := range [][]byte{s.Ark.Raw, s.Ask.Raw, s.Vcek.Raw} {
+	result := make([]byte, headers[4].Offset+headers[4].Length)
+	for i, cert := range [][]byte{s.Ark.Raw, s.Ask.Raw, s.Vcek.Raw, s.Vlek.Raw, s.Asvk.Raw} {
 		if err := (&headers[i]).Write(result[i*abi.CertTableEntrySize:]); err != nil {
 			return nil, err
 		}

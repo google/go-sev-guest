@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/google/go-sev-guest/abi"
 	"github.com/google/go-sev-guest/client"
 	test "github.com/google/go-sev-guest/testing"
 	"github.com/google/go-sev-guest/verify/trust"
@@ -47,8 +48,9 @@ func GetSevGuest(tcs []test.TestCase, opts *test.DeviceOptions, tb testing.TB) (
 				{
 					Product: "Milan",
 					ProductCerts: &trust.ProductCerts{
-						Ask: sevTestDevice.Signer.Ask,
-						Ark: sevTestDevice.Signer.Ark,
+						Ask:  sevTestDevice.Signer.Ask,
+						Ark:  sevTestDevice.Signer.Ark,
+						Asvk: sevTestDevice.Signer.Asvk,
 					},
 				},
 			},
@@ -59,8 +61,9 @@ func GetSevGuest(tcs []test.TestCase, opts *test.DeviceOptions, tb testing.TB) (
 					Product: "Milan",
 					ProductCerts: &trust.ProductCerts{
 						// No ASK, oops.
-						Ask: sevTestDevice.Signer.Ark,
-						Ark: sevTestDevice.Signer.Ark,
+						Ask:  sevTestDevice.Signer.Ark,
+						Ark:  sevTestDevice.Signer.Ark,
+						Asvk: sevTestDevice.Signer.Ark,
 					},
 				},
 			},
@@ -81,7 +84,7 @@ func GetSevGuest(tcs []test.TestCase, opts *test.DeviceOptions, tb testing.TB) (
 	badSnpRoot := make(map[string][]*trust.AMDRootCerts)
 	for product, rootCerts := range trust.DefaultRootCerts {
 		// Supplement the defaults with the missing x509 certificates.
-		pc, err := trust.GetProductChain(product, kdsImpl)
+		pc, err := trust.GetProductChain(product, abi.VcekReportSigner, kdsImpl)
 		if err != nil {
 			tb.Fatalf("failed to get product chain for %q: %v", product, err)
 		}
@@ -90,8 +93,9 @@ func GetSevGuest(tcs []test.TestCase, opts *test.DeviceOptions, tb testing.TB) (
 		badSnpRoot[product] = []*trust.AMDRootCerts{{
 			Product: product,
 			ProductCerts: &trust.ProductCerts{
-				Ark: pc.Ark,
-				Ask: pc.Ark,
+				Ark:  pc.Ark,
+				Ask:  pc.Ark,
+				Asvk: pc.Ark,
 			},
 			AskSev: rootCerts.ArkSev,
 			ArkSev: rootCerts.AskSev,
