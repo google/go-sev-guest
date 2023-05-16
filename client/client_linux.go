@@ -18,6 +18,7 @@
 package client
 
 import (
+	"flag"
 	"fmt"
 	"time"
 
@@ -28,8 +29,13 @@ import (
 const (
 	// defaultSevGuestDevicePath is the platform's usual device path to the SEV guest.
 	defaultSevGuestDevicePath = "/dev/sev-guest"
-	throttleDuration          = 2 * time.Second
-	burstMax                  = 2
+)
+
+// These flags should not be needed for long term health of the project as the Linux kernel
+// catches up with throttling-awareness.
+var (
+	throttleDuration = flag.Duration("self_throttle_duration", 2*time.Second, "Rate-limit library-initiated device commands to this duration")
+	burstMax         = flag.Int("self_throttle_burst", 1, "Rate-limit library-initiated device commands to this many commands per duration")
 )
 
 // LinuxDevice implements the Device interface with Linux ioctls.
@@ -83,8 +89,8 @@ func (d *LinuxDevice) Ioctl(command uintptr, req any) (uintptr, error) {
 	if d.burst == 0 {
 		sinceLast := time.Since(d.lastCmd)
 		// Self-throttle for tests without guest OS throttle detection
-		if sinceLast < throttleDuration {
-			time.Sleep(throttleDuration - sinceLast)
+		if sinceLast < *throttleDuration {
+			time.Sleep(*throttleDuration - sinceLast)
 		}
 	}
 	switch sreq := req.(type) {
@@ -92,7 +98,7 @@ func (d *LinuxDevice) Ioctl(command uintptr, req any) (uintptr, error) {
 		abi := sreq.ABI()
 		result, _, errno := unix.Syscall(unix.SYS_IOCTL, uintptr(d.fd), command, uintptr(abi.Pointer()))
 		abi.Finish(sreq)
-		d.burst = (d.burst + 1) % burstMax
+		d.burst = (d.burst + 1) % *burstMax
 		if d.burst == 0 {
 			d.lastCmd = time.Now()
 		}
