@@ -473,10 +473,6 @@ type Options struct {
 	// Getter takes a URL and returns the body of its contents. By default uses http.Get and returns
 	// the body.
 	Getter trust.HTTPSGetter
-	// KDSClockSkewThreshold is the length of time permitted to wait for a certificate from KDS to
-	// become valid. The host and KDS servers' clocks may be skewed such that a VCEK certificate
-	// may have been "certified in the future".
-	KDSClockSkewThreshold time.Duration
 	// Now is the time at which to verify the validity of certificates. If unset, uses time.Now().
 	Now time.Time
 	// TrustedRoots specifies the ARK and ASK certificates to trust when checking the VCEK. If nil,
@@ -488,9 +484,8 @@ type Options struct {
 // DefaultOptions returns a useful default verification option setting
 func DefaultOptions() *Options {
 	return &Options{
-		Getter:                trust.DefaultHTTPSGetter(),
-		KDSClockSkewThreshold: 5 * time.Minute,
-		Now:                   time.Now(),
+		Getter: trust.DefaultHTTPSGetter(),
+		Now:    time.Now(),
 	}
 }
 
@@ -552,44 +547,6 @@ func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 	return SnpProtoReportSignature(attestation.GetReport(), vcek)
 }
 
-// waitForClockSkew allows a fresh certificate to be NotBefore a future time if that time is within
-// a threshold of acceptable clock skew between the host and KDS.
-func waitForClockSkew(certRaw []byte, opts *Options) error {
-	cert, err := x509.ParseCertificate(certRaw)
-	if err != nil {
-		return err
-	}
-	now := opts.Now
-	// KDS hasn't returned a certificate from the future. No wait needed.
-	if now.After(cert.NotBefore) {
-		return nil
-	}
-	// Follow the x509 convention that zero means to use system time.
-	realNow := now
-	if realNow.IsZero() {
-		realNow = time.Now()
-	}
-
-	// The certificate is from the future. If within the accepted threshold, then
-	// either wait for the system clock to catch up or flub the Now value, depending
-	// on what the user specified for Now.
-	skew := cert.NotBefore.Sub(realNow)
-	// Wait for the host to catch up if within the threshold, otherwise verification
-	// will fail when comparing time.Now() against cert.NotBefore.
-	if skew <= opts.KDSClockSkewThreshold {
-		if now.IsZero() {
-			// The system time is used for verification, so wait until the future
-			// time of NotBefore before continuing.
-			time.Sleep(skew)
-		} else {
-			// The Now value won't be interpreted as time.Now() since it's not zero, but
-			// the threshold is acceptable to bump up the Now option for verification.
-			opts.Now = cert.NotBefore
-		}
-	}
-	return nil
-}
-
 // fillInAttestation uses AMD's KDS to populate any empty certificate field in the attestation's
 // certificate chain.
 func fillInAttestation(attestation *spb.Attestation, options *Options) error {
@@ -627,7 +584,6 @@ func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 			}
 		}
 		chain.VcekCert = vcek
-		return waitForClockSkew(vcek, options)
 	}
 	return nil
 }
