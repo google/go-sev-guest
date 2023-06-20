@@ -20,7 +20,6 @@ import (
 	"crypto/x509/pkix"
 	_ "embed"
 	"encoding/asn1"
-	"fmt"
 	"math/big"
 	"math/rand"
 	"os"
@@ -395,97 +394,6 @@ func TestCRLRootValidity(t *testing.T) {
 	}
 }
 
-func TestClockSkew(t *testing.T) {
-	if !sg.UseDefaultSevGuest() {
-		t.Skip("Skipping certificate skew test for hardware device testing")
-	}
-	// Tests that the CRL is signed by the ARK.
-	trust.ClearProductCertCache()
-	staticNow := time.Date(2022, time.June, 14, 12, 0, 0, 0, time.UTC)
-	skewSigner := func(t *testing.T, now time.Time, skew time.Duration) *test.AmdSigner {
-		future := now.Add(skew)
-		sb := &test.AmdSignerBuilder{
-			Product:          "Milan",
-			ArkCreationTime:  future,
-			AskCreationTime:  future,
-			VcekCreationTime: future,
-		}
-		signer2, err := sb.CertChain()
-		if err != nil {
-			t.Fatal(err)
-		}
-		return signer2
-	}
-	var nonce [64]byte
-
-	tcs := []struct {
-		name      string
-		now       time.Time
-		skew      time.Duration
-		threshold time.Duration
-		wantErr   string
-	}{
-		{
-			name:      "happy path",
-			now:       staticNow,
-			skew:      50 * time.Millisecond,
-			threshold: time.Second,
-		},
-
-		{
-			name:      "Too new",
-			skew:      5 * time.Second,
-			now:       staticNow,
-			threshold: time.Second,
-			wantErr: fmt.Sprintf("%s Last error: %s: current time %v is before %v",
-				"VCEK could not be verified by any trusted roots.",
-				"error verifying VCEK certificate: x509: certificate has expired or is not yet valid",
-				staticNow.Format(time.RFC3339), staticNow.Add(5*time.Second).Format(time.RFC3339)),
-		},
-		{
-			name: "happy path (system)",
-			// At the cost of a longer test, allow for computation to take much longer
-			// than one should expect it to take to avoid test flakes.
-			skew:      10 * time.Second,
-			threshold: 15 * time.Second,
-		},
-		{
-			name:      "Too new (system)",
-			skew:      10 * time.Second,
-			threshold: time.Second,
-			wantErr:   "x509: certificate has expired or is not yet valid",
-		},
-	}
-	testData := test.TestCases()
-	for _, tc := range tcs {
-		t.Run(tc.name, func(t *testing.T) {
-			realNow := tc.now
-			if realNow.IsZero() {
-				realNow = time.Now()
-			}
-			signer2 := skewSigner(t, realNow, tc.skew)
-			dopts := &test.DeviceOptions{Now: realNow, Signer: signer2}
-			d, goodRoots, _, getter := testclient.GetSevGuest(testData, dopts, t)
-			// Sign the zero report for verification.
-			report, err := sg.GetReport(d, nonce)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			// Verify the report with a skewed certificate.
-			err = SnpReport(report, &Options{
-				Getter:                getter,
-				KDSClockSkewThreshold: tc.threshold,
-				TrustedRoots:          goodRoots,
-				Now:                   tc.now,
-			})
-			if !test.Match(err, tc.wantErr) {
-				t.Fatalf("SnpReport(report, {KDSClockSkewThreshold: %v}) = %v. Want err: %v", tc.threshold, err, tc.wantErr)
-			}
-		})
-	}
-}
-
 func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 	trust.ClearProductCertCache()
 	tests := test.TestCases()
@@ -549,5 +457,27 @@ func TestRealAttestationVerification(t *testing.T) {
 	}
 	if err := RawSnpReport(testdata.AttestationBytes, &Options{Getter: getter}); err != nil {
 		t.Error(err)
+	}
+}
+
+func TestKDSCertBackdated(t *testing.T) {
+	if !test.TestUseKDS() {
+		t.Skip()
+	}
+	getter := test.GetKDS(t)
+	// Throttle requests to KDS.
+	time.Sleep(10 * time.Second)
+	bytes, err := getter.Get("https://kdsintf.amd.com/vcek/v1/Milan/3ac3fe21e13fb0990eb28a802e3fb6a29483a6b0753590c951bdd3b8e53786184ca39e359669a2b76a1936776b564ea464cdce40c05f63c9b610c5068b006b5d?blSPL=2&teeSPL=0&snpSPL=5&ucodeSPL=68")
+	if err != nil {
+		t.Skipf("Live KDS query failed: %v", err)
+	}
+	cert, err := x509.ParseCertificate(bytes)
+	if err != nil {
+		t.Fatalf("Could not parse live VCEK certificate: %v", err)
+	}
+	now := time.Now()
+	if !cert.NotBefore.Before(now.Add(-23 * time.Hour)) {
+		t.Fatalf("KDS has not backdated its certificates. NotBefore: %s, now: %s",
+			cert.NotBefore.Format(time.RFC3339), now.Format(time.RFC3339))
 	}
 }
