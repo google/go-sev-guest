@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/google/go-sev-guest/abi"
+	"github.com/google/go-sev-guest/kds"
 	"github.com/pborman/uuid"
 )
 
@@ -65,5 +66,8 @@ func TestCertificatesParse(t *testing.T) {
 	}
 	if !hasArk {
 		t.Errorf("fake certs missing ARK")
+	}
+	if _, err := kds.VcekCertificateExtensions(signer.Vcek); err != nil {
+		t.Errorf("could not parse generated VCEK extensions: %v", err)
 	}
 }
