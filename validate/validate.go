@@ -293,62 +293,144 @@ func validateVerbatimFields(report *spb.Report, options *Options) error {
 	)
 }
 
+// partDescription combines a TCB decomposition with a short description. It enables concise
+// comparisons with high quality error messages.
+type partDescription struct {
+	parts kds.TCBParts
+	desc  string
+}
+
+// reportTcbDescriptions is a collection of all TCB kinds that are within or about a report itself.
+type reportTcbDescriptions struct {
+	// The host operator's reported TCB, which may not be higher than the current TCB.
+	// May be lower than the current TCB, e.g., if the host wants to ensure a lower bound
+	// TCB across multiple machines, and this one is just ahead of the curve with a newer version.
+	reported partDescription
+	// The firmware version of the VM host machine at the time the report was constructed.
+	current partDescription
+	// When a firmware version is installed and also ensured to not get overwritten with a
+	// firmware with a lower TCB than this.
+	committed partDescription
+	// The CURRENT_TCB version of the machine at the time of launch.
+	launch partDescription
+	// The TCB that the VCEK certificate is certified for. Embedded as x509v3 extensions from
+	// AMD's Key Distribution Service (KDS).
+	vcek partDescription
+}
+
+func getReportTcbs(report *spb.Report, vcekTcb kds.TCBVersion) *reportTcbDescriptions {
+	return &reportTcbDescriptions{
+		reported: partDescription{
+			parts: kds.DecomposeTCBVersion(kds.TCBVersion(report.GetReportedTcb())),
+			desc:  "report's REPORTED_TCB",
+		},
+		current: partDescription{
+			parts: kds.DecomposeTCBVersion(kds.TCBVersion(report.GetCurrentTcb())),
+			desc:  "report's CURRENT_TCB",
+		},
+		committed: partDescription{
+			parts: kds.DecomposeTCBVersion(kds.TCBVersion(report.GetCommittedTcb())),
+			desc:  "report's COMMITTED_TCB",
+		},
+		launch: partDescription{
+			parts: kds.DecomposeTCBVersion(kds.TCBVersion(report.GetLaunchTcb())),
+			desc:  "report's LAUNCH_TCB",
+		},
+		vcek: partDescription{
+			parts: kds.DecomposeTCBVersion(vcekTcb),
+			desc:  "TCB of the VCEK certificate",
+		},
+	}
+}
+
+// policyTcbDescriptions is a collection of all TCB kinds that the validation policy specifies.
+type policyTcbDescriptions struct {
+	// The validator policy's specified minimum TCB for both reported
+	minimum partDescription
+	// The validator policy's sp
+	minLaunch partDescription
+}
+
+func getPolicyTcbs(options *Options) *policyTcbDescriptions {
+	return &policyTcbDescriptions{
+		minimum: partDescription{
+			parts: options.MinimumTCB,
+			desc:  "policy minimum TCB",
+		},
+		minLaunch: partDescription{
+			parts: options.MinimumLaunchTCB,
+			desc:  "policy minimum launch TCB",
+		},
+	}
+}
+
+// tcbNeError return an error if the two TCBs are not equal
+func tcbNeError(left, right partDescription) error {
+	ltcb, _ := kds.ComposeTCBParts(left.parts)
+	rtcb, _ := kds.ComposeTCBParts(right.parts)
+	if ltcb == rtcb {
+		return nil
+	}
+	return fmt.Errorf("the %s 0x%x does not match the %s 0x%x", left.desc, ltcb, right.desc, rtcb)
+}
+
+// tcbGtError returns an error if wantLower is greater than (in part) wantHigher. It enforces
+// the property wantLower <= wantHigher.
+func tcbGtError(wantLower, wantHigher partDescription) error {
+	if kds.TCBPartsLE(wantLower.parts, wantHigher.parts) {
+		return nil
+	}
+	return fmt.Errorf("the %s %+v is lower than the %s %+v in at least one component",
+		wantHigher.desc, wantHigher.parts, wantLower.desc, wantLower.parts)
+}
+
+// validateTcb returns an error if the TCB values present in the report and VCEK certificate do not
+// obey expected relationships with respect to the given validation policy, or with respect to
+// internal consistency checks.
 func validateTcb(report *spb.Report, vcekTcb kds.TCBVersion, options *Options) error {
-	// Any change to the TCB means that the VCEK certificate at an earlier TCB is no longer valid. The
-	// host must make sure that the up-to-date certificate is provisioned and delivered alongside the
-	// report that contains the new reported TCB value.
-	// If the certificate's TCB is greater than the report's TCB, then the host has not provisioned
-	// a certificate for the machine's actual state and should also not be accepted.
-	if kds.TCBVersion(report.GetReportedTcb()) != vcekTcb {
-		return fmt.Errorf("chip's VCEK TCB %x does not match the REPORTED_TCB %x",
-			vcekTcb, report.GetReportedTcb())
+	reportTcbs := getReportTcbs(report, vcekTcb)
+	policyTcbs := getPolicyTcbs(options)
+
+	var provisionalErr error
+	if options.PermitProvisionalFirmware {
+		provisionalErr = tcbGtError(reportTcbs.committed, reportTcbs.current)
+	} else {
+		provisionalErr = tcbNeError(reportTcbs.committed, reportTcbs.current)
 	}
-	if !options.PermitProvisionalFirmware {
-		if kds.TCBVersion(report.GetCurrentTcb()) != vcekTcb {
-			return fmt.Errorf("chip's VCEK TCB %x does not match the CURRENT_TCB %x",
-				vcekTcb, report.GetReportedTcb())
-		}
-		if report.GetCurrentTcb() != report.GetCommittedTcb() {
-			return fmt.Errorf("firmware's committed TCB %x does not match the current TCB %x",
-				report.GetCommittedTcb(), report.GetCurrentTcb())
-		}
-	} else if kds.TCBVersion(report.GetCurrentTcb()) < vcekTcb {
-		return fmt.Errorf("firmware's current TCB %x is less than the TCB the VCEK is certified for %x",
-			report.GetCurrentTcb(), vcekTcb)
-	}
-	min, err := kds.ComposeTCBParts(options.MinimumTCB)
-	if err != nil {
-		return fmt.Errorf("option MinimumTCB error: %v", err)
-	}
-	if kds.TCBVersion(report.GetCurrentTcb()) < min {
-		return fmt.Errorf("firmware's current TCB %x is less than required %x",
-			report.GetCurrentTcb(), min)
-	}
-	minLaunch, err := kds.ComposeTCBParts(options.MinimumLaunchTCB)
-	if err != nil {
-		return fmt.Errorf("option MinimumLaunchTCB error: %v", err)
-	}
-	if kds.TCBVersion(report.GetLaunchTcb()) < minLaunch {
-		return fmt.Errorf("the VM's launch TCB %x was less than required %x",
-			report.GetCurrentTcb(), minLaunch)
-	}
-	// The launch TCB should be less than or equal to the reported TCB on the machine
-	if report.GetLaunchTcb() > report.GetReportedTcb() {
-		return fmt.Errorf("report field LAUNCH_TCB %x is greater than its REPORTED_TCB %x",
-			report.GetLaunchTcb(), report.GetReportedTcb())
-	}
-	// Since the launch TCB should be less than or equal to the reported TCB, we should be safe and
-	// also require that the committed TCB is also good enough.
-	if report.GetLaunchTcb() > report.GetCommittedTcb() {
-		return fmt.Errorf("report field LAUNCH_TCB %x is greater than its COMMITTED_TCB %x",
-			report.GetLaunchTcb(), report.GetCommittedTcb())
-	}
-	// The committed TCB means that a firmware installation cannot backslide before that number.
-	if report.GetCommittedTcb() > report.GetReportedTcb() {
-		return fmt.Errorf("report field COMMITTED_TCB %x is greater than its REPORTED_TCB %x",
-			report.GetLaunchTcb(), report.GetReportedTcb())
-	}
-	return nil
+
+	return multierr.Combine(provisionalErr,
+		tcbGtError(policyTcbs.minLaunch, reportTcbs.launch),
+		// Any change to the TCB means that the VCEK certificate at an earlier TCB is no longer valid. The
+		// host must make sure that the up-to-date certificate is provisioned and delivered alongside the
+		// report that contains the new reported TCB value.
+		// If the certificate's TCB is greater than the report's TCB, then the host has not provisioned
+		// a certificate for the machine's actual state and should also not be accepted.
+		tcbNeError(reportTcbs.reported, reportTcbs.vcek),
+		tcbGtError(reportTcbs.vcek, reportTcbs.current),
+		tcbGtError(policyTcbs.minimum, reportTcbs.reported))
+	// Note:
+	//   * by transitivity of <=, if we're here, then minimum <= current
+	//   * since vcek == reported, reported <= current
+
+	// Checks that could make sense but don't:
+	//
+	//  * tcbGtError(reportTcbs.launch, reportTcbs.reported)
+	//    Since LAUNCH_TCB on a single node is CURRENT_TCB, we expect the opposite ordering.
+	//    One only needs to pay attention to LAUNCH_TCB if permitting provisional firmware
+	//    but not permitting backsliding the firmware when the VM launched at a higher TCB.
+	//    We have no strong recommendations on how such a policy should be enforced.
+	//
+	// * tcbGtError(reportTcbs.launch, reportTcbs.committed),
+	//    This seems to be a safe assertion, but the VM Absorb guest message from a migration
+	//    agent would allow violation of the ordering. The launch tcb may come from node 1,
+	//    where current_tcb and committed_tcb are both higher than node 2's current and
+	//    committed tcbs, but the two share the same reported tcb due to a fleetwide commitment
+	//    to administer all machines to have a least common TCB in the reported tcb field.
+	//
+	// * tcbGt(reportTcbs.committed, reportTcbs.reported),
+	//    The committed TCB <= reported TCB only if you want to have a high standard for
+	//    what TCB you report on the machine, but it doesn't match up with previous comments
+	//    that we think it reasonable for the reported TCB to be the lowest of the bunch.
 }
 
 func validateVersion(report *spb.Report, options *Options) error {
