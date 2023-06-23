@@ -173,7 +173,7 @@ func TestKdsMetadataLogic(t *testing.T) {
 	signMu.Do(initSigner)
 	trust.ClearProductCertCache()
 	asn1Zero, _ := asn1.Marshal(0)
-	productName, _ := asn1.Marshal("Cookie-B0")
+	productName, _ := asn1.MarshalWithParams("Cookie-B0", "ia5")
 	var hwid [64]byte
 	asn1Hwid, _ := asn1.Marshal(hwid[:])
 	tests := []struct {

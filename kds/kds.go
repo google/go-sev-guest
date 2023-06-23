@@ -237,10 +237,14 @@ func asn1U8(ext *pkix.Extension, field string, out *uint8) error {
 }
 
 func asn1IA5String(ext *pkix.Extension, field string, out *string) error {
-	if ext == nil {
+	if ext == nil || len(ext.Value) == 0 {
 		return fmt.Errorf("no extension for field %s", field)
 	}
-	rest, err := asn1.Unmarshal(ext.Value, out)
+	// Even with the "ia5" params, Unmarshal is too lax about string tags.
+	if ext.Value[0] != asn1.TagIA5String {
+		return fmt.Errorf("value is not tagged as an IA5String: %d", ext.Value[0])
+	}
+	rest, err := asn1.UnmarshalWithParams(ext.Value, out, "ia5")
 	if err != nil {
 		return fmt.Errorf("could not parse extension as an IA5String %v: %v", *ext, err)
 	}

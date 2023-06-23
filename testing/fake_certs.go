@@ -258,7 +258,7 @@ func (b *AmdSignerBuilder) certifyAsk() error {
 // for the given values.
 func CustomVcekExtensions(tcb kds.TCBParts, hwid [64]byte) []pkix.Extension {
 	asn1Zero, _ := asn1.Marshal(0)
-	productName, _ := asn1.Marshal("Milan-B0")
+	productName, _ := asn1.MarshalWithParams("Milan-B0", "ia5")
 	blSpl, _ := asn1.Marshal(int(tcb.BlSpl))
 	teeSpl, _ := asn1.Marshal(int(tcb.TeeSpl))
 	snpSpl, _ := asn1.Marshal(int(tcb.SnpSpl))
