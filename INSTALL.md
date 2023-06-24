@@ -39,4 +39,4 @@ the sev-guest device, the Linux user that accesses `/dev/sev-guest` must have
 root privileges.
 
 To provide attestation report capabilities to a lesser-privileged user, you will
-need to create a priviledged client that can act on their behalf.
+need to create a privileged client that can act on their behalf.
