@@ -311,7 +311,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 				PlatformInfo: &abi.SnpPlatformInfo{SMTEnabled: true},
 				MinimumTCB:   kds.TCBParts{UcodeSpl: 0xff, SnpSpl: 0x05, BlSpl: 0x02},
 			},
-			wantErr: "firmware's current TCB 9270000000007f1f is less than required",
+			wantErr: "the report's REPORTED_TCB {BlSpl:31 TeeSpl:127 Spl4:0 Spl5:0 Spl6:0 Spl7:0 SnpSpl:112 UcodeSpl:146} is lower than the policy minimum TCB {BlSpl:2 TeeSpl:0 Spl4:0 Spl5:0 Spl6:0 Spl7:0 SnpSpl:5 UcodeSpl:255} in at least one component",
 		},
 		{
 			name:        "Minimum build checked",
@@ -399,7 +399,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 			name:        "rejected provisional by tcb",
 			attestation: attestationcb1455,
 			opts:        &Options{ReportData: noncecb1455[:], GuestPolicy: abi.SnpPolicy{Debug: true}},
-			wantErr:     "firmware's committed TCB 9270000000007f00 does not match the current TCB 9270000000007f1f",
+			wantErr:     "the report's COMMITTED_TCB 0x9270000000007f00 does not match the report's CURRENT_TCB 0x9270000000007f1f",
 		},
 		{
 			name:        "accepted provisional by version",

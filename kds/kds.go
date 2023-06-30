@@ -216,6 +216,18 @@ func DecomposeTCBVersion(tcb TCBVersion) TCBParts {
 	}
 }
 
+// TCBPartsLE returns true iff all TCB components of tcb0 are <= the corresponding tcb1 components.
+func TCBPartsLE(tcb0, tcb1 TCBParts) bool {
+	return (tcb0.UcodeSpl <= tcb1.UcodeSpl) &&
+		(tcb0.SnpSpl <= tcb1.SnpSpl) &&
+		(tcb0.Spl7 <= tcb1.Spl7) &&
+		(tcb0.Spl6 <= tcb1.Spl6) &&
+		(tcb0.Spl5 <= tcb1.Spl5) &&
+		(tcb0.Spl4 <= tcb1.Spl4) &&
+		(tcb0.TeeSpl <= tcb1.TeeSpl) &&
+		(tcb0.BlSpl <= tcb1.BlSpl)
+}
+
 func asn1U8(ext *pkix.Extension, field string, out *uint8) error {
 	if ext == nil {
 		return fmt.Errorf("no extension for field %s", field)
