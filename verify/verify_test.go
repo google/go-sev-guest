@@ -303,7 +303,9 @@ func TestKdsMetadataLogic(t *testing.T) {
 					Ask: newSigner.Ask,
 				},
 			}},
-		}}
+		},
+			Now: time.Date(1, time.January, 5, 0, 0, 0, 0, time.UTC),
+		}
 		if tc.wantErr != "" {
 			options = &Options{}
 		}
