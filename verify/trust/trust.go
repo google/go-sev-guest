@@ -218,6 +218,7 @@ func (r *ProductCerts) X509Options(now time.Time) *x509.VerifyOptions {
 	roots.AddCert(r.Ark)
 	intermediates := x509.NewCertPool()
 	intermediates.AddCert(r.Ask)
+	fmt.Printf("but now is %s\n", now.Format(time.RFC3339))
 	return &x509.VerifyOptions{Roots: roots, Intermediates: intermediates, CurrentTime: now}
 }
 

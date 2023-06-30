@@ -21,5 +21,5 @@ func Match(got error, want string) bool {
 	if got == nil {
 		return want == ""
 	}
-	return strings.Contains(got.Error(), want)
+	return want != "" && strings.Contains(got.Error(), want)
 }

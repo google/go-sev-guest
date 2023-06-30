@@ -382,6 +382,7 @@ func validateVcekCertificateProductSpecifics(r *trust.AMDRootCerts, cert *x509.C
 	if err := ValidateVcekCertIssuer(r, cert.Issuer); err != nil {
 		return err
 	}
+	fmt.Printf("now is %s\n", opts.Now.Format(time.RFC3339))
 	if _, err := cert.Verify(*r.X509Options(opts.Now)); err != nil {
 		return fmt.Errorf("error verifying VCEK certificate: %v (%v)", err, r.ProductCerts.Ask.IsCA)
 	}
@@ -527,6 +528,9 @@ func RootOfTrustToOptions(rot *cpb.RootOfTrust) (*Options, error) {
 func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 	if options == nil {
 		return fmt.Errorf("options cannot be nil")
+	}
+	if attestation == nil {
+		return fmt.Errorf("attestation cannot be nil")
 	}
 	// Make sure we have the whole certificate chain if we're allowed.
 	if !options.DisableCertFetching {
