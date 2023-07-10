@@ -71,8 +71,25 @@ message CertificateChain {
   bytes firmware_cert = 4;
 }
 
+// The CPUID[EAX=1] version information includes product info as described in
+// the AMD KDS specification. The product name, model, and stepping values are
+// important for determining the required parameters to KDS when requesting the
+// endorsement key's certificate.
+message SevProduct {
+  enum SevProductName {
+    SEV_PRODUCT_UNKNOWN = 0;
+    SEV_PRODUCT_MILAN = 1;
+    SEV_PRODUCT_GENOA = 2;
+  }
+
+  SevProductName name = 1;
+  uint32 model_stepping = 2;  // Must be a byte
+}
+
 message Attestation {
   Report report = 1;
 
   CertificateChain certificate_chain = 2;
+
+  SevProduct product = 3;
 }

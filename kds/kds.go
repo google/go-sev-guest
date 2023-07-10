@@ -27,6 +27,7 @@ import (
 	"strings"
 
 	"github.com/google/go-sev-guest/abi"
+	pb "github.com/google/go-sev-guest/proto/sevsnp"
 	"go.uber.org/multierr"
 )
 
@@ -58,7 +59,8 @@ var (
 	// OidUcodeSpl is the x509v3 extension for VCEK microcode security patch level.
 	OidUcodeSpl = asn1.ObjectIdentifier([]int{1, 3, 6, 1, 4, 1, 3704, 1, 3, 8})
 	// OidHwid is the x509v3 extension for VCEK certificate associated hardware identifier.
-	OidHwid         = asn1.ObjectIdentifier([]int{1, 3, 6, 1, 4, 1, 3704, 1, 4})
+	OidHwid = asn1.ObjectIdentifier([]int{1, 3, 6, 1, 4, 1, 3704, 1, 4})
+
 	authorityKeyOid = asn1.ObjectIdentifier([]int{2, 5, 29, 35})
 	// Short forms of the asn1 Object identifiers to use in map lookups, since []int are invalid key
 	// types.
@@ -515,4 +517,52 @@ func ParseVCEKCertURL(kdsurl string) (VCEKCert, error) {
 	}
 	result.TCB = uint64(tcb)
 	return result, nil
+}
+
+// ProductString returns the KDS product argument to use for the product associated with
+// an attestation report proto.
+func ProductString(product *pb.SevProduct) string {
+	if product == nil {
+		product = abi.DefaultSevProduct()
+	}
+	switch product.Name {
+	case pb.SevProduct_SEV_PRODUCT_MILAN:
+		return "Milan"
+	case pb.SevProduct_SEV_PRODUCT_GENOA:
+		return "Genoa"
+	default:
+		return "Unknown"
+	}
+}
+
+// ProductName returns the expected productName extension value for the product associated
+// with an attestation report proto.
+func ProductName(product *pb.SevProduct) string {
+	if product == nil {
+		product = abi.DefaultSevProduct()
+	}
+	return fmt.Sprintf("%s-%02X", ProductString(product), product.ModelStepping)
+}
+
+// ParseProductName returns the KDS project input value, and the model, stepping numbers represented
+// by a given VCEK productName extension value, or an error.
+func ParseProductName(productName string) (*pb.SevProduct, error) {
+	subs := strings.SplitN(productName, "-", 2)
+	if len(subs) != 2 {
+		return nil, fmt.Errorf("productName value %q does not match the expected Name-ModelStepping format", productName)
+	}
+	var name pb.SevProduct_SevProductName
+	switch subs[0] {
+	case "Milan":
+		name = pb.SevProduct_SEV_PRODUCT_MILAN
+	case "Genoa":
+		name = pb.SevProduct_SEV_PRODUCT_GENOA
+	default:
+		return nil, fmt.Errorf("unknown AMD SEV product: %q", subs[0])
+	}
+	modelStepping, err := strconv.ParseUint(subs[1], 16, 8)
+	if err != nil {
+		return nil, fmt.Errorf("model stepping in productName is not a hexadecimal byte: %q", subs[1])
+	}
+	return &pb.SevProduct{Name: name, ModelStepping: uint32(modelStepping)}, nil
 }

@@ -284,7 +284,7 @@ func TestKdsMetadataLogic(t *testing.T) {
 					},
 				},
 			},
-			wantErr: "unknown VCEK product name: Cookie-B0",
+			wantErr: "unknown AMD SEV product: \"Cookie\"",
 		},
 	}
 	for _, tc := range tests {

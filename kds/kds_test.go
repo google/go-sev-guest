@@ -23,6 +23,8 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-sev-guest/abi"
+	pb "github.com/google/go-sev-guest/proto/sevsnp"
+	"google.golang.org/protobuf/testing/protocmp"
 )
 
 func TestProductCertChainURL(t *testing.T) {
@@ -151,6 +153,103 @@ func TestParseVCEKCertURL(t *testing.T) {
 			if err == nil {
 				if diff := cmp.Diff(got, tc.want); diff != "" {
 					t.Errorf("ParseVCEKCertURL(%q) returned unexpected diff (-want +got):\n%s", tc.url, diff)
+				}
+			}
+		})
+	}
+}
+
+func TestProductName(t *testing.T) {
+	tcs := []struct {
+		name  string
+		input *pb.SevProduct
+		want  string
+	}{
+		{
+			name: "nil",
+			want: "Milan-B0",
+		},
+		{
+			name: "unknown",
+			input: &pb.SevProduct{
+				ModelStepping: 0x1A,
+			},
+			want: "Unknown-1A",
+		},
+		{
+			name: "Milan-00",
+			input: &pb.SevProduct{
+				Name: pb.SevProduct_SEV_PRODUCT_MILAN,
+			},
+			want: "Milan-00",
+		},
+		{
+			name: "Genoa-FF",
+			input: &pb.SevProduct{
+				Name:          pb.SevProduct_SEV_PRODUCT_GENOA,
+				ModelStepping: 0xFF,
+			},
+			want: "Genoa-FF",
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ProductName(tc.input); got != tc.want {
+				t.Errorf("ProductName(%v) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseProductName(t *testing.T) {
+	tcs := []struct {
+		name    string
+		input   string
+		want    *pb.SevProduct
+		wantErr string
+	}{
+		{
+			name:    "empty",
+			wantErr: "does not match",
+		},
+		{
+			name:    "Too much",
+			input:   "Milan-B0-and some extra",
+			wantErr: "not a hexadecimal byte: \"B0-and some extra\"",
+		},
+		{
+			name:    "start-",
+			input:   "-00",
+			wantErr: "unknown AMD SEV product: \"\"",
+		},
+		{
+			name:    "end-",
+			input:   "Milan-",
+			wantErr: "model stepping in productName is not a hexadecimal byte: \"\"",
+		},
+		{
+			name:    "Too big",
+			input:   "Milan-100",
+			wantErr: "model stepping in productName is not a hexadecimal byte: \"100\"",
+		},
+		{
+			name:  "happy path",
+			input: "Genoa-9C",
+			want: &pb.SevProduct{
+				Name:          pb.SevProduct_SEV_PRODUCT_GENOA,
+				ModelStepping: 0x9C,
+			},
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ParseProductName(tc.input)
+			if (err == nil && tc.wantErr != "") || (err != nil && (tc.wantErr == "" || !strings.Contains(err.Error(), tc.wantErr))) {
+				t.Fatalf("ParseProductName(%v) errored unexpectedly: %v, want %q", tc.input, err, tc.wantErr)
+			}
+			if tc.wantErr == "" {
+				if diff := cmp.Diff(got, tc.want, protocmp.Transform()); diff != "" {
+					t.Fatalf("ParseProductName(%v) = %v, want %v\nDiff: %s", tc.input, got, tc.want, diff)
 				}
 			}
 		})

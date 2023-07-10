@@ -21,6 +21,7 @@ import (
 
 	"github.com/google/go-sev-guest/abi"
 	labi "github.com/google/go-sev-guest/client/linuxabi"
+	spb "github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/pkg/errors"
 	"golang.org/x/sys/unix"
 )
@@ -39,6 +40,7 @@ type Device struct {
 	Keys          map[string][]byte
 	Certs         []byte
 	Signer        *AmdSigner
+	SevProduct    *spb.SevProduct
 }
 
 // Open changes the mock device's state to open.
@@ -135,6 +137,17 @@ func (d *Device) Ioctl(command uintptr, req any) (uintptr, error) {
 		}
 	}
 	return 0, fmt.Errorf("unexpected request: %v", req)
+}
+
+// Product returns the mocked product info or the default.
+func (d *Device) Product() *spb.SevProduct {
+	if d.SevProduct == nil {
+		return &spb.SevProduct{
+			Name:          spb.SevProduct_SEV_PRODUCT_MILAN,
+			ModelStepping: 0xB0,
+		}
+	}
+	return d.SevProduct
 }
 
 // Getter represents a static server for request/respond url -> body contents.

@@ -702,3 +702,47 @@ func (c *CertTable) Proto() *pb.CertificateChain {
 		FirmwareCert: firmware,
 	}
 }
+
+// cpuid returns the 4 register results of CPUID[EAX=op,ECX=0].
+// See assembly implementations in cpuid_*.s
+var cpuid func(op uint32) (eax, ebx, ecx, edx uint32)
+
+// SevProduct returns the SEV product enum for the CPU that runs this
+// function. Ought to be called from the client, not the verifier.
+func SevProduct() *pb.SevProduct {
+	// CPUID[EAX=1] is the processor info. The only bits we care about are in
+	// the eax result.
+	eax, _, _, _ := cpuid(1)
+	// 31:28 reserved
+	// 27:20 Extended Family ID
+	extendedFamily := (eax >> 20) & 0xff
+	// 19:16 Extended Model ID
+	extendedModel := (eax >> 16) & 0xf
+	// 15:14 reserved
+	// 11:8 Family ID
+	family := (eax >> 8) & 0xf
+	// 7:4 Model, 3:0 Stepping
+	modelStepping := eax & 0xff
+	// Ah, Fh, {0h,1h} values from the KDS specification,
+	// section "Determining the Product Name".
+	var productName pb.SevProduct_SevProductName
+	if extendedFamily == 0xA && family == 0xF {
+		switch extendedModel {
+		case 0:
+			productName = pb.SevProduct_SEV_PRODUCT_MILAN
+		case 1:
+			productName = pb.SevProduct_SEV_PRODUCT_GENOA
+		default:
+			productName = pb.SevProduct_SEV_PRODUCT_UNKNOWN
+		}
+	}
+	return &pb.SevProduct{
+		Name:          productName,
+		ModelStepping: modelStepping,
+	}
+}
+
+// DefaultSevProduct returns the initial product version for a commercially available AMD SEV-SNP chip.
+func DefaultSevProduct() *pb.SevProduct {
+	return &pb.SevProduct{Name: pb.SevProduct_SEV_PRODUCT_MILAN, ModelStepping: 0xB0}
+}
