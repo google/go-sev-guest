@@ -19,6 +19,7 @@ import (
 	"context"
 	"crypto/x509"
 	_ "embed"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
@@ -171,15 +172,29 @@ func (r *AMDRootCerts) Unmarshal(data []byte) error {
 	return nil
 }
 
-// FromDER populates the ProductCerts from DER-formatted certificates for both the ASK and the ARK.
-func (r *ProductCerts) FromDER(ask []byte, ark []byte) error {
-	askCert, err := x509.ParseCertificate(ask)
+// ParseCert returns an X.509 Certificate type for a PEM[CERTIFICATE]- or DER-encoded cert.
+func ParseCert(cert []byte) (*x509.Certificate, error) {
+	raw := cert
+	b, rest := pem.Decode(cert)
+	if b != nil {
+		if len(rest) > 0 || b.Type != "CERTIFICATE" {
+			return nil, fmt.Errorf("bad type %q or trailing bytes (%d). Expected a single certificate when in PEM format",
+				b.Type, len(rest))
+		}
+		raw = b.Bytes
+	}
+	return x509.ParseCertificate(raw)
+}
+
+// Decode populates the ProductCerts from DER-formatted certificates for both the ASK and the ARK.
+func (r *ProductCerts) Decode(ask []byte, ark []byte) error {
+	askCert, err := ParseCert(ask)
 	if err != nil {
 		return fmt.Errorf("could not parse ASK certificate: %v", err)
 	}
 	r.Ask = askCert
 
-	arkCert, err := x509.ParseCertificate(ark)
+	arkCert, err := ParseCert(ark)
 	if err != nil {
 		logger.Errorf("could not parse ARK certificate: %v", err)
 	}
@@ -195,7 +210,7 @@ func (r *ProductCerts) FromKDSCertBytes(data []byte) error {
 	if err != nil {
 		return err
 	}
-	return r.FromDER(ask, ark)
+	return r.Decode(ask, ark)
 }
 
 // FromKDSCert populates r's AskX509 and ArkX509 certificates from the certificate format AMD's Key
@@ -218,7 +233,6 @@ func (r *ProductCerts) X509Options(now time.Time) *x509.VerifyOptions {
 	roots.AddCert(r.Ark)
 	intermediates := x509.NewCertPool()
 	intermediates.AddCert(r.Ask)
-	fmt.Printf("but now is %s\n", now.Format(time.RFC3339))
 	return &x509.VerifyOptions{Roots: roots, Intermediates: intermediates, CurrentTime: now}
 }
 
@@ -271,10 +285,10 @@ func GetProductChain(product string, getter HTTPSGetter) (*ProductCerts, error) 
 // Forward all the ProductCerts operations from the AMDRootCerts struct to follow the
 // Law of Demeter.
 
-// FromDER populates the AMDRootCerts from DER-formatted certificates for both the ASK and the ARK.
-func (r *AMDRootCerts) FromDER(ask []byte, ark []byte) error {
+// Decode populates the AMDRootCerts from DER-formatted certificates for both the ASK and the ARK.
+func (r *AMDRootCerts) Decode(ask []byte, ark []byte) error {
 	r.ProductCerts = &ProductCerts{}
-	return r.ProductCerts.FromDER(ask, ark)
+	return r.ProductCerts.Decode(ask, ark)
 }
 
 // FromKDSCertBytes populates r's AskX509 and ArkX509 certificates from the two PEM-encoded
