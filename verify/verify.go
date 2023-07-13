@@ -382,7 +382,6 @@ func validateVcekCertificateProductSpecifics(r *trust.AMDRootCerts, cert *x509.C
 	if err := ValidateVcekCertIssuer(r, cert.Issuer); err != nil {
 		return err
 	}
-	fmt.Printf("now is %s\n", opts.Now.Format(time.RFC3339))
 	if _, err := cert.Verify(*r.X509Options(opts.Now)); err != nil {
 		return fmt.Errorf("error verifying VCEK certificate: %v (%v)", err, r.ProductCerts.Ask.IsCA)
 	}
@@ -390,11 +389,11 @@ func validateVcekCertificateProductSpecifics(r *trust.AMDRootCerts, cert *x509.C
 	return nil
 }
 
-// VcekDER checks that the VCEK certificate matches expected fields
+// decodeCerts checks that the VCEK certificate matches expected fields
 // from the KDS specification and also that its certificate chain matches
 // hardcoded trusted root certificates from AMD.
-func VcekDER(vcek []byte, ask []byte, ark []byte, options *Options) (*x509.Certificate, *trust.AMDRootCerts, error) {
-	vcekCert, err := x509.ParseCertificate(vcek)
+func decodeCerts(vcek []byte, ask []byte, ark []byte, options *Options) (*x509.Certificate, *trust.AMDRootCerts, error) {
+	vcekCert, err := trust.ParseCert(vcek)
 	if err != nil {
 		return nil, nil, fmt.Errorf("could not interpret VCEK DER bytes: %v", err)
 	}
@@ -412,7 +411,7 @@ func VcekDER(vcek []byte, ask []byte, ark []byte, options *Options) (*x509.Certi
 			AskSev: trust.DefaultRootCerts[product].AskSev,
 			ArkSev: trust.DefaultRootCerts[product].ArkSev,
 		}
-		if err := root.FromDER(ask, ark); err != nil {
+		if err := root.Decode(ask, ark); err != nil {
 			return nil, nil, err
 		}
 		if err := ValidateX509(root); err != nil {
@@ -539,7 +538,7 @@ func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 		}
 	}
 	chain := attestation.GetCertificateChain()
-	vcek, root, err := VcekDER(chain.GetVcekCert(), chain.GetAskCert(), chain.GetArkCert(), options)
+	vcek, root, err := decodeCerts(chain.GetVcekCert(), chain.GetAskCert(), chain.GetArkCert(), options)
 	if err != nil {
 		return err
 	}

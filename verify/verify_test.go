@@ -20,6 +20,7 @@ import (
 	"crypto/x509/pkix"
 	_ "embed"
 	"encoding/asn1"
+	"encoding/pem"
 	"math/big"
 	"math/rand"
 	"os"
@@ -309,9 +310,10 @@ func TestKdsMetadataLogic(t *testing.T) {
 		if tc.wantErr != "" {
 			options = &Options{}
 		}
-		vcek, _, err := VcekDER(newSigner.Vcek.Raw, newSigner.Ask.Raw, newSigner.Ark.Raw, options)
+		vcekPem := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: newSigner.Vcek.Raw})
+		vcek, _, err := decodeCerts(vcekPem, newSigner.Ask.Raw, newSigner.Ark.Raw, options)
 		if !test.Match(err, tc.wantErr) {
-			t.Errorf("%s: VcekDER(...) = %+v, %v did not error as expected. Want %q", tc.name, vcek, err, tc.wantErr)
+			t.Errorf("%s: decodeCerts(...) = %+v, %v did not error as expected. Want %q", tc.name, vcek, err, tc.wantErr)
 		}
 	}
 }
