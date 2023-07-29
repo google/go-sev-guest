@@ -43,13 +43,6 @@ const (
 	arkX509Version = 3
 )
 
-// The VCEK productName in includes the specific silicon stepping
-// corresponding to the supplied hwID. For example, “Milan-B0”.
-// The product should inform what product keys we expect the key to be certified by.
-var vcekProductMap = map[string]string{
-	"Milan-B0": "Milan",
-}
-
 func askVerifiedBy(signee, signer *abi.AskCert, signeeName, signerName string) error {
 	if !uuid.Equal(signee.CertifyingID[:], signer.KeyID[:]) {
 		return fmt.Errorf("%s's certifying ID (%s) is not %s's key ID (%s) ",
@@ -327,13 +320,11 @@ func validateCRLlink(x *x509.Certificate, product, role string) error {
 	return nil
 }
 
-// ValidateVcekExtensions checks if the certificate extensions match
+// validateVcekExtensions checks if the certificate extensions match
 // wellformedness expectations.
-func ValidateVcekExtensions(exts *kds.VcekExtensions) error {
-	if _, ok := vcekProductMap[exts.ProductName]; !ok {
-		return fmt.Errorf("unknown VCEK product name: %v", exts.ProductName)
-	}
-	return nil
+func validateVcekExtensions(exts *kds.VcekExtensions) error {
+	_, err := kds.ParseProductName(exts.ProductName)
+	return err
 }
 
 // validateVcekCertificateProductNonspecific returns an error if the given certificate doesn't have
@@ -372,7 +363,7 @@ func validateVcekCertificateProductNonspecific(cert *x509.Certificate) (*kds.Vce
 	if err != nil {
 		return nil, err
 	}
-	if err := ValidateVcekExtensions(exts); err != nil {
+	if err := validateVcekExtensions(exts); err != nil {
 		return nil, err
 	}
 	return exts, nil
@@ -389,6 +380,23 @@ func validateVcekCertificateProductSpecifics(r *trust.AMDRootCerts, cert *x509.C
 	return nil
 }
 
+func checkProductName(got, want *spb.SevProduct) error {
+	// No constraint
+	if want == nil {
+		return nil
+	}
+	if got == nil {
+		return fmt.Errorf("internal error: no product name")
+	}
+	if got.Name != want.Name {
+		return fmt.Errorf("VCEK cert product name %v is not %v", got, want)
+	}
+	if got.ModelStepping != want.ModelStepping {
+		return fmt.Errorf("VCEK cert product model-stepping number %02X is not %02X", got.ModelStepping, want.ModelStepping)
+	}
+	return nil
+}
+
 // decodeCerts checks that the VCEK certificate matches expected fields
 // from the KDS specification and also that its certificate chain matches
 // hardcoded trusted root certificates from AMD.
@@ -402,14 +410,23 @@ func decodeCerts(vcek []byte, ask []byte, ark []byte, options *Options) (*x509.C
 		return nil, nil, err
 	}
 	roots := options.TrustedRoots
-	product := vcekProductMap[exts.ProductName]
+
+	product, err := kds.ParseProductName(exts.ProductName)
+	if err != nil {
+		return nil, nil, err
+	}
+	productName := kds.ProductString(product)
+	// Ensure the extension product info matches expectations.
+	if err := checkProductName(product, options.Product); err != nil {
+		return nil, nil, err
+	}
 	if len(roots) == 0 {
 		logger.Warning("Using embedded AMD certificates for SEV-SNP attestation root of trust")
 		root := &trust.AMDRootCerts{
-			Product: product,
+			Product: productName,
 			// Require that the root matches embedded root certs.
-			AskSev: trust.DefaultRootCerts[product].AskSev,
-			ArkSev: trust.DefaultRootCerts[product].ArkSev,
+			AskSev: trust.DefaultRootCerts[productName].AskSev,
+			ArkSev: trust.DefaultRootCerts[productName].ArkSev,
 		}
 		if err := root.Decode(ask, ark); err != nil {
 			return nil, nil, err
@@ -418,11 +435,11 @@ func decodeCerts(vcek []byte, ask []byte, ark []byte, options *Options) (*x509.C
 			return nil, nil, err
 		}
 		roots = map[string][]*trust.AMDRootCerts{
-			product: {root},
+			productName: {root},
 		}
 	}
 	var lastErr error
-	for _, productRoot := range roots[product] {
+	for _, productRoot := range roots[productName] {
 		if err := validateVcekCertificateProductSpecifics(productRoot, vcekCert, options); err != nil {
 			lastErr = err
 			continue
@@ -479,6 +496,10 @@ type Options struct {
 	// then verification will fall back on embedded AMD-published root certificates.
 	// Maps the product name to an array of allowed roots.
 	TrustedRoots map[string][]*trust.AMDRootCerts
+	// Product is a forced value for the attestation product name when verifying or retrieving
+	// VCEK certificates. An attestation should carry the product of the reporting
+	// machine.
+	Product *spb.SevProduct
 }
 
 // DefaultOptions returns a useful default verification option setting
@@ -531,12 +552,15 @@ func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 	if attestation == nil {
 		return fmt.Errorf("attestation cannot be nil")
 	}
-	// Make sure we have the whole certificate chain if we're allowed.
-	if !options.DisableCertFetching {
-		if err := fillInAttestation(attestation, options); err != nil {
-			return err
-		}
+	// Make sure we have the whole certificate chain, or at least the product
+	// info.
+	if err := fillInAttestation(attestation, options); err != nil {
+		return err
 	}
+	// Pass along the expected product information for VcekDER. fillInAttestation will ensure
+	// that this is a noop if options.Product began as non-nil.
+	options.Product = attestation.Product
+
 	chain := attestation.GetCertificateChain()
 	vcek, root, err := decodeCerts(chain.GetVcekCert(), chain.GetAskCert(), chain.GetArkCert(), options)
 	if err != nil {
@@ -553,8 +577,20 @@ func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 // fillInAttestation uses AMD's KDS to populate any empty certificate field in the attestation's
 // certificate chain.
 func fillInAttestation(attestation *spb.Attestation, options *Options) error {
-	// TODO(Issue #11): Determine the product a report was fetched from, or make this an option.
-	product := "Milan"
+	if options.Product != nil {
+		attestation.Product = options.Product
+	}
+	if attestation.Product == nil {
+		// The default product is the first launched SEV-SNP product value.
+		attestation.Product = &spb.SevProduct{
+			Name:          spb.SevProduct_SEV_PRODUCT_MILAN,
+			ModelStepping: 0xB0,
+		}
+	}
+	if options.DisableCertFetching {
+		return nil
+	}
+	product := kds.ProductString(options.Product)
 	getter := options.Getter
 	if getter == nil {
 		getter = trust.DefaultHTTPSGetter()

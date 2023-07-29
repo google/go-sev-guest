@@ -53,6 +53,10 @@ This function's name is selected to discourage its use in a Cloud setting. See
 
 Closes the device.
 
+### `func (d Device) Product() *spb.SevProduct`
+
+Returns a representation of CPU info relevant to the AMD SEV product version.
+
 ## `verify`
 
 This library will check the signature and basic well-formedness properties of an
@@ -179,6 +183,9 @@ P-384 public keys are considered. All other certificates are quietly ignored.
 *   `TrustedIDKeyHashes`: An array of SHA-384 hashes of the SEV-SNP API format
     for an ECDSA public key. Has the same validation behavior as
     `TrustedIDKeys`.
+*   `Product`: A replacement or supplemental `SevProduct` value to use for
+    a given attestation or report. If nil, uses the information present in
+    the attestation proto, or provides a default `Milan-B0` value.
 
 ## License
 
