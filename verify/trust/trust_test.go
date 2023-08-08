@@ -24,60 +24,113 @@ import (
 	"github.com/google/go-sev-guest/verify/trust"
 )
 
-func TestRetryHTTPSGetterSuccess(t *testing.T) {
-	r := &trust.RetryHTTPSGetter{
-		Timeout:       2 * time.Second,
-		MaxRetryDelay: 1 * time.Millisecond,
-		Getter: &test.VariableResponseGetter{
-			ResponseBody:  test.StringsToByteSlice("content"),
-			ResponseError: []error{nil},
+func TestRetryHTTPSGetter(t *testing.T) {
+	testCases := map[string]struct {
+		getter        *test.VariableResponseGetter
+		timeout       time.Duration
+		maxRetryDelay time.Duration
+	}{
+		"immediate success": {
+			getter: &test.VariableResponseGetter{
+				Responses: map[string][]test.GetResponse{
+					"https://fetch.me": {
+						{
+							Occurances: 1,
+							Body:       []byte("content"),
+							Error:      nil,
+						},
+					},
+				},
+			},
+			timeout:       time.Second,
+			maxRetryDelay: time.Millisecond,
+		},
+		"second success": {
+			getter: &test.VariableResponseGetter{
+				Responses: map[string][]test.GetResponse{
+					"https://fetch.me": {
+						{
+							Occurances: 1,
+							Body:       []byte(""),
+							Error:      errors.New("fail"),
+						},
+						{
+							Occurances: 1,
+							Body:       []byte("content"),
+							Error:      nil,
+						},
+					},
+				},
+			},
+			timeout:       time.Second,
+			maxRetryDelay: time.Millisecond,
+		},
+		"third success": {
+			getter: &test.VariableResponseGetter{
+				Responses: map[string][]test.GetResponse{
+					"https://fetch.me": {
+						{
+							Occurances: 2,
+							Body:       []byte(""),
+							Error:      errors.New("fail"),
+						},
+						{
+							Occurances: 1,
+							Body:       []byte("content"),
+							Error:      nil,
+						},
+					},
+				},
+			},
+			timeout:       time.Second,
+			maxRetryDelay: time.Millisecond,
 		},
 	}
 
-	body, err := r.Get("https://any.url")
-	if !bytes.Equal(body, []byte("content")) {
-		t.Errorf("expected '%s' but got '%s'", "content", body)
-	}
-	if err != nil {
-		t.Errorf("expected no error, but got %s", err.Error())
-	}
-}
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			r := &trust.RetryHTTPSGetter{
+				Timeout:       tc.timeout,
+				MaxRetryDelay: tc.maxRetryDelay,
+				Getter:        tc.getter,
+			}
 
-func TestRetryHTTPSGetterSecondSuccess(t *testing.T) {
-	r := &trust.RetryHTTPSGetter{
-		Timeout:       2 * time.Second,
-		MaxRetryDelay: 1 * time.Millisecond,
-		Getter: &test.VariableResponseGetter{
-			ResponseBody:  test.StringsToByteSlice("", "content"),
-			ResponseError: []error{errors.New("failed"), nil},
-		},
-	}
-
-	body, err := r.Get("https://any.url")
-	if !bytes.Equal(body, []byte("content")) {
-		t.Errorf("expected '%s' but got '%s'", "content", body)
-	}
-	if err != nil {
-		t.Errorf("expected no error, but got %s", err.Error())
+			body, err := r.Get("https://fetch.me")
+			if !bytes.Equal(body, []byte("content")) {
+				t.Errorf("expected '%s' but got '%s'", "content", body)
+			}
+			if err != nil {
+				t.Errorf("expected no error, but got %s", err.Error())
+			}
+			tc.getter.Done(t)
+		})
 	}
 }
 
 func TestRetryHTTPSGetterAllFail(t *testing.T) {
-	fail := errors.New("failed")
+	testGetter := &test.VariableResponseGetter{
+		Responses: map[string][]test.GetResponse{
+			"https://fetch.me": {
+				{
+					Occurances: 1,
+					Body:       []byte(""),
+					Error:      errors.New("fail"),
+				},
+			},
+		},
+	}
 	r := &trust.RetryHTTPSGetter{
 		Timeout:       1 * time.Millisecond,
 		MaxRetryDelay: 1 * time.Millisecond,
-		Getter: &test.VariableResponseGetter{
-			ResponseBody:  test.StringsToByteSlice("", "", ""),
-			ResponseError: []error{fail, fail, fail},
-		},
+		Getter:        testGetter,
 	}
 
-	body, err := r.Get("https://any.url")
+	body, err := r.Get("https://fetch.me")
 	if !bytes.Equal(body, []byte("")) {
 		t.Errorf("expected '%s' but got '%s'", "content", body)
 	}
 	if err == nil {
 		t.Errorf("expected error, but got none")
 	}
+	testGetter.Done(t)
 }

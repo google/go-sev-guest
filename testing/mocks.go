@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"syscall"
+	"testing"
 
 	"github.com/google/go-sev-guest/abi"
 	labi "github.com/google/go-sev-guest/client/linuxabi"
@@ -164,30 +165,43 @@ func (g *Getter) Get(url string) ([]byte, error) {
 	return v, nil
 }
 
-// VariableResponseGetter is a mock for HTTPSGetter interface that sequentially
-// returns the configured responses, independent of the provided URL.
-type VariableResponseGetter struct {
-	// callCount is used to return the respective responses
-	callCount     int
-	ResponseBody  [][]byte
-	ResponseError []error
+// GetResponse controls how often (Occurances) a certain response should be
+// provided.
+type GetResponse struct {
+	Occurances uint
+	Body       []byte
+	Error      error
 }
 
-// Get the next configured response body and error.
-func (g *VariableResponseGetter) Get(_ string) ([]byte, error) {
-	body := g.ResponseBody[g.callCount]
-	err := g.ResponseError[g.callCount]
-	g.callCount++
+// VariableResponseGetter is a mock for HTTPSGetter interface that sequentially
+// returns the configured responses for the provided URL. Responses are returned
+// as a queue, i.e., always serving from index 0.
+type VariableResponseGetter struct {
+	Responses map[string][]GetResponse
+}
+
+// Get the next configured response body and error. The configured response
+// is also removed if it has been requested the configured number of times.
+func (g *VariableResponseGetter) Get(url string) ([]byte, error) {
+	resp, ok := g.Responses[url]
+	if !ok || len(resp) == 0 {
+		return nil, fmt.Errorf("404: %s", url)
+	}
+	body := resp[0].Body
+	err := resp[0].Error
+	resp[0].Occurances--
+	if resp[0].Occurances == 0 {
+		g.Responses[url] = resp[1:]
+	}
 	return body, err
 }
 
-// StringsToByteSlice helps to concisely construct the required ResponseBodies
-// for VariableResponseGetter.
-func StringsToByteSlice(strings ...string) [][]byte {
-	var result [][]byte
-	for idx := range strings {
-		s := strings[idx]
-		result = append(result, []byte(s))
+// Done checks that all configured responses have been consumed, and errors
+// otherwise.
+func (g *VariableResponseGetter) Done(t testing.TB) {
+	for key := range g.Responses {
+		if len(g.Responses[key]) != 0 {
+			t.Errorf("Prepared response for '%s' not retrieved.", key)
+		}
 	}
-	return result
 }
