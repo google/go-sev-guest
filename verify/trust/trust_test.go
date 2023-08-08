@@ -1,45 +1,35 @@
-package trust
+// Copyright 2022 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package trust_test
 
 import (
 	"bytes"
 	"errors"
 	"testing"
 	"time"
+
+	test "github.com/google/go-sev-guest/testing"
+	"github.com/google/go-sev-guest/verify/trust"
 )
 
-// FakeHTTPSGetter is a test double for HTTPSGetter. It can hold a slice
-// of body and error responses so Get can be called multiple times and return
-// different values, as to simulate different scenarios.
-type FakeHTTPSGetter struct {
-	// callCount is used to return the respective responses
-	callCount     int
-	ResponseBody  [][]byte
-	ResponseError []error
-}
-
-// Get the next configured response body and error.
-func (f *FakeHTTPSGetter) Get(url string) ([]byte, error) {
-	body := f.ResponseBody[f.callCount]
-	err := f.ResponseError[f.callCount]
-	f.callCount++
-	return body, err
-}
-
-func stringsToByteSlice(strings ...string) [][]byte {
-	var result [][]byte
-	for idx := range strings {
-		s := strings[idx]
-		result = append(result, []byte(s))
-	}
-	return result
-}
-
 func TestRetryHTTPSGetterSuccess(t *testing.T) {
-	r := &RetryHTTPSGetter{
+	r := &trust.RetryHTTPSGetter{
 		Timeout:       2 * time.Second,
 		MaxRetryDelay: 1 * time.Millisecond,
-		Getter: &FakeHTTPSGetter{
-			ResponseBody:  stringsToByteSlice("content"),
+		Getter: &test.VariableResponseGetter{
+			ResponseBody:  test.StringsToByteSlice("content"),
 			ResponseError: []error{nil},
 		},
 	}
@@ -54,11 +44,11 @@ func TestRetryHTTPSGetterSuccess(t *testing.T) {
 }
 
 func TestRetryHTTPSGetterSecondSuccess(t *testing.T) {
-	r := &RetryHTTPSGetter{
+	r := &trust.RetryHTTPSGetter{
 		Timeout:       2 * time.Second,
 		MaxRetryDelay: 1 * time.Millisecond,
-		Getter: &FakeHTTPSGetter{
-			ResponseBody:  stringsToByteSlice("", "content"),
+		Getter: &test.VariableResponseGetter{
+			ResponseBody:  test.StringsToByteSlice("", "content"),
 			ResponseError: []error{errors.New("failed"), nil},
 		},
 	}
@@ -74,11 +64,11 @@ func TestRetryHTTPSGetterSecondSuccess(t *testing.T) {
 
 func TestRetryHTTPSGetterAllFail(t *testing.T) {
 	fail := errors.New("failed")
-	r := &RetryHTTPSGetter{
+	r := &trust.RetryHTTPSGetter{
 		Timeout:       1 * time.Millisecond,
 		MaxRetryDelay: 1 * time.Millisecond,
-		Getter: &FakeHTTPSGetter{
-			ResponseBody:  stringsToByteSlice("", "", ""),
+		Getter: &test.VariableResponseGetter{
+			ResponseBody:  test.StringsToByteSlice("", "", ""),
 			ResponseError: []error{fail, fail, fail},
 		},
 	}

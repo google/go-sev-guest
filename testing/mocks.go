@@ -163,3 +163,31 @@ func (g *Getter) Get(url string) ([]byte, error) {
 	}
 	return v, nil
 }
+
+// VariableResponseGetter is a mock for HTTPSGetter interface that sequentially
+// returns the configured responses, independent of the provided URL.
+type VariableResponseGetter struct {
+	// callCount is used to return the respective responses
+	callCount     int
+	ResponseBody  [][]byte
+	ResponseError []error
+}
+
+// Get the next configured response body and error.
+func (g *VariableResponseGetter) Get(_ string) ([]byte, error) {
+	body := g.ResponseBody[g.callCount]
+	err := g.ResponseError[g.callCount]
+	g.callCount++
+	return body, err
+}
+
+// StringsToByteSlice helps to concisely construct the required ResponseBodies
+// for VariableResponseGetter.
+func StringsToByteSlice(strings ...string) [][]byte {
+	var result [][]byte
+	for idx := range strings {
+		s := strings[idx]
+		result = append(result, []byte(s))
+	}
+	return result
+}
