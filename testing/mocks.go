@@ -151,20 +151,6 @@ func (d *Device) Product() *spb.SevProduct {
 	return d.SevProduct
 }
 
-// Getter represents a static server for request/respond url -> body contents.
-type Getter struct {
-	Responses map[string][]byte
-}
-
-// Get returns a registered response for a given URL.
-func (g *Getter) Get(url string) ([]byte, error) {
-	v, ok := g.Responses[url]
-	if !ok {
-		return nil, fmt.Errorf("404: %s", url)
-	}
-	return v, nil
-}
-
 // GetResponse controls how often (Occurances) a certain response should be
 // provided.
 type GetResponse struct {
@@ -173,16 +159,34 @@ type GetResponse struct {
 	Error      error
 }
 
-// VariableResponseGetter is a mock for HTTPSGetter interface that sequentially
+// Getter is a mock for HTTPSGetter interface that sequentially
 // returns the configured responses for the provided URL. Responses are returned
 // as a queue, i.e., always serving from index 0.
-type VariableResponseGetter struct {
+type Getter struct {
 	Responses map[string][]GetResponse
 }
 
-// Get the next configured response body and error. The configured response
-// is also removed if it has been requested the configured number of times.
-func (g *VariableResponseGetter) Get(url string) ([]byte, error) {
+// SimpleGetter constructs a static server from url -> body responses.
+// For more elaborate tests, construct a custom Getter.
+func SimpleGetter(responses map[string][]byte) *Getter {
+	getter := &Getter{
+		Responses: make(map[string][]GetResponse),
+	}
+	for key, value := range responses {
+		getter.Responses[key] = []GetResponse{
+			{
+				Occurances: ^uint(0),
+				Body:       value,
+				Error:      nil,
+			},
+		}
+	}
+	return getter
+}
+
+// Get the next response body and error. The response is also removed,
+// if it has been requested the configured number of times.
+func (g *Getter) Get(url string) ([]byte, error) {
 	resp, ok := g.Responses[url]
 	if !ok || len(resp) == 0 {
 		return nil, fmt.Errorf("404: %s", url)
@@ -198,7 +202,7 @@ func (g *VariableResponseGetter) Get(url string) ([]byte, error) {
 
 // Done checks that all configured responses have been consumed, and errors
 // otherwise.
-func (g *VariableResponseGetter) Done(t testing.TB) {
+func (g *Getter) Done(t testing.TB) {
 	for key := range g.Responses {
 		if len(g.Responses[key]) != 0 {
 			t.Errorf("Prepared response for '%s' not retrieved.", key)

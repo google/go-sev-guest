@@ -26,12 +26,12 @@ import (
 
 func TestRetryHTTPSGetter(t *testing.T) {
 	testCases := map[string]struct {
-		getter        *test.VariableResponseGetter
+		getter        *test.Getter
 		timeout       time.Duration
 		maxRetryDelay time.Duration
 	}{
 		"immediate success": {
-			getter: &test.VariableResponseGetter{
+			getter: &test.Getter{
 				Responses: map[string][]test.GetResponse{
 					"https://fetch.me": {
 						{
@@ -46,7 +46,7 @@ func TestRetryHTTPSGetter(t *testing.T) {
 			maxRetryDelay: time.Millisecond,
 		},
 		"second success": {
-			getter: &test.VariableResponseGetter{
+			getter: &test.Getter{
 				Responses: map[string][]test.GetResponse{
 					"https://fetch.me": {
 						{
@@ -66,7 +66,7 @@ func TestRetryHTTPSGetter(t *testing.T) {
 			maxRetryDelay: time.Millisecond,
 		},
 		"third success": {
-			getter: &test.VariableResponseGetter{
+			getter: &test.Getter{
 				Responses: map[string][]test.GetResponse{
 					"https://fetch.me": {
 						{
@@ -108,7 +108,7 @@ func TestRetryHTTPSGetter(t *testing.T) {
 }
 
 func TestRetryHTTPSGetterAllFail(t *testing.T) {
-	testGetter := &test.VariableResponseGetter{
+	testGetter := &test.Getter{
 		Responses: map[string][]test.GetResponse{
 			"https://fetch.me": {
 				{
