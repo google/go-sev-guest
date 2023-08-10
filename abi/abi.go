@@ -96,7 +96,7 @@ const (
 
 	// The following GUIDs are defined by the AMD Guest-host communication block specification
 	// for MSG_REPORT_REQ:
-	// https://developer.amd.com/wp-content/resources/56421.pdf
+	// https://www.amd.com/system/files/TechDocs/56421-guest-hypervisor-communication-block-standardization.pdf
 
 	// VcekGUID is the Versioned Chip Endorsement Key GUID
 	VcekGUID = "63da758d-e664-4564-adc5-f4b93be8accd"

@@ -34,7 +34,7 @@ import (
 
 var (
 	// DefaultRootCerts holds AMD's SEV API certificate format for ASK and ARK keys as published here
-	// https://developer.amd.com/wp-content/resources/ask_ark_milan.cert
+	// https://download.amd.com/developer/eula/sev/ask_ark_milan.cert
 	DefaultRootCerts map[string]*AMDRootCerts
 
 	// The ASK and ARK certificates are embedded since they do not have an expiration date. The KDS
