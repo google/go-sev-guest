@@ -35,9 +35,9 @@ func TestRetryHTTPSGetter(t *testing.T) {
 				Responses: map[string][]test.GetResponse{
 					"https://fetch.me": {
 						{
-							Occurances: 1,
-							Body:       []byte("content"),
-							Error:      nil,
+							Occurrences: 1,
+							Body:        []byte("content"),
+							Error:       nil,
 						},
 					},
 				},
@@ -50,14 +50,14 @@ func TestRetryHTTPSGetter(t *testing.T) {
 				Responses: map[string][]test.GetResponse{
 					"https://fetch.me": {
 						{
-							Occurances: 1,
-							Body:       []byte(""),
-							Error:      errors.New("fail"),
+							Occurrences: 1,
+							Body:        []byte(""),
+							Error:       errors.New("fail"),
 						},
 						{
-							Occurances: 1,
-							Body:       []byte("content"),
-							Error:      nil,
+							Occurrences: 1,
+							Body:        []byte("content"),
+							Error:       nil,
 						},
 					},
 				},
@@ -70,14 +70,14 @@ func TestRetryHTTPSGetter(t *testing.T) {
 				Responses: map[string][]test.GetResponse{
 					"https://fetch.me": {
 						{
-							Occurances: 2,
-							Body:       []byte(""),
-							Error:      errors.New("fail"),
+							Occurrences: 2,
+							Body:        []byte(""),
+							Error:       errors.New("fail"),
 						},
 						{
-							Occurances: 1,
-							Body:       []byte("content"),
-							Error:      nil,
+							Occurrences: 1,
+							Body:        []byte("content"),
+							Error:       nil,
 						},
 					},
 				},
@@ -112,9 +112,9 @@ func TestRetryHTTPSGetterAllFail(t *testing.T) {
 		Responses: map[string][]test.GetResponse{
 			"https://fetch.me": {
 				{
-					Occurances: 1,
-					Body:       []byte(""),
-					Error:      errors.New("fail"),
+					Occurrences: 1,
+					Body:        []byte(""),
+					Error:       errors.New("fail"),
 				},
 			},
 		},

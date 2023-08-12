@@ -151,12 +151,12 @@ func (d *Device) Product() *spb.SevProduct {
 	return d.SevProduct
 }
 
-// GetResponse controls how often (Occurances) a certain response should be
+// GetResponse controls how often (Occurrences) a certain response should be
 // provided.
 type GetResponse struct {
-	Occurances uint
-	Body       []byte
-	Error      error
+	Occurrences uint
+	Body        []byte
+	Error       error
 }
 
 // Getter is a mock for HTTPSGetter interface that sequentially
@@ -175,9 +175,9 @@ func SimpleGetter(responses map[string][]byte) *Getter {
 	for key, value := range responses {
 		getter.Responses[key] = []GetResponse{
 			{
-				Occurances: ^uint(0),
-				Body:       value,
-				Error:      nil,
+				Occurrences: ^uint(0),
+				Body:        value,
+				Error:       nil,
 			},
 		}
 	}
@@ -193,8 +193,8 @@ func (g *Getter) Get(url string) ([]byte, error) {
 	}
 	body := resp[0].Body
 	err := resp[0].Error
-	resp[0].Occurances--
-	if resp[0].Occurances == 0 {
+	resp[0].Occurrences--
+	if resp[0].Occurrences == 0 {
 		g.Responses[url] = resp[1:]
 	}
 	return body, err
