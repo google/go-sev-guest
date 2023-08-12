@@ -41,8 +41,10 @@ import (
 
 const product = "Milan"
 
-var signMu sync.Once
-var signer *test.AmdSigner
+var (
+	signMu sync.Once
+	signer *test.AmdSigner
+)
 
 func initSigner() {
 	newSigner, err := test.DefaultCertChain(product, time.Now())
@@ -296,15 +298,16 @@ func TestKdsMetadataLogic(t *testing.T) {
 		}
 		// Trust the test-generated root if the test should pass. Otherwise, other root logic
 		// won't get tested.
-		options := &Options{TrustedRoots: map[string][]*trust.AMDRootCerts{
-			"Milan": {&trust.AMDRootCerts{
-				Product: "Milan",
-				ProductCerts: &trust.ProductCerts{
-					Ark: newSigner.Ark,
-					Ask: newSigner.Ask,
-				},
-			}},
-		},
+		options := &Options{
+			TrustedRoots: map[string][]*trust.AMDRootCerts{
+				"Milan": {&trust.AMDRootCerts{
+					Product: "Milan",
+					ProductCerts: &trust.ProductCerts{
+						Ark: newSigner.Ark,
+						Ask: newSigner.Ask,
+					},
+				}},
+			},
 			Now: time.Date(1, time.January, 5, 0, 0, 0, 0, time.UTC),
 		}
 		if tc.wantErr != "" {
@@ -374,11 +377,11 @@ func TestCRLRootValidity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g2 := &test.Getter{
-		Responses: map[string][]byte{
+	g2 := test.SimpleGetter(
+		map[string][]byte{
 			"https://kdsintf.amd.com/vcek/v1/Milan/crl": crl,
 		},
-	}
+	)
 	wantErr := "CRL is not signed by ARK"
 	if err := VcekNotRevoked(root, signer2.Vcek, &Options{Getter: g2}); !test.Match(err, wantErr) {
 		t.Errorf("Bad Root: VcekNotRevoked(%v) did not error as expected. Got %v, want %v", signer.Vcek, err, wantErr)
@@ -452,13 +455,13 @@ func TestRealAttestationVerification(t *testing.T) {
 	trust.ClearProductCertCache()
 	var nonce [64]byte
 	copy(nonce[:], []byte{1, 2, 3, 4, 5})
-	getter := &test.Getter{
-		Responses: map[string][]byte{
+	getter := test.SimpleGetter(
+		map[string][]byte{
 			"https://kdsintf.amd.com/vcek/v1/Milan/cert_chain": testdata.MilanBytes,
 			// Use the VCEK's hwID and known TCB values to specify the URL its VCEK cert would be fetched from.
 			"https://kdsintf.amd.com/vcek/v1/Milan/3ac3fe21e13fb0990eb28a802e3fb6a29483a6b0753590c951bdd3b8e53786184ca39e359669a2b76a1936776b564ea464cdce40c05f63c9b610c5068b006b5d?blSPL=2&teeSPL=0&snpSPL=5&ucodeSPL=68": testdata.VcekBytes,
 		},
-	}
+	)
 	if err := RawSnpReport(testdata.AttestationBytes, &Options{Getter: getter}); err != nil {
 		t.Error(err)
 	}

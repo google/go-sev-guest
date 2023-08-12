@@ -30,6 +30,7 @@ import (
 	"github.com/google/go-sev-guest/abi"
 	"github.com/google/go-sev-guest/kds"
 	"github.com/google/logger"
+	"go.uber.org/multierr"
 )
 
 var (
@@ -103,7 +104,7 @@ func (n *SimpleHTTPSGetter) Get(url string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	} else if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("failed to retrieve %s", url)
+		return nil, fmt.Errorf("failed to retrieve '%s' status %d", url, resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -128,12 +129,14 @@ type RetryHTTPSGetter struct {
 func (n *RetryHTTPSGetter) Get(url string) ([]byte, error) {
 	delay := initialDelay
 	ctx, cancel := context.WithTimeout(context.Background(), n.Timeout)
+	var returnedError error
 	for {
 		body, err := n.Getter.Get(url)
 		if err == nil {
 			cancel()
 			return body, nil
 		}
+		returnedError = multierr.Append(returnedError, err)
 		delay = delay + delay
 		if delay > n.MaxRetryDelay {
 			delay = n.MaxRetryDelay
@@ -141,7 +144,7 @@ func (n *RetryHTTPSGetter) Get(url string) ([]byte, error) {
 		select {
 		case <-ctx.Done():
 			cancel()
-			return nil, fmt.Errorf("timeout") // context cancelled
+			return nil, multierr.Append(returnedError, fmt.Errorf("timeout")) // context cancelled
 		case <-time.After(delay): // wait to retry
 		}
 	}

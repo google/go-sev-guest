@@ -18,6 +18,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"syscall"
+	"testing"
 
 	"github.com/google/go-sev-guest/abi"
 	labi "github.com/google/go-sev-guest/client/linuxabi"
@@ -150,16 +151,61 @@ func (d *Device) Product() *spb.SevProduct {
 	return d.SevProduct
 }
 
-// Getter represents a static server for request/respond url -> body contents.
-type Getter struct {
-	Responses map[string][]byte
+// GetResponse controls how often (Occurrences) a certain response should be
+// provided.
+type GetResponse struct {
+	Occurrences uint
+	Body        []byte
+	Error       error
 }
 
-// Get returns a registered response for a given URL.
+// Getter is a mock for HTTPSGetter interface that sequentially
+// returns the configured responses for the provided URL. Responses are returned
+// as a queue, i.e., always serving from index 0.
+type Getter struct {
+	Responses map[string][]GetResponse
+}
+
+// SimpleGetter constructs a static server from url -> body responses.
+// For more elaborate tests, construct a custom Getter.
+func SimpleGetter(responses map[string][]byte) *Getter {
+	getter := &Getter{
+		Responses: make(map[string][]GetResponse),
+	}
+	for key, value := range responses {
+		getter.Responses[key] = []GetResponse{
+			{
+				Occurrences: ^uint(0),
+				Body:        value,
+				Error:       nil,
+			},
+		}
+	}
+	return getter
+}
+
+// Get the next response body and error. The response is also removed,
+// if it has been requested the configured number of times.
 func (g *Getter) Get(url string) ([]byte, error) {
-	v, ok := g.Responses[url]
-	if !ok {
+	resp, ok := g.Responses[url]
+	if !ok || len(resp) == 0 {
 		return nil, fmt.Errorf("404: %s", url)
 	}
-	return v, nil
+	body := resp[0].Body
+	err := resp[0].Error
+	resp[0].Occurrences--
+	if resp[0].Occurrences == 0 {
+		g.Responses[url] = resp[1:]
+	}
+	return body, err
+}
+
+// Done checks that all configured responses have been consumed, and errors
+// otherwise.
+func (g *Getter) Done(t testing.TB) {
+	for key := range g.Responses {
+		if len(g.Responses[key]) != 0 {
+			t.Errorf("Prepared response for '%s' not retrieved.", key)
+		}
+	}
 }

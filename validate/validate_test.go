@@ -235,12 +235,12 @@ func TestValidateSnpAttestation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	getter := &test.Getter{
-		Responses: map[string][]byte{
+	getter := test.SimpleGetter(
+		map[string][]byte{
 			"https://kdsintf.amd.com/vcek/v1/Milan/cert_chain": rootBytes,
 			"https://kdsintf.amd.com/vcek/v1/Milan/0a0b0c0d0e0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010203040506?blSPL=31&teeSPL=127&snpSPL=112&ucodeSPL=146": sign.Vcek.Raw,
 		},
-	}
+	)
 	attestationFn := func(nonce [64]byte) *spb.Attestation {
 		report, err := sg.GetReport(device, nonce)
 		if err != nil {
@@ -271,12 +271,14 @@ func TestValidateSnpAttestation(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				return &spb.Attestation{Report: report,
+				return &spb.Attestation{
+					Report: report,
 					CertificateChain: &spb.CertificateChain{
 						AskCert:  sign0.Ask.Raw,
 						ArkCert:  sign0.Ark.Raw,
 						VcekCert: sign0.Vcek.Raw,
-					}}
+					},
+				}
 			}(),
 			opts: &Options{ReportData: nonce0s1[:], GuestPolicy: abi.SnpPolicy{Debug: true}},
 		},
