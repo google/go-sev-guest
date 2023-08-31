@@ -615,7 +615,7 @@ func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 		}
 	}
 	if len(chain.GetVcekCert()) == 0 {
-		vcekURL := kds.VCEKCertURL(product, report.GetChipId(), kds.TCBVersion(report.GetCurrentTcb()))
+		vcekURL := kds.VCEKCertURL(product, report.GetChipId(), kds.TCBVersion(report.GetReportedTcb()))
 		vcek, err := getter.Get(vcekURL)
 		if err != nil {
 			return &trust.AttestationRecreationErr{
