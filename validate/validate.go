@@ -91,7 +91,7 @@ type Options struct {
 	// provided.
 	TrustedIDKeys []*x509.Certificate
 	// TrustedIDKeyHashes is an array of SHA-384 hashes of trusted ID signer keys's public key in
-	// SEV-SNP API format. Not required if TrustedKeyKeys is provided.
+	// SEV-SNP API format. Not required if TrustedIDKeys is provided.
 	TrustedIDKeyHashes [][]byte
 }
 
