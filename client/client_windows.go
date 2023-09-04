@@ -47,6 +47,6 @@ func (*WindowsDevice) Ioctl(_ uintptr, _ any) (uintptr, error) {
 }
 
 // Product is not supported on Windows.
-func (*MacOSDevice) Product() *spb.SevProduct {
+func (*WindowsDevice) Product() *spb.SevProduct {
 	return &spb.SevProduct{}
 }
