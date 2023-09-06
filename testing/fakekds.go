@@ -31,12 +31,34 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-var testUseKDS = flag.Bool("test_use_kds", false, "If true, tests will attempt to retrieve certificates from AMD KDS")
+var testUseKDS = flag.Bool("test_use_kds", false, "Deprecated: If true, tests will attempt to retrieve certificates from AMD KDS")
+
+type testKdsType struct {
+	value string
+}
+
+func (t *testKdsType) String() string { return t.value }
+func (t *testKdsType) Set(value string) error {
+	if value != "amd" && value != "cache" && value != "none" {
+		return fmt.Errorf("--test_kds must be one of amd, cache, or none. Got %q", value)
+	}
+	t.value = value
+	return nil
+}
+
+var testKds = testKdsType{value: "cache"}
+
+func init() {
+	flag.Var(&testKds, "test_kds", "One of amd, cache, none. If amd, tests will "+
+		"attempt to retrieve certificates from AMD KDS. If cache, only piper-submitted certificates "+
+		"will be available given a hostname and TCB version. If none, then no VCEK certificates will "+
+		"be retrieved.")
+}
 
 // TestUseKDS returns whether tests should use the network to connect the live AMD Key Distribution
 // service.
 func TestUseKDS() bool {
-	return *testUseKDS
+	return *testUseKDS || testKds.value == "amd"
 }
 
 // The Milan product certificate bundle is only embedded for tests rather than in the main library
@@ -144,12 +166,16 @@ func (f *FakeKDS) Get(url string) ([]byte, error) {
 // GetKDS returns an HTTPSGetter that can produce the expected certificates for a given URL in the
 // test environment.
 func GetKDS(t testing.TB) trust.HTTPSGetter {
-	if *testUseKDS {
+	if TestUseKDS() {
 		return trust.DefaultHTTPSGetter()
 	}
 	fakeKds := &FakeKDS{
 		Certs:       &kpb.Certificates{},
 		RootBundles: map[string]string{"Milan": string(milanCerts)},
+	}
+	// Provide nothing if --test_kds=none.
+	if testKds.value == "none" {
+		return fakeKds
 	}
 	if err := proto.Unmarshal(internalKDSCache, fakeKds.Certs); err != nil {
 		t.Fatalf("could not unmarshal embedded FakeKDS file: %v", err)
