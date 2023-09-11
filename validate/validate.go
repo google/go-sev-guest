@@ -315,10 +315,10 @@ type reportTcbDescriptions struct {
 	launch partDescription
 	// The TCB that the VCEK certificate is certified for. Embedded as x509v3 extensions from
 	// AMD's Key Distribution Service (KDS).
-	vcek partDescription
+	cert partDescription
 }
 
-func getReportTcbs(report *spb.Report, vcekTcb kds.TCBVersion) *reportTcbDescriptions {
+func getReportTcbs(report *spb.Report, certTcb kds.TCBVersion) *reportTcbDescriptions {
 	return &reportTcbDescriptions{
 		reported: partDescription{
 			parts: kds.DecomposeTCBVersion(kds.TCBVersion(report.GetReportedTcb())),
@@ -336,9 +336,9 @@ func getReportTcbs(report *spb.Report, vcekTcb kds.TCBVersion) *reportTcbDescrip
 			parts: kds.DecomposeTCBVersion(kds.TCBVersion(report.GetLaunchTcb())),
 			desc:  "report's LAUNCH_TCB",
 		},
-		vcek: partDescription{
-			parts: kds.DecomposeTCBVersion(vcekTcb),
-			desc:  "TCB of the VCEK certificate",
+		cert: partDescription{
+			parts: kds.DecomposeTCBVersion(certTcb),
+			desc:  "TCB of the V[CL]EK certificate",
 		},
 	}
 }
@@ -384,11 +384,11 @@ func tcbGtError(wantLower, wantHigher partDescription) error {
 		wantHigher.desc, wantHigher.parts, wantLower.desc, wantLower.parts)
 }
 
-// validateTcb returns an error if the TCB values present in the report and VCEK certificate do not
+// validateTcb returns an error if the TCB values present in the report and V[CL]EK certificate do not
 // obey expected relationships with respect to the given validation policy, or with respect to
 // internal consistency checks.
-func validateTcb(report *spb.Report, vcekTcb kds.TCBVersion, options *Options) error {
-	reportTcbs := getReportTcbs(report, vcekTcb)
+func validateTcb(report *spb.Report, certTcb kds.TCBVersion, options *Options) error {
+	reportTcbs := getReportTcbs(report, certTcb)
 	policyTcbs := getPolicyTcbs(options)
 
 	var provisionalErr error
@@ -400,17 +400,18 @@ func validateTcb(report *spb.Report, vcekTcb kds.TCBVersion, options *Options) e
 
 	return multierr.Combine(provisionalErr,
 		tcbGtError(policyTcbs.minLaunch, reportTcbs.launch),
-		// Any change to the TCB means that the VCEK certificate at an earlier TCB is no longer valid. The
-		// host must make sure that the up-to-date certificate is provisioned and delivered alongside the
-		// report that contains the new reported TCB value.
-		// If the certificate's TCB is greater than the report's TCB, then the host has not provisioned
-		// a certificate for the machine's actual state and should also not be accepted.
-		tcbNeError(reportTcbs.reported, reportTcbs.vcek),
-		tcbGtError(reportTcbs.vcek, reportTcbs.current),
+		// Any change to the TCB means that the V[CL]EK certificate at an earlier TCB is no
+		// longer valid. The host must make sure that the up-to-date certificate is provisioned
+		// and delivered alongside the report that contains the new reported TCB value.
+		// If the certificate's TCB is greater than the report's TCB, then the host has not
+		// provisioned a certificate for the machine's actual state and should also not be
+		// accepted.
+		tcbNeError(reportTcbs.reported, reportTcbs.cert),
+		tcbGtError(reportTcbs.cert, reportTcbs.current),
 		tcbGtError(policyTcbs.minimum, reportTcbs.reported))
 	// Note:
 	//   * by transitivity of <=, if we're here, then minimum <= current
-	//   * since vcek == reported, reported <= current
+	//   * since cert == reported, reported <= current
 
 	// Checks that could make sense but don't:
 	//
@@ -542,7 +543,11 @@ func consolidateKeyHashes(options *Options) error {
 }
 
 func validateKeys(report *spb.Report, options *Options) error {
-	if options.RequireAuthorKey && report.GetAuthorKeyEn() == 0 {
+	info, err := abi.ParseSignerInfo(report.GetSignerInfo())
+	if err != nil {
+		return err
+	}
+	if options.RequireAuthorKey && !info.AuthorKeyEn {
 		return errors.New("author key missing when required")
 	}
 
@@ -565,7 +570,7 @@ func validateKeys(report *spb.Report, options *Options) error {
 		return false
 	}
 
-	authorKeyTrusted := report.GetAuthorKeyEn() != 0 && bytesContained(options.TrustedAuthorKeyHashes,
+	authorKeyTrusted := info.AuthorKeyEn && bytesContained(options.TrustedAuthorKeyHashes,
 		report.GetAuthorKeyDigest())
 
 	if options.RequireAuthorKey && !authorKeyTrusted {
@@ -580,15 +585,42 @@ func validateKeys(report *spb.Report, options *Options) error {
 	return nil
 }
 
-func validateSnpAttestation(report *spb.Report, vcek []byte, options *Options) error {
-	vcekCert, err := x509.ParseCertificate(vcek)
+func validateKeyKind(report *spb.Attestation) (*x509.Certificate, error) {
+	info, err := abi.ParseSignerInfo(report.GetReport().GetSignerInfo())
 	if err != nil {
-		return fmt.Errorf("could not parse VCEK certificate: %v", err)
+		return nil, err
 	}
-	// Get the TCB values of the VCEK
-	exts, err := kds.VcekCertificateExtensions(vcekCert)
+	switch info.SigningKey {
+	case abi.VcekReportSigner:
+		if report.GetCertificateChain().VcekCert != nil {
+			return x509.ParseCertificate(report.GetCertificateChain().VcekCert)
+		}
+	case abi.VlekReportSigner:
+		if report.GetCertificateChain().VlekCert != nil {
+			return x509.ParseCertificate(report.GetCertificateChain().VlekCert)
+		}
+	case abi.NoneReportSigner:
+		return nil, nil
+	}
+	return nil, fmt.Errorf("unsupported key kind %v", info.SigningKey)
+}
+
+// SnpAttestation validates fields of the protobuf representation of an attestation report against
+// expectations. Does not check the attestation certificates or signature.
+func SnpAttestation(attestation *spb.Attestation, options *Options) error {
+	endorsementKeyCert, err := validateKeyKind(attestation)
 	if err != nil {
-		return fmt.Errorf("could not get VCEK certificate extensions: %v", err)
+		return err
+	}
+	report := attestation.GetReport()
+	info, err := abi.ParseSignerInfo(report.GetSignerInfo())
+	if err != nil {
+		return err
+	}
+	// Get the TCB values of the V[CL]EK
+	exts, err := kds.CertificateExtensions(endorsementKeyCert, info.SigningKey)
+	if err != nil {
+		return fmt.Errorf("could not get %v certificate extensions: %v", info.SigningKey, err)
 	}
 
 	if report.GetGuestSvn() < options.MinimumGuestSvn {
@@ -611,18 +643,11 @@ func validateSnpAttestation(report *spb.Report, vcek []byte, options *Options) e
 	}
 
 	// MaskChipId might be 1 for the host, so only check if the the CHIP_ID is not all zeros.
-	if !allZero(report.GetChipId()) && !bytes.Equal(report.GetChipId(), exts.HWID[:]) {
+	if info.SigningKey == abi.VcekReportSigner && !allZero(report.GetChipId()) && !bytes.Equal(report.GetChipId(), exts.HWID[:]) {
 		return fmt.Errorf("report field CHIP_ID %s is not the same as the VCEK certificate's HWID %s",
 			hex.EncodeToString(report.GetChipId()), hex.EncodeToString(exts.HWID[:]))
 	}
 	return nil
-}
-
-// SnpAttestation validates fields of the protobuf representation of an attestation report against
-// expectations. Does not check the attestation certificates or signature.
-func SnpAttestation(attestation *spb.Attestation, options *Options) error {
-	return validateSnpAttestation(attestation.GetReport(),
-		attestation.GetCertificateChain().GetVcekCert(), options)
 }
 
 // RawSnpAttestation validates fields of a raw attestation report against expectations. Does not
@@ -633,14 +658,10 @@ func RawSnpAttestation(report []byte, certTable []byte, options *Options) error 
 		return fmt.Errorf("could not unmarshal SNP certificate table: %v", err)
 	}
 
-	vcek, err := certs.GetByGUIDString(abi.VcekGUID)
-	if err != nil {
-		return fmt.Errorf("could not get VCEK certificate: %v", err)
-	}
-
 	proto, err := abi.ReportToProto(report)
 	if err != nil {
 		return fmt.Errorf("could not parse attestation report: %v", err)
 	}
-	return validateSnpAttestation(proto, vcek, options)
+	return SnpAttestation(&spb.Attestation{Report: proto, CertificateChain: certs.Proto()},
+		options)
 }

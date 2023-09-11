@@ -275,7 +275,7 @@ type RootOfTrust struct {
 	// The expected AMD product the attestation was collected from. Default "Milan".
 	Product string `protobuf:"bytes,1,opt,name=product,proto3" json:"product,omitempty"`
 	// Paths to CA bundles for the AMD product.
-	// Must be in PEM format, ASK, then ARK certificates.
+	// Must be in PEM format, AS[V]K, then ARK certificates.
 	// This is for verifing a report's signature, as opposed to validating trust
 	// in the report's ID key or author key.
 	// If empty, uses the verification library's embedded certificates from AMD.

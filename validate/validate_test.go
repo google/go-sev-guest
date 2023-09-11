@@ -67,7 +67,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 		reportedTcb    kds.TCBParts
 		committedTcb   kds.TCBParts
 		launchTcb      kds.TCBParts
-		authorKeyEn    uint32
+		signerInfo     abi.SignerInfo
 		currentBuild   uint8
 		currentMajor   uint8
 		currentMinor   uint8
@@ -100,7 +100,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 			ReportId:        reportID,
 			ReportIdMa:      reportIDMA,
 			ChipId:          chipID[:],
-			AuthorKeyEn:     opts.authorKeyEn,
+			SignerInfo:      abi.ComposeSignerInfo(opts.signerInfo),
 			CommittedBuild:  uint32(opts.committedBuild),
 			CommittedMajor:  uint32(opts.committedMajor),
 			CommittedMinor:  uint32(opts.committedMinor),
@@ -129,7 +129,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	sign0, err := test.DefaultCertChain("Milan", now)
+	sign0, err := test.DefaultTestOnlyCertChain("Milan", now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,14 +139,23 @@ func TestValidateSnpAttestation(t *testing.T) {
 		ArkCreationTime:  now,
 		AskCreationTime:  now,
 		VcekCreationTime: now,
+		VlekCreationTime: now,
 		VcekCustom: test.CertOverride{
-			Extensions: test.CustomVcekExtensions(
+			Extensions: test.CustomExtensions(
 				goodtcb,
-				chipID,
+				chipID[:],
+				"",
+			),
+		},
+		VlekCustom: test.CertOverride{
+			Extensions: test.CustomExtensions(
+				goodtcb,
+				nil,
+				"Cloud Service Provider",
 			),
 		},
 	}
-	sign, err := sb.CertChain()
+	sign, err := sb.TestOnlyCertChain()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +177,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 		committedTcb:   goodtcb,
 		reportedTcb:    goodtcb,
 		launchTcb:      goodtcb,
-		authorKeyEn:    1,
+		signerInfo:     abi.SignerInfo{AuthorKeyEn: true},
 		currentBuild:   2,
 		committedBuild: 2,
 		currentMajor:   1,
@@ -195,7 +204,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 			Input: nonce54321,
 			Output: func() [labi.SnpReportRespReportSize]byte {
 				opts := baseOpts
-				opts.authorKeyEn = 0
+				opts.signerInfo = abi.SignerInfo{}
 				return makeReport(nonce54321, opts)
 			}(),
 		},

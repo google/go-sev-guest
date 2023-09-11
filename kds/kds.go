@@ -31,120 +31,130 @@ import (
 	"go.uber.org/multierr"
 )
 
-// Encapsulates the rest of the fields after AMD's VCEK OID classifier prefix 1.3.6.1.4.1.3704.1.
-type vcekOID struct {
+// Encapsulates the rest of the fields after AMD's V{C,L}EK OID classifier prefix 1.3.6.1.4.1.3704.1.
+type kdsOID struct {
 	major int
 	minor int
 }
 
 var (
-	// OidStructVersion is the x509v3 extension for VCEK certificate struct version.
+	// OidStructVersion is the x509v3 extension for V[CL]EK certificate struct version.
 	OidStructVersion = asn1.ObjectIdentifier([]int{1, 3, 6, 1, 4, 1, 3704, 1, 1})
-	// OidProductName1 is the x509v3 extension for VCEK certificate product name.
+	// OidProductName1 is the x509v3 extension for V[CL]EK certificate product name.
 	OidProductName1 = asn1.ObjectIdentifier([]int{1, 3, 6, 1, 4, 1, 3704, 1, 2})
-	// OidBlSpl is the x509v3 extension for VCEK certificate bootloader security patch level.
+	// OidBlSpl is the x509v3 extension for V[CL]EK certificate bootloader security patch level.
 	OidBlSpl = asn1.ObjectIdentifier([]int{1, 3, 6, 1, 4, 1, 3704, 1, 3, 1})
-	// OidTeeSpl is the x509v3 extension for VCEK certificate TEE security patch level.
+	// OidTeeSpl is the x509v3 extension for V[CL]EK certificate TEE security patch level.
 	OidTeeSpl = asn1.ObjectIdentifier([]int{1, 3, 6, 1, 4, 1, 3704, 1, 3, 2})
-	// OidSnpSpl is the x509v3 extension for VCEK certificate SNP security patch level.
+	// OidSnpSpl is the x509v3 extension for V[CL]EK certificate SNP security patch level.
 	OidSnpSpl = asn1.ObjectIdentifier([]int{1, 3, 6, 1, 4, 1, 3704, 1, 3, 3})
-	// OidSpl4 is the x509v3 extension for VCEK certificate reserved security patch level.
+	// OidSpl4 is the x509v3 extension for V[CL]EK certificate reserved security patch level.
 	OidSpl4 = asn1.ObjectIdentifier([]int{1, 3, 6, 1, 4, 1, 3704, 1, 3, 4})
-	// OidSpl5 is the x509v3 extension for VCEK certificate reserved security patch level.
+	// OidSpl5 is the x509v3 extension for V[CL]EK certificate reserved security patch level.
 	OidSpl5 = asn1.ObjectIdentifier([]int{1, 3, 6, 1, 4, 1, 3704, 1, 3, 5})
-	// OidSpl6 is the x509v3 extension for VCEK certificate reserved security patch level.
+	// OidSpl6 is the x509v3 extension for V[CL]EK certificate reserved security patch level.
 	OidSpl6 = asn1.ObjectIdentifier([]int{1, 3, 6, 1, 4, 1, 3704, 1, 3, 6})
-	// OidSpl7 is the x509v3 extension for VCEK certificate reserved security patch level.
+	// OidSpl7 is the x509v3 extension for V[CL]EK certificate reserved security patch level.
 	OidSpl7 = asn1.ObjectIdentifier([]int{1, 3, 6, 1, 4, 1, 3704, 1, 3, 7})
-	// OidUcodeSpl is the x509v3 extension for VCEK microcode security patch level.
+	// OidUcodeSpl is the x509v3 extension for V[CL]EK microcode security patch level.
 	OidUcodeSpl = asn1.ObjectIdentifier([]int{1, 3, 6, 1, 4, 1, 3704, 1, 3, 8})
 	// OidHwid is the x509v3 extension for VCEK certificate associated hardware identifier.
 	OidHwid = asn1.ObjectIdentifier([]int{1, 3, 6, 1, 4, 1, 3704, 1, 4})
+	// OidCspID is the x509v3 extension for a VLEK certificate's Cloud Service Provider's
+	// origin TLS key's certificate's subject key's CommonName.
+	OidCspID = asn1.ObjectIdentifier([]int{1, 3, 6, 1, 4, 1, 3704, 1, 5})
 
 	authorityKeyOid = asn1.ObjectIdentifier([]int{2, 5, 29, 35})
 	// Short forms of the asn1 Object identifiers to use in map lookups, since []int are invalid key
 	// types.
-	vcekStructVersion = vcekOID{major: 1}
-	vcekProductName1  = vcekOID{major: 2}
-	vcekBlSpl         = vcekOID{major: 3, minor: 1}
-	vcekTeeSpl        = vcekOID{major: 3, minor: 2}
-	vcekSnpSpl        = vcekOID{major: 3, minor: 3}
-	vcekSpl4          = vcekOID{major: 3, minor: 4}
-	vcekSpl5          = vcekOID{major: 3, minor: 5}
-	vcekSpl6          = vcekOID{major: 3, minor: 6}
-	vcekSpl7          = vcekOID{major: 3, minor: 7}
-	vcekUcodeSpl      = vcekOID{major: 3, minor: 8}
-	vcekHwid          = vcekOID{major: 4}
+	kdsStructVersion = kdsOID{major: 1}
+	kdsProductName1  = kdsOID{major: 2}
+	kdsBlSpl         = kdsOID{major: 3, minor: 1}
+	kdsTeeSpl        = kdsOID{major: 3, minor: 2}
+	kdsSnpSpl        = kdsOID{major: 3, minor: 3}
+	kdsSpl4          = kdsOID{major: 3, minor: 4}
+	kdsSpl5          = kdsOID{major: 3, minor: 5}
+	kdsSpl6          = kdsOID{major: 3, minor: 6}
+	kdsSpl7          = kdsOID{major: 3, minor: 7}
+	kdsUcodeSpl      = kdsOID{major: 3, minor: 8}
+	kdsHwid          = kdsOID{major: 4}
+	kdsCspID         = kdsOID{major: 5}
 
 	kdsHostname = "kdsintf.amd.com"
 	kdsBaseURL  = "https://" + kdsHostname
 	kdsVcekPath = "/vcek/v1/"
+	kdsVlekPath = "/vlek/v1/"
 )
 
 // TCBVersion is a 64-bit bitfield of different security patch levels of AMD firmware and microcode.
 type TCBVersion uint64
 
-// VcekExtensions represents the information stored in the KDS-specified x509 extensions of a VCEK
+// Extensions represents the information stored in the KDS-specified x509 extensions of a V{C,L}EK
 // certificate.
-type VcekExtensions struct {
+type Extensions struct {
 	StructVersion uint8
 	ProductName   string
 	// The host driver knows the difference between primary and secondary HWID.
-	// Primary vs secondary is irrelevant to verification.
-	HWID       [64]byte
+	// Primary vs secondary is irrelevant to verification. Must be nil or
+	// abi.ChipIDSize long.
+	HWID       []byte
 	TCBVersion TCBVersion
+	CspID      string
 }
 
-func oidTovcekOID(id asn1.ObjectIdentifier) (vcekOID, error) {
+func oidTokdsOID(id asn1.ObjectIdentifier) (kdsOID, error) {
 	if id.Equal(OidStructVersion) {
-		return vcekStructVersion, nil
+		return kdsStructVersion, nil
 	}
 	if id.Equal(OidProductName1) {
-		return vcekProductName1, nil
+		return kdsProductName1, nil
 	}
 	if id.Equal(OidBlSpl) {
-		return vcekBlSpl, nil
+		return kdsBlSpl, nil
 	}
 	if id.Equal(OidHwid) {
-		return vcekHwid, nil
+		return kdsHwid, nil
 	}
 	if id.Equal(OidTeeSpl) {
-		return vcekTeeSpl, nil
+		return kdsTeeSpl, nil
 	}
 	if id.Equal(OidSnpSpl) {
-		return vcekSnpSpl, nil
+		return kdsSnpSpl, nil
 	}
 	if id.Equal(OidSpl4) {
-		return vcekSpl4, nil
+		return kdsSpl4, nil
 	}
 	if id.Equal(OidSpl5) {
-		return vcekSpl5, nil
+		return kdsSpl5, nil
 	}
 	if id.Equal(OidSpl6) {
-		return vcekSpl6, nil
+		return kdsSpl6, nil
 	}
 	if id.Equal(OidSpl7) {
-		return vcekSpl7, nil
+		return kdsSpl7, nil
 	}
 	if id.Equal(OidUcodeSpl) {
-		return vcekUcodeSpl, nil
+		return kdsUcodeSpl, nil
 	}
-	return vcekOID{}, fmt.Errorf("not an AMD VCEK OID: %v", id)
+	if id.Equal(OidCspID) {
+		return kdsCspID, nil
+	}
+	return kdsOID{}, fmt.Errorf("not an AMD KDS OID: %v", id)
 }
 
-func vcekOidMap(cert *x509.Certificate) (map[vcekOID]*pkix.Extension, error) {
-	result := make(map[vcekOID]*pkix.Extension)
+func kdsOidMap(cert *x509.Certificate) (map[kdsOID]*pkix.Extension, error) {
+	result := make(map[kdsOID]*pkix.Extension)
 	for i, ext := range cert.Extensions {
 		if ext.Id.Equal(authorityKeyOid) {
 			// Since ASK is a CA, signing can impart the authority key extension.
 			continue
 		}
-		oid, err := oidTovcekOID(ext.Id)
+		oid, err := oidTokdsOID(ext.Id)
 		if err != nil {
 			return nil, err
 		}
 		if _, ok := result[oid]; ok {
-			return nil, fmt.Errorf("duplicate VCEK extension: %v", ext)
+			return nil, fmt.Errorf("duplicate AMD KDS extension: %v", ext)
 		}
 		result[oid] = &cert.Extensions[i]
 	}
@@ -293,43 +303,55 @@ func asn1OctetString(ext *pkix.Extension, field string, size int) ([]byte, error
 	return octet, nil
 }
 
-func vcekOidMapToVcekExtensions(exts map[vcekOID]*pkix.Extension) (*VcekExtensions, error) {
-	var result VcekExtensions
+func kdsOidMapToExtensions(exts map[kdsOID]*pkix.Extension) (*Extensions, error) {
+	var result Extensions
 
-	if err := asn1U8(exts[vcekStructVersion], "StructVersion", &result.StructVersion); err != nil {
+	if err := asn1U8(exts[kdsStructVersion], "StructVersion", &result.StructVersion); err != nil {
 		return nil, err
 	}
-	if err := asn1IA5String(exts[vcekProductName1], "ProductName1", &result.ProductName); err != nil {
+	if err := asn1IA5String(exts[kdsProductName1], "ProductName1", &result.ProductName); err != nil {
 		return nil, err
 	}
-	octet, err := asn1OctetString(exts[vcekHwid], "HWID", 64)
-	if err != nil {
-		return nil, err
+	hwidExt, ok := exts[kdsHwid]
+	if ok {
+		octet, err := asn1OctetString(hwidExt, "HWID", 64)
+		if err != nil {
+			return nil, err
+		}
+		result.HWID = octet
 	}
-	copy(result.HWID[:], octet)
+	cspidExt := exts[kdsCspID]
+	if cspidExt != nil {
+		if err := asn1IA5String(cspidExt, "CSP_ID", &result.CspID); err != nil {
+			return nil, err
+		}
+		if hwidExt != nil {
+			return nil, fmt.Errorf("certificate has both HWID (%s) and CSP_ID (%s) extensions", hex.EncodeToString(result.HWID), result.CspID)
+		}
+	}
 	var blspl, snpspl, teespl, spl4, spl5, spl6, spl7, ucodespl uint8
-	if err := asn1U8(exts[vcekBlSpl], "BlSpl", &blspl); err != nil {
+	if err := asn1U8(exts[kdsBlSpl], "BlSpl", &blspl); err != nil {
 		return nil, err
 	}
-	if err := asn1U8(exts[vcekTeeSpl], "TeeSpl", &teespl); err != nil {
+	if err := asn1U8(exts[kdsTeeSpl], "TeeSpl", &teespl); err != nil {
 		return nil, err
 	}
-	if err := asn1U8(exts[vcekSnpSpl], "SnpSpl", &snpspl); err != nil {
+	if err := asn1U8(exts[kdsSnpSpl], "SnpSpl", &snpspl); err != nil {
 		return nil, err
 	}
-	if err := asn1U8(exts[vcekSpl4], "Spl4", &spl4); err != nil {
+	if err := asn1U8(exts[kdsSpl4], "Spl4", &spl4); err != nil {
 		return nil, err
 	}
-	if err := asn1U8(exts[vcekSpl5], "Spl5", &spl5); err != nil {
+	if err := asn1U8(exts[kdsSpl5], "Spl5", &spl5); err != nil {
 		return nil, err
 	}
-	if err := asn1U8(exts[vcekSpl6], "Spl6", &spl6); err != nil {
+	if err := asn1U8(exts[kdsSpl6], "Spl6", &spl6); err != nil {
 		return nil, err
 	}
-	if err := asn1U8(exts[vcekSpl7], "Spl7", &spl7); err != nil {
+	if err := asn1U8(exts[kdsSpl7], "Spl7", &spl7); err != nil {
 		return nil, err
 	}
-	if err := asn1U8(exts[vcekUcodeSpl], "UcodeSpl", &ucodespl); err != nil {
+	if err := asn1U8(exts[kdsUcodeSpl], "UcodeSpl", &ucodespl); err != nil {
 		return nil, err
 	}
 	tcb, err := ComposeTCBParts(TCBParts{
@@ -349,18 +371,64 @@ func vcekOidMapToVcekExtensions(exts map[vcekOID]*pkix.Extension) (*VcekExtensio
 	return &result, nil
 }
 
-// VcekCertificateExtensions returns the x509v3 extensions from the KDS specification interpreted
-// into a struct type.
-func VcekCertificateExtensions(cert *x509.Certificate) (*VcekExtensions, error) {
-	oidMap, err := vcekOidMap(cert)
+// preEndorsementKeyCertificateExtensions returns the x509v3 extensions from the KDS specification interpreted
+// into a struct type for either the VCEK or the VLEK
+func preEndorsementKeyCertificateExtensions(cert *x509.Certificate) (*Extensions, error) {
+	oidMap, err := kdsOidMap(cert)
 	if err != nil {
 		return nil, err
 	}
-	extensions, err := vcekOidMapToVcekExtensions(oidMap)
+	extensions, err := kdsOidMapToExtensions(oidMap)
 	if err != nil {
 		return nil, err
 	}
 	return extensions, nil
+}
+
+// VcekCertificateExtensions returns the x509v3 extensions from the KDS specification of a VCEK
+// certificate interpreted into a struct type.
+func VcekCertificateExtensions(cert *x509.Certificate) (*Extensions, error) {
+	exts, err := preEndorsementKeyCertificateExtensions(cert)
+	if err != nil {
+		return nil, err
+	}
+	if exts.CspID != "" {
+		return nil, fmt.Errorf("unexpected CSP_ID in VCEK certificate: %s", exts.CspID)
+	}
+	if len(exts.HWID) != abi.ChipIDSize {
+		return nil, fmt.Errorf("missing HWID extension for VCEK certificate")
+	}
+	return exts, nil
+}
+
+// VlekCertificateExtensions returns the x509v3 extensions from the KDS specification of a VLEK
+// certificate interpreted into a struct type.
+func VlekCertificateExtensions(cert *x509.Certificate) (*Extensions, error) {
+	exts, err := preEndorsementKeyCertificateExtensions(cert)
+	if err != nil {
+		return nil, err
+	}
+	if exts.CspID == "" {
+		return nil, fmt.Errorf("missing CSP_ID in VLEK certificate")
+	}
+	if exts.HWID != nil {
+		return nil, fmt.Errorf("unexpected HWID in VLEK certificate: %s", hex.EncodeToString(exts.HWID))
+	}
+	return exts, nil
+}
+
+// CertificateExtensions returns the x509v3 extensions from the KDS specification interpreted
+// into a struct type.
+func CertificateExtensions(cert *x509.Certificate, key abi.ReportSigner) (*Extensions, error) {
+	switch key {
+	case abi.VcekReportSigner:
+		return VcekCertificateExtensions(cert)
+	case abi.VlekReportSigner:
+		return VlekCertificateExtensions(cert)
+	case abi.NoneReportSigner:
+		return &Extensions{}, nil
+	}
+	return nil, fmt.Errorf("unexpected endorsement key kind %v", key)
 }
 
 // ParseProductCertChain returns the DER-formatted certificates represented by the body
@@ -380,7 +448,7 @@ func ParseProductCertChain(pems []byte) ([]byte, []byte, error) {
 	}
 	askBlock, arkRest := pem.Decode(pems)
 	arkBlock, noRest := pem.Decode(arkRest)
-	if err := multierr.Combine(checkForm("ASK", askBlock), checkForm("ARK", arkBlock)); err != nil {
+	if err := multierr.Combine(checkForm("ASK or ASVK", askBlock), checkForm("ARK", arkBlock)); err != nil {
 		return nil, nil, err
 	}
 	if len(noRest) != 0 {
@@ -389,15 +457,23 @@ func ParseProductCertChain(pems []byte) ([]byte, []byte, error) {
 	return askBlock.Bytes, arkBlock.Bytes, nil
 }
 
-// productBaseURL returns the base URL for all certificate queries within a particular product.
-func productBaseURL(name string) string {
-	return fmt.Sprintf("%s/vcek/v1/%s", kdsBaseURL, name)
+// productBaseURL returns the base URL for all certificate queries within a particular product for the
+// given report signer kind.
+func productBaseURL(s abi.ReportSigner, name string) string {
+	path := "unknown"
+	if s == abi.VcekReportSigner {
+		path = kdsVcekPath
+	}
+	if s == abi.VlekReportSigner {
+		path = kdsVlekPath
+	}
+	return fmt.Sprintf("%s%s%s", kdsBaseURL, path, name)
 }
 
-// ProductCertChainURL returns the AMD KDS URL for retrieving the ARK and ASK
-// certificates on the given product in PEM format.
-func ProductCertChainURL(product string) string {
-	return fmt.Sprintf("%s/cert_chain", productBaseURL(product))
+// ProductCertChainURL returns the AMD KDS URL for retrieving the ARK and AS(V)K
+// certificates on the given product in ??? format.
+func ProductCertChainURL(s abi.ReportSigner, product string) string {
+	return fmt.Sprintf("%s/cert_chain", productBaseURL(s, product))
 }
 
 // VCEKCertURL returns the AMD KDS URL for retrieving the VCEK on a given product
@@ -405,8 +481,21 @@ func ProductCertChainURL(product string) string {
 func VCEKCertURL(product string, hwid []byte, tcb TCBVersion) string {
 	parts := DecomposeTCBVersion(tcb)
 	return fmt.Sprintf("%s/%s?blSPL=%d&teeSPL=%d&snpSPL=%d&ucodeSPL=%d",
-		productBaseURL(product),
+		productBaseURL(abi.VcekReportSigner, product),
 		hex.EncodeToString(hwid),
+		parts.BlSpl,
+		parts.TeeSpl,
+		parts.SnpSpl,
+		parts.UcodeSpl,
+	)
+}
+
+// VLEKCertURL returns the GET URL for retrieving a VLEK certificate, but without the necessary
+// CSP secret in the HTTP headers that makes the request validate to the KDS.
+func VLEKCertURL(product string, tcb TCBVersion) string {
+	parts := DecomposeTCBVersion(tcb)
+	return fmt.Sprintf("%s/cert?blSPL=%d&teeSPL=%d&snpSPL=%d&ucodeSPL=%d",
+		productBaseURL(abi.VlekReportSigner, product),
 		parts.BlSpl,
 		parts.TeeSpl,
 		parts.SnpSpl,
@@ -422,71 +511,88 @@ type VCEKCert struct {
 	TCB     uint64
 }
 
+// VLEKCert represents the attestation report components represented in a KDS VLEK certificate
+// request URL.
+type VLEKCert struct {
+	Product string
+	TCB     uint64
+}
+
+// CertFunction is an enumeration of which endorsement key type is getting certified.
+type CertFunction int
+
+const (
+	// UnknownCertFunction represents an unknown endpoint for parsing KDS URLs.
+	UnknownCertFunction CertFunction = iota
+	// VcekCertFunction represents the vcek endpoints for parsing KDS URLs.
+	VcekCertFunction
+	// VlekCertFunction represents the vlek endpoints for parsing KDS URLs.
+	VlekCertFunction
+)
+
+type parsedURL struct {
+	product   string
+	simpleURL *url.URL
+	function  CertFunction
+}
+
 // parseBaseProductURL returns the product name for a root certificate chain URL if it is one,
 // with the parsed URL that has the product prefix trimmed.
-func parseBaseProductURL(kdsurl string) (string, *url.URL, error) {
+func parseBaseProductURL(kdsurl string) (*parsedURL, error) {
 	u, err := url.Parse(kdsurl)
 	if err != nil {
-		return "", nil, fmt.Errorf("invalid AMD KDS URL %q: %v", kdsurl, err)
+		return nil, fmt.Errorf("invalid AMD KDS URL %q: %v", kdsurl, err)
 	}
 	if u.Scheme != "https" {
-		return "", nil, fmt.Errorf("unexpected AMD KDS URL scheme %q, want \"https\"", u.Scheme)
+		return nil, fmt.Errorf("unexpected AMD KDS URL scheme %q, want \"https\"", u.Scheme)
 	}
 	if u.Host != kdsHostname {
-		return "", nil, fmt.Errorf("unexpected AMD KDS URL host %q, want %q", u.Host, kdsHostname)
+		return nil, fmt.Errorf("unexpected AMD KDS URL host %q, want %q", u.Host, kdsHostname)
 	}
-	if !strings.HasPrefix(u.Path, kdsVcekPath) {
-		return "", nil, fmt.Errorf("unexpected AMD KDS URL path %q, want prefix %q", u.Path, kdsVcekPath)
+	result := &parsedURL{}
+	vcekFunc := strings.HasPrefix(u.Path, kdsVcekPath)
+	vlekFunc := strings.HasPrefix(u.Path, kdsVlekPath)
+	var function string
+	if vcekFunc {
+		function = strings.TrimPrefix(u.Path, kdsVcekPath)
+		result.function = VcekCertFunction
+	} else if vlekFunc {
+		function = strings.TrimPrefix(u.Path, kdsVlekPath)
+		result.function = VlekCertFunction
+	} else {
+		return nil, fmt.Errorf("unexpected AMD KDS URL path %q, want prefix %q or %q", u.Path, kdsVcekPath, kdsVlekPath)
 	}
-	function := strings.TrimPrefix(u.Path, kdsVcekPath)
 
 	// The following should be product/endpoint
 	pieces := strings.Split(function, "/")
 	if len(pieces) != 2 {
-		return "", nil, fmt.Errorf("url has unexpected endpoint %q not product/endpoint", function)
+		return nil, fmt.Errorf("url has unexpected endpoint %q not product/endpoint", function)
 	}
 
-	product := pieces[0]
+	result.product = pieces[0]
 	// Set the URL's path to the rest of the path without the API or product prefix.
 	u.Path = pieces[1]
-	return product, u, nil
+	result.simpleURL = u
+	return result, nil
 }
 
-// ParseProductCertChainURL returns the product name for a KDS cert_chain url, or an error if the
-// input is not a KDS cert_chain url.
-func ParseProductCertChainURL(kdsurl string) (string, error) {
-	product, u, err := parseBaseProductURL(kdsurl)
+// ParseProductCertChainURL returns the product name and either "vcek" or "vlek" for a KDS
+// cert_chain url, or an error if the input is not a KDS cert_chain url.
+func ParseProductCertChainURL(kdsurl string) (string, CertFunction, error) {
+	parsed, err := parseBaseProductURL(kdsurl)
 	if err != nil {
-		return "", err
+		return "", UnknownCertFunction, err
 	}
-	if u.Path != "cert_chain" {
-		return "", fmt.Errorf("unexpected AMD KDS URL path %q, want \"cert_chain\"", u.Path)
+	if parsed.simpleURL.Path != "cert_chain" {
+		return "", UnknownCertFunction, fmt.Errorf("unexpected AMD KDS URL path %q, want \"cert_chain\"", parsed.simpleURL.Path)
 	}
-	return product, nil
+	return parsed.product, parsed.function, nil
 }
 
-// ParseVCEKCertURL returns the attestation report components represented in the given KDS VCEK
-// certificate request URL.
-func ParseVCEKCertURL(kdsurl string) (VCEKCert, error) {
-	result := VCEKCert{}
-	product, u, err := parseBaseProductURL(kdsurl)
-	if err != nil {
-		return result, err
-	}
-	result.Product = product
-	hwid, err := hex.DecodeString(u.Path)
-	if err != nil {
-		return result, fmt.Errorf("hwid component of KDS URL is not a hex string: %q", u.Path)
-	}
-	if len(hwid) != abi.ChipIDSize {
-		return result, fmt.Errorf("hwid component of KDS URL has size %d, want %d", len(hwid), abi.ChipIDSize)
-	}
-
-	result.HWID = hwid
-
+func parseTCBURL(u *url.URL) (uint64, error) {
 	values, err := url.ParseQuery(u.RawQuery)
 	if err != nil {
-		return result, fmt.Errorf("invalid AMD KDS URL query %q: %v", u.RawQuery, err)
+		return 0, fmt.Errorf("invalid AMD KDS URL query %q: %v", u.RawQuery, err)
 	}
 	parts := TCBParts{}
 	for key, valuelist := range values {
@@ -501,22 +607,67 @@ func ParseVCEKCertURL(kdsurl string) (VCEKCert, error) {
 		case "ucodeSPL":
 			setter = func(number uint8) { parts.UcodeSpl = number }
 		default:
-			return result, fmt.Errorf("unexpected KDS VCEK URL argument %q", key)
+			return 0, fmt.Errorf("unexpected KDS TCB version URL argument %q", key)
 		}
 		for _, val := range valuelist {
 			number, err := strconv.Atoi(val)
 			if err != nil || number < 0 || number > 255 {
-				return result, fmt.Errorf("invalid KDS VCEK URL argument value %q, want a value 0-255", val)
+				return 0, fmt.Errorf("invalid KDS TCB version URL argument value %q, want a value 0-255", val)
 			}
 			setter(uint8(number))
 		}
 	}
 	tcb, err := ComposeTCBParts(parts)
 	if err != nil {
-		return result, fmt.Errorf("invalid AMD KDS TCB arguments: %v", err)
+		return 0, fmt.Errorf("invalid AMD KDS TCB arguments: %v", err)
 	}
-	result.TCB = uint64(tcb)
-	return result, nil
+	return uint64(tcb), err
+}
+
+// ParseVCEKCertURL returns the attestation report components represented in the given KDS VCEK
+// certificate request URL.
+func ParseVCEKCertURL(kdsurl string) (VCEKCert, error) {
+	result := VCEKCert{}
+	parsed, err := parseBaseProductURL(kdsurl)
+	if err != nil {
+		return result, err
+	}
+	if parsed.function != VcekCertFunction {
+		return result, fmt.Errorf("not a VCEK certificate URL: %s", kdsurl)
+	}
+	result.Product = parsed.product
+	hwid, err := hex.DecodeString(parsed.simpleURL.Path)
+	if err != nil {
+		return result, fmt.Errorf("hwid component of KDS URL is not a hex string: %q", parsed.simpleURL.Path)
+	}
+	if len(hwid) != abi.ChipIDSize {
+		return result, fmt.Errorf("hwid component of KDS URL has size %d, want %d", len(hwid), abi.ChipIDSize)
+	}
+
+	result.HWID = hwid
+
+	result.TCB, err = parseTCBURL(parsed.simpleURL)
+	return result, err
+}
+
+// ParseVLEKCertURL returns the attestation report components represented in the given KDS VLEK
+// certificate request URL.
+func ParseVLEKCertURL(kdsurl string) (VLEKCert, error) {
+	result := VLEKCert{}
+	parsed, err := parseBaseProductURL(kdsurl)
+	if err != nil {
+		return result, err
+	}
+	if parsed.function != VlekCertFunction {
+		return result, fmt.Errorf("not a VLEK certificate URL: %s", kdsurl)
+	}
+	result.Product = parsed.product
+	if parsed.simpleURL.Path != "cert" {
+		return result, fmt.Errorf("vlek function is %q, want 'cert'", parsed.simpleURL.Path)
+	}
+
+	result.TCB, err = parseTCBURL(parsed.simpleURL)
+	return result, err
 }
 
 // ProductString returns the KDS product argument to use for the product associated with
@@ -545,24 +696,57 @@ func ProductName(product *pb.SevProduct) string {
 }
 
 // ParseProductName returns the KDS project input value, and the model, stepping numbers represented
-// by a given VCEK productName extension value, or an error.
-func ParseProductName(productName string) (*pb.SevProduct, error) {
-	subs := strings.SplitN(productName, "-", 2)
-	if len(subs) != 2 {
-		return nil, fmt.Errorf("productName value %q does not match the expected Name-ModelStepping format", productName)
+// by a given V[CL]EK productName extension value, or an error.
+func ParseProductName(productName string, key abi.ReportSigner) (*pb.SevProduct, error) {
+	var product, stepping string
+	var needStepping bool
+	switch key {
+	case abi.VcekReportSigner:
+		subs := strings.SplitN(productName, "-", 2)
+		if len(subs) != 2 {
+			return nil, fmt.Errorf("productName value %q does not match the VCEK expected Name-ModelStepping format", productName)
+		}
+		product = subs[0]
+		stepping = subs[1]
+		needStepping = true
+	case abi.VlekReportSigner:
+		// VLEK certificates don't carry the stepping value in productName.
+		product = productName
 	}
 	var name pb.SevProduct_SevProductName
-	switch subs[0] {
+	switch product {
 	case "Milan":
 		name = pb.SevProduct_SEV_PRODUCT_MILAN
 	case "Genoa":
 		name = pb.SevProduct_SEV_PRODUCT_GENOA
 	default:
-		return nil, fmt.Errorf("unknown AMD SEV product: %q", subs[0])
+		return nil, fmt.Errorf("unknown AMD SEV product: %q", product)
 	}
-	modelStepping, err := strconv.ParseUint(subs[1], 16, 8)
-	if err != nil {
-		return nil, fmt.Errorf("model stepping in productName is not a hexadecimal byte: %q", subs[1])
+	var modelStepping uint64
+	if needStepping {
+		var err error
+		modelStepping, err = strconv.ParseUint(stepping, 16, 8)
+		if err != nil {
+			return nil, fmt.Errorf("model stepping in productName is not a hexadecimal byte: %q", stepping)
+		}
 	}
 	return &pb.SevProduct{Name: name, ModelStepping: uint32(modelStepping)}, nil
+}
+
+// CrlLinkByKey returns the CRL distribution point for the given key type's
+// product. If key is VlekReportSigner, then we use the vlek endpoint. The ASK
+// and ARK are both on the vcek endpoint.
+func CrlLinkByKey(product string, key abi.ReportSigner) string {
+	return fmt.Sprintf("%s/crl", productBaseURL(key, product))
+}
+
+// CrlLinkByRole returns the CRL distribution point for the given key role's
+// product. If role is "ASVK", then we use the vlek endpoint. The ASK and ARK
+// are both on the vcek endpoint.
+func CrlLinkByRole(product, role string) string {
+	key := abi.VcekReportSigner
+	if role == "ASVK" {
+		key = abi.VlekReportSigner
+	}
+	return CrlLinkByKey(product, key)
 }

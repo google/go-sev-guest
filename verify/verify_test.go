@@ -47,7 +47,7 @@ var (
 )
 
 func initSigner() {
-	newSigner, err := test.DefaultCertChain(product, time.Now())
+	newSigner, err := test.DefaultTestOnlyCertChain(product, time.Now())
 	if err != nil { // Unexpected
 		panic(err)
 	}
@@ -63,10 +63,10 @@ func TestEmbeddedCertsAppendixB3Expectations(t *testing.T) {
 	// https://www.amd.com/system/files/TechDocs/55766_SEV-KM_API_Specification.pdf
 	// Appendix B.1
 	for _, root := range trust.DefaultRootCerts {
-		if err := ValidateAskSev(root); err != nil {
+		if err := validateAskSev(root); err != nil {
 			t.Errorf("Embedded ASK failed validation: %v", err)
 		}
-		if err := ValidateArkSev(root); err != nil {
+		if err := validateArkSev(root); err != nil {
 			t.Errorf("Embedded ARK failed validation: %v", err)
 		}
 	}
@@ -83,10 +83,10 @@ func TestFakeCertsKDSExpectations(t *testing.T) {
 		},
 		// No ArkSev or AskSev intentionally for test certs.
 	}
-	if err := ValidateArkX509(root); err != nil {
+	if err := validateArkX509(root); err != nil {
 		t.Errorf("fake ARK validation error: %v", err)
 	}
-	if err := ValidateAskX509(root); err != nil {
+	if err := validateAskX509(root); err != nil {
 		t.Errorf("fake ASK validation error: %v", err)
 	}
 }
@@ -96,7 +96,7 @@ func TestParseVcekCert(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not parse valid VCEK certificate: %v", err)
 	}
-	if _, err := validateVcekCertificateProductNonspecific(cert); err != nil {
+	if _, err := validateKDSCertificateProductNonspecific(cert, abi.VcekReportSigner); err != nil {
 		t.Errorf("could not validate valid VCEK certificate: %v", err)
 	}
 }
@@ -105,7 +105,7 @@ func TestVerifyVcekCert(t *testing.T) {
 	// This certificate is committed regardless of its expiration date, but we'll adjust the
 	// CurrentTime to compare against so that the validity with respect to time is always true.
 	root := new(trust.AMDRootCerts)
-	if err := root.FromKDSCertBytes(testdata.MilanBytes); err != nil {
+	if err := root.FromKDSCertBytes(testdata.MilanVcekBytes); err != nil {
 		t.Fatalf("could not read Milan certificate file: %v", err)
 	}
 	vcek, err := x509.ParseCertificate(testdata.VcekBytes)
@@ -113,9 +113,10 @@ func TestVerifyVcekCert(t *testing.T) {
 		t.Errorf("could not parse valid VCEK certificate: %v", err)
 	}
 	now := time.Date(2022, time.September, 24, 1, 0, 0, 0, time.UTC)
-	opts := root.X509Options(now)
+	opts := root.X509Options(now, abi.VcekReportSigner)
 	if opts == nil {
 		t.Fatalf("root x509 certificates missing: %v", root)
+		return
 	}
 	// This time is within the 25 year lifespan of the Milan product.
 	chains, err := vcek.Verify(*opts)
@@ -165,7 +166,11 @@ func TestSnpReportSignature(t *testing.T) {
 			if !bytes.Equal(got, want) {
 				t.Errorf("%s: GetRawReport(%v) = %v, want %v", tc.Name, tc.Input, got, want)
 			}
-			if err := SnpReportSignature(raw, d.Signer.Vcek); err != nil {
+			key := d.Signer.Vcek
+			if tc.EK == test.KeyChoiceVlek {
+				key = d.Signer.Vlek
+			}
+			if err := SnpReportSignature(raw, key); err != nil {
 				t.Errorf("signature with test keys did not verify: %v", err)
 			}
 		}
@@ -291,9 +296,9 @@ func TestKdsMetadataLogic(t *testing.T) {
 	}
 	for _, tc := range tests {
 		bcopy := tc.builder
-		newSigner, err := (&bcopy).CertChain()
+		newSigner, err := (&bcopy).TestOnlyCertChain()
 		if err != nil {
-			t.Errorf("%+v.CertChain() errored unexpectedly: %v", tc.builder, err)
+			t.Errorf("%+v.TestOnlyCertChain() errored unexpectedly: %v", tc.builder, err)
 			continue
 		}
 		// Trust the test-generated root if the test should pass. Otherwise, other root logic
@@ -314,7 +319,7 @@ func TestKdsMetadataLogic(t *testing.T) {
 			options = &Options{}
 		}
 		vcekPem := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: newSigner.Vcek.Raw})
-		vcek, _, err := decodeCerts(vcekPem, newSigner.Ask.Raw, newSigner.Ark.Raw, options)
+		vcek, _, err := decodeCerts(&pb.CertificateChain{VcekCert: vcekPem, AskCert: newSigner.Ask.Raw, ArkCert: newSigner.Ark.Raw}, abi.VcekReportSigner, options)
 		if !test.Match(err, tc.wantErr) {
 			t.Errorf("%s: decodeCerts(...) = %+v, %v did not error as expected. Want %q", tc.name, vcek, err, tc.wantErr)
 		}
@@ -336,10 +341,13 @@ func TestCRLRootValidity(t *testing.T) {
 		ArkCreationTime:  now,
 		AskCreationTime:  now,
 		VcekCreationTime: now,
+		CSPID:            "go-sev-guest",
 		Keys: &test.AmdKeys{
 			Ark:  ark2,
 			Ask:  signer.Keys.Ask,
+			Asvk: signer.Keys.Asvk,
 			Vcek: signer.Keys.Vcek,
+			Vlek: signer.Keys.Vlek,
 		},
 		VcekCustom: test.CertOverride{
 			SerialNumber: big.NewInt(0xd),
@@ -348,7 +356,7 @@ func TestCRLRootValidity(t *testing.T) {
 			SerialNumber: big.NewInt(0x8088),
 		},
 	}
-	signer2, err := sb.CertChain()
+	signer2, err := sb.TestOnlyCertChain()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,47 +415,104 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 	d, goodRoots, badRoots, kds := testclient.GetSevGuest(tests, &test.DeviceOptions{Now: time.Now()}, t)
 	defer d.Close()
 	type reportGetter func(sg.Device, [64]byte) (*pb.Attestation, error)
+	reportOnly := func(d sg.Device, input [64]byte) (*pb.Attestation, error) {
+		report, err := sg.GetReport(d, input)
+		if err != nil {
+			return nil, err
+		}
+		return &pb.Attestation{Report: report}, nil
+	}
 	reportGetters := []struct {
-		name   string
-		getter reportGetter
+		name           string
+		getter         reportGetter
+		skipVlek       bool
+		badRootErr     string
+		vlekOnly       bool
+		vlekErr        string
+		vlekBadRootErr string
 	}{
 		{
-			name:   "GetExtendedReport",
-			getter: sg.GetExtendedReport,
+			name:           "GetExtendedReport",
+			getter:         sg.GetExtendedReport,
+			badRootErr:     "error verifying VCEK certificate",
+			vlekBadRootErr: "error verifying VLEK certificate",
 		},
 		{
-			name: "GetReport",
+			name:           "GetReport",
+			getter:         reportOnly,
+			badRootErr:     "error verifying VCEK certificate",
+			vlekErr:        "VLEK certificate is missing",
+			vlekBadRootErr: "VLEK certificate is missing",
+		},
+		{
+			name: "GetReportVlek",
 			getter: func(d sg.Device, input [64]byte) (*pb.Attestation, error) {
-				report, err := sg.GetReport(d, input)
+				attestation, err := reportOnly(d, input)
 				if err != nil {
 					return nil, err
 				}
-				return &pb.Attestation{Report: report}, nil
+				// If fake, we can provide the VLEK. Otherwise we have to error.
+				if attestation.CertificateChain == nil {
+					attestation.CertificateChain = &pb.CertificateChain{}
+				}
+				chain := attestation.CertificateChain
+				info, _ := abi.ParseSignerInfo(attestation.GetReport().GetSignerInfo())
+				if sg.UseDefaultSevGuest() && info.SigningKey == abi.VlekReportSigner {
+					if td, ok := d.(*test.Device); ok {
+						chain.VlekCert = td.Signer.Vlek.Raw
+					}
+				}
+				return attestation, nil
 			},
+			skipVlek:       !sg.UseDefaultSevGuest(),
+			vlekOnly:       true,
+			badRootErr:     "error verifying VLEK certificate",
+			vlekBadRootErr: "error verifying VLEK certificate",
 		},
 	}
 	// Trust the test device's root certs.
 	options := &Options{TrustedRoots: goodRoots, Getter: kds}
 	badOptions := &Options{TrustedRoots: badRoots, Getter: kds}
 	for _, tc := range tests {
-		if testclient.SkipUnmockableTestCase(&tc) {
-			continue
-		}
-		for _, getReport := range reportGetters {
-			ereport, err := getReport.getter(d, tc.Input)
-			if !test.Match(err, tc.WantErr) {
-				t.Fatalf("%s: %s(d, %v) = %v, %v. Want err: %v", tc.Name, getReport.name, tc.Input, ereport, err, tc.WantErr)
+		t.Run(tc.Name, func(t *testing.T) {
+			if testclient.SkipUnmockableTestCase(&tc) {
+				t.Skip()
+				return
 			}
-			if tc.WantErr == "" {
-				if err := SnpAttestation(ereport, options); err != nil {
-					t.Errorf("SnpAttestation(%v) errored unexpectedly: %v", ereport, err)
+
+			for _, getReport := range reportGetters {
+				if getReport.skipVlek && tc.EK == test.KeyChoiceVlek {
+					t.Skip()
+					continue
 				}
-				wantBad := "error verifying VCEK certificate"
-				if err := SnpAttestation(ereport, badOptions); !test.Match(err, wantBad) {
-					t.Errorf("SnpAttestation(_) bad root test errored unexpectedly: %v, want %s", err, wantBad)
+				if getReport.vlekOnly && tc.EK != test.KeyChoiceVlek {
+					t.Skip()
+					continue
+				}
+				ereport, err := getReport.getter(d, tc.Input)
+				if !test.Match(err, tc.WantErr) {
+					t.Fatalf("%s: %s(d, %v) = %v, %v. Want err: %v", tc.Name, getReport.name, tc.Input, ereport, err, tc.WantErr)
+				}
+				if tc.WantErr == "" {
+					var wantAttestationErr string
+					if tc.EK == test.KeyChoiceVlek && getReport.vlekErr != "" {
+						wantAttestationErr = getReport.vlekErr
+					}
+					if err := SnpAttestation(ereport, options); !test.Match(err, wantAttestationErr) {
+						t.Errorf("SnpAttestation(%v) = %v. Want err: %q", ereport, err, wantAttestationErr)
+					}
+
+					wantBad := getReport.badRootErr
+					if tc.EK == test.KeyChoiceVlek && getReport.vlekBadRootErr != "" {
+						wantBad = getReport.vlekBadRootErr
+					}
+					if err := SnpAttestation(ereport, badOptions); !test.Match(err, wantBad) {
+						t.Errorf("%s: SnpAttestation(_) bad root test errored unexpectedly: %v, want %s",
+							getReport.name, err, wantBad)
+					}
 				}
 			}
-		}
+		})
 	}
 }
 
@@ -457,7 +522,7 @@ func TestRealAttestationVerification(t *testing.T) {
 	copy(nonce[:], []byte{1, 2, 3, 4, 5})
 	getter := test.SimpleGetter(
 		map[string][]byte{
-			"https://kdsintf.amd.com/vcek/v1/Milan/cert_chain": testdata.MilanBytes,
+			"https://kdsintf.amd.com/vcek/v1/Milan/cert_chain": testdata.MilanVcekBytes,
 			// Use the VCEK's hwID and known TCB values to specify the URL its VCEK cert would be fetched from.
 			"https://kdsintf.amd.com/vcek/v1/Milan/3ac3fe21e13fb0990eb28a802e3fb6a29483a6b0753590c951bdd3b8e53786184ca39e359669a2b76a1936776b564ea464cdce40c05f63c9b610c5068b006b5d?blSPL=2&teeSPL=0&snpSPL=5&ucodeSPL=68": testdata.VcekBytes,
 		},

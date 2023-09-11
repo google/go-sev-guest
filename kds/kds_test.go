@@ -28,7 +28,7 @@ import (
 )
 
 func TestProductCertChainURL(t *testing.T) {
-	got := ProductCertChainURL("Milan")
+	got := ProductCertChainURL(abi.VcekReportSigner, "Milan")
 	want := "https://kdsintf.amd.com/vcek/v1/Milan/cert_chain"
 	if got != want {
 		t.Errorf("ProductCertChainURL(\"Milan\") = %q, want %q", got, want)
@@ -56,7 +56,7 @@ func TestParseProductBaseURL(t *testing.T) {
 	}{
 		{
 			name:        "happy path",
-			url:         ProductCertChainURL("Milan"),
+			url:         ProductCertChainURL(abi.VcekReportSigner, "Milan"),
 			wantProduct: "Milan",
 			wantURL: &url.URL{
 				Scheme: "https",
@@ -82,16 +82,16 @@ func TestParseProductBaseURL(t *testing.T) {
 	}
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
-			gotProduct, gotURL, err := parseBaseProductURL(tc.url)
+			parsed, err := parseBaseProductURL(tc.url)
 			if (err == nil && tc.wantErr != "") || (err != nil && !strings.Contains(err.Error(), tc.wantErr)) {
 				t.Fatalf("parseBaseProductURL(%q) = _, _, %v, want %q", tc.url, err, tc.wantErr)
 			}
 			if err == nil {
-				if diff := cmp.Diff(gotURL, tc.wantURL); diff != "" {
+				if diff := cmp.Diff(parsed.simpleURL, tc.wantURL); diff != "" {
 					t.Errorf("parseBaseProductURL(%q) returned unexpected diff (-want +got):\n%s", tc.url, diff)
 				}
-				if gotProduct != tc.wantProduct {
-					t.Errorf("parseBaseProductURL(%q) = %q, _, _ want %q", tc.url, gotProduct, tc.wantProduct)
+				if parsed.product != tc.wantProduct {
+					t.Errorf("parseBaseProductURL(%q) = %q, _, _ want %q", tc.url, parsed.product, tc.wantProduct)
 				}
 			}
 		})
@@ -99,13 +99,31 @@ func TestParseProductBaseURL(t *testing.T) {
 }
 
 func TestParseProductCertChainURL(t *testing.T) {
-	url := ProductCertChainURL("Milan")
-	got, err := ParseProductCertChainURL(url)
-	if err != nil {
-		t.Fatalf("ParseProductCertChainURL(%q) = _, %v, want nil", "Milan", err)
+	tests := []struct {
+		key     abi.ReportSigner
+		product string
+		wantKey CertFunction
+	}{
+		{
+			key:     abi.VcekReportSigner,
+			product: "Milan",
+			wantKey: VcekCertFunction,
+		},
+		{
+			key:     abi.VlekReportSigner,
+			product: "Milan",
+			wantKey: VlekCertFunction,
+		},
 	}
-	if got != "Milan" {
-		t.Errorf("ProductCertChainURL(%q) = %q, nil want %q", url, got, "Milan")
+	for _, tc := range tests {
+		url := ProductCertChainURL(tc.key, tc.product)
+		got, key, err := ParseProductCertChainURL(url)
+		if err != nil {
+			t.Fatalf("ParseProductCertChainURL(%q) = _, _, %v, want nil", tc.product, err)
+		}
+		if got != tc.product || key != tc.wantKey {
+			t.Errorf("ProductCertChainURL(%q) = %q, %v, nil want %q, %v", url, got, key, tc.product, tc.wantKey)
+		}
 	}
 }
 
@@ -131,17 +149,17 @@ func TestParseVCEKCertURL(t *testing.T) {
 		{
 			name:    "bad query key",
 			url:     fmt.Sprintf("https://kdsintf.amd.com/vcek/v1/Milan/%s?fakespl=4", hwidhex),
-			wantErr: "unexpected KDS VCEK URL argument \"fakespl\"",
+			wantErr: "unexpected KDS TCB version URL argument \"fakespl\"",
 		},
 		{
 			name:    "bad query argument numerical",
 			url:     fmt.Sprintf("https://kdsintf.amd.com/vcek/v1/Milan/%s?blSPL=-4", hwidhex),
-			wantErr: "invalid KDS VCEK URL argument value \"-4\", want a value 0-255",
+			wantErr: "invalid KDS TCB version URL argument value \"-4\", want a value 0-255",
 		},
 		{
 			name:    "bad query argument numerical",
 			url:     fmt.Sprintf("https://kdsintf.amd.com/vcek/v1/Milan/%s?blSPL=alpha", hwidhex),
-			wantErr: "invalid KDS VCEK URL argument value \"alpha\", want a value 0-255",
+			wantErr: "invalid KDS TCB version URL argument value \"alpha\", want a value 0-255",
 		},
 	}
 	for _, tc := range tcs {
@@ -205,6 +223,7 @@ func TestParseProductName(t *testing.T) {
 	tcs := []struct {
 		name    string
 		input   string
+		key     abi.ReportSigner
 		want    *pb.SevProduct
 		wantErr string
 	}{
@@ -240,10 +259,18 @@ func TestParseProductName(t *testing.T) {
 				ModelStepping: 0x9C,
 			},
 		},
+		{
+			name:  "vlek products have no stepping",
+			input: "Genoa",
+			key:   abi.VlekReportSigner,
+			want: &pb.SevProduct{
+				Name: pb.SevProduct_SEV_PRODUCT_GENOA,
+			},
+		},
 	}
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := ParseProductName(tc.input)
+			got, err := ParseProductName(tc.input, tc.key)
 			if (err == nil && tc.wantErr != "") || (err != nil && (tc.wantErr == "" || !strings.Contains(err.Error(), tc.wantErr))) {
 				t.Fatalf("ParseProductName(%v) errored unexpectedly: %v, want %q", tc.input, err, tc.wantErr)
 			}

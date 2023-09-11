@@ -35,12 +35,19 @@ import (
 )
 
 const (
-	askVersion     = 1
-	askKeyUsage    = 0x13
-	arkVersion     = 1
-	arkKeyUsage    = 0x0
-	askX509Version = 3
-	arkX509Version = 3
+	askVersion      = 1
+	askKeyUsage     = 0x13
+	arkVersion      = 1
+	arkKeyUsage     = 0x0
+	askX509Version  = 3
+	asvkX509Version = 3
+	arkX509Version  = 3
+)
+
+var (
+	// ErrMissingVlek is returned when attempting to verify a VLEK-signed report that doesn't also
+	// have its VLEK certificate attached.
+	ErrMissingVlek = errors.New("report signed with VLEK, but VLEK certificate is missing")
 )
 
 func askVerifiedBy(signee, signer *abi.AskCert, signeeName, signerName string) error {
@@ -133,16 +140,13 @@ func validateRootX509(product string, x *x509.Certificate, version int, role, cn
 	return validateCRLlink(x, product, role)
 }
 
-// ValidateAskX509 checks expected metadata about the ASK X.509 certificate. It does not verify the
+// validateAskX509 checks expected metadata about the ASK X.509 certificate. It does not verify the
 // cryptographic signatures.
-func ValidateAskX509(r *trust.AMDRootCerts) error {
+func validateAskX509(r *trust.AMDRootCerts) error {
 	if r == nil {
 		r = trust.DefaultRootCerts["Milan"]
 	}
-	var cn string
-	if r.Product != "" {
-		cn = fmt.Sprintf("SEV-%s", r.Product)
-	}
+	cn := intermediateKeyCommonName(r.Product, abi.VcekReportSigner)
 	if err := validateRootX509(r.Product, r.ProductCerts.Ask, askX509Version, "ASK", cn); err != nil {
 		return err
 	}
@@ -152,9 +156,36 @@ func ValidateAskX509(r *trust.AMDRootCerts) error {
 	return nil
 }
 
+func endorsementKeyCommonName(key abi.ReportSigner) string {
+	return fmt.Sprintf("SEV-%v", key)
+}
+
+func intermediateKeyCommonName(product string, key abi.ReportSigner) string {
+	if product != "" {
+		switch key {
+		case abi.VcekReportSigner:
+			return fmt.Sprintf("SEV-%s", product)
+		case abi.VlekReportSigner:
+			return fmt.Sprintf("SEV-VLEK-%s", product)
+		}
+	}
+	return ""
+}
+
+// validateAsvkX509 checks expected metadata about the ASVK X.509 certificate. It does not verify the
+// cryptographic signatures.
+func validateAsvkX509(r *trust.AMDRootCerts) error {
+	if r == nil {
+		r = trust.DefaultRootCerts["Milan"]
+	}
+	cn := intermediateKeyCommonName(r.Product, abi.VlekReportSigner)
+	// There is no ASVK SEV ABI key released by AMD to cross-check.
+	return validateRootX509(r.Product, r.ProductCerts.Asvk, asvkX509Version, "ASVK", cn)
+}
+
 // ValidateArkX509 checks expected metadata about the ARK X.509 certificate. It does not verify the
 // cryptographic signatures.
-func ValidateArkX509(r *trust.AMDRootCerts) error {
+func validateArkX509(r *trust.AMDRootCerts) error {
 	if r == nil {
 		r = trust.DefaultRootCerts["Milan"]
 	}
@@ -184,9 +215,9 @@ func validateRootSev(subject, issuer *abi.AskCert, version, keyUsage uint32, sub
 	return askVerifiedBy(subject, issuer, subjectRole, issuerRole)
 }
 
-// ValidateAskSev checks ASK SEV format certificate validity according to AMD SEV API Appendix B.3
+// validateAskSev checks ASK SEV format certificate validity according to AMD SEV API Appendix B.3
 // This covers steps 1, 2, and 5
-func ValidateAskSev(r *trust.AMDRootCerts) error {
+func validateAskSev(r *trust.AMDRootCerts) error {
 	if r == nil {
 		r = trust.DefaultRootCerts["Milan"]
 	}
@@ -195,43 +226,57 @@ func ValidateAskSev(r *trust.AMDRootCerts) error {
 
 // ValidateArkSev checks ARK certificate validity according to AMD SEV API Appendix B.3
 // This covers steps 5, 6, 9, and 11.
-func ValidateArkSev(r *trust.AMDRootCerts) error {
+func validateArkSev(r *trust.AMDRootCerts) error {
 	if r == nil {
 		r = trust.DefaultRootCerts["Milan"]
 	}
 	return validateRootSev(r.ArkSev, r.ArkSev, arkVersion, arkKeyUsage, "ARK", "ARK")
 }
 
-// ValidateX509 will validate the x509 certificates of the ASK and ARK.
-func ValidateX509(r *trust.AMDRootCerts) error {
-	if err := ValidateArkX509(r); err != nil {
+// validateX509 will validate the x509 certificates of the ASK, ASVK, and ARK.
+func validateX509(r *trust.AMDRootCerts, key abi.ReportSigner) error {
+	if err := validateArkX509(r); err != nil {
 		return fmt.Errorf("ARK validation error: %v", err)
 	}
-	if err := ValidateAskX509(r); err != nil {
-		return fmt.Errorf("ASK validation error: %v", err)
+	if r.ProductCerts.Ask == nil && key == abi.VcekReportSigner {
+		return fmt.Errorf("trusted root must have ASK certificate for VCEK chain")
+	}
+	if r.ProductCerts.Asvk == nil && key == abi.VlekReportSigner {
+		return fmt.Errorf("trusted root must have ASVK certificate for VLEK chain")
+	}
+	if r.ProductCerts.Ask != nil {
+		if err := validateAskX509(r); err != nil {
+			return fmt.Errorf("ASK validation error: %v", err)
+		}
+	}
+	if r.ProductCerts.Asvk != nil {
+		if err := validateAsvkX509(r); err != nil {
+			return fmt.Errorf("ASVK validation error: %v", err)
+		}
 	}
 	return nil
 }
 
-// ValidateVcekCertSubject checks KDS-specified values of the subject metadata of the AMD certificate.
-func ValidateVcekCertSubject(subject pkix.Name) error {
-	if err := validateAmdLocation(subject, "VCEK subject"); err != nil {
+// validateKDSCertSubject checks KDS-specified values of the subject metadata of the AMD certificate.
+func validateKDSCertSubject(subject pkix.Name, key abi.ReportSigner) error {
+	if err := validateAmdLocation(subject, fmt.Sprintf("%v subject", key)); err != nil {
 		return err
 	}
-	if subject.CommonName != "SEV-VCEK" {
-		return fmt.Errorf("VCEK certificate subject common name %s not expected. Expected SEV-VCEK", subject.CommonName)
+	want := endorsementKeyCommonName(key)
+	if subject.CommonName != want {
+		return fmt.Errorf("%s certificate subject common name %v not expected. Expected %s", key, subject.CommonName, want)
 	}
 	return nil
 }
 
-// ValidateVcekCertIssuer checks KDS-specified values of the issuer metadata of the AMD certificate.
-func ValidateVcekCertIssuer(r *trust.AMDRootCerts, issuer pkix.Name) error {
-	if err := validateAmdLocation(issuer, "VCEK issuer"); err != nil {
+// validateKDSCertIssuer checks KDS-specified values of the issuer metadata of the AMD certificate.
+func validateKDSCertIssuer(r *trust.AMDRootCerts, issuer pkix.Name, key abi.ReportSigner) error {
+	if err := validateAmdLocation(issuer, fmt.Sprintf("%v issuer", key)); err != nil {
 		return err
 	}
-	cn := fmt.Sprintf("SEV-%s", r.Product)
+	cn := intermediateKeyCommonName(r.Product, key)
 	if issuer.CommonName != cn {
-		return fmt.Errorf("VCEK certificate issuer common name %s not expected. Expected %s", issuer.CommonName, cn)
+		return fmt.Errorf("%s certificate issuer common name %v not expected. Expected %s", key, issuer.CommonName, cn)
 	}
 	return nil
 }
@@ -286,7 +331,7 @@ func verifyCRL(r *trust.AMDRootCerts) error {
 	if r.ProductCerts.Ark == nil {
 		return errors.New("missing ARK x509 certificate to check CRL validity")
 	}
-	if r.ProductCerts.Ark == nil {
+	if r.ProductCerts.Ask == nil {
 		return errors.New("missing ASK x509 certificate to check intermediate key validity")
 	}
 	if err := r.CRL.CheckSignatureFrom(r.ProductCerts.Ark); err != nil {
@@ -309,8 +354,10 @@ func VcekNotRevoked(r *trust.AMDRootCerts, _ *x509.Certificate, options *Options
 	return err
 }
 
+// product is expected to be of form "Milan" or "Genoa".
+// role is expected to be one of "ARK", "ASK", "ASVK".
 func validateCRLlink(x *x509.Certificate, product, role string) error {
-	url := fmt.Sprintf("https://kdsintf.amd.com/vcek/v1/%s/crl", product)
+	url := kds.CrlLinkByRole(product, role)
 	if len(x.CRLDistributionPoints) != 1 {
 		return fmt.Errorf("%s has %d CRL distribution points, want 1", role, len(x.CRLDistributionPoints))
 	}
@@ -322,65 +369,77 @@ func validateCRLlink(x *x509.Certificate, product, role string) error {
 
 // validateVcekExtensions checks if the certificate extensions match
 // wellformedness expectations.
-func validateVcekExtensions(exts *kds.VcekExtensions) error {
-	_, err := kds.ParseProductName(exts.ProductName)
+func validateExtensions(exts *kds.Extensions, key abi.ReportSigner) error {
+	_, err := kds.ParseProductName(exts.ProductName, key)
 	return err
 }
 
-// validateVcekCertificateProductNonspecific returns an error if the given certificate doesn't have
-// the documented qualities of a VCEK certificate according to Key Distribution Service
+// validateKDSCertificateProductNonspecific returns an error if the given certificate doesn't have
+// the documented qualities of a V[CL]EK certificate according to Key Distribution Service
 // documentation:
 // https://www.amd.com/system/files/TechDocs/57230.pdf
 // This does not check the certificate revocation list since that requires internet access.
-// If valid, then returns the VCEK-specific certificate extensions in the VcekExtensions type.
-func validateVcekCertificateProductNonspecific(cert *x509.Certificate) (*kds.VcekExtensions, error) {
+// If valid, then returns the V[CL]EK-specific certificate extensions in the VcekExtensions type.
+func validateKDSCertificateProductNonspecific(cert *x509.Certificate, key abi.ReportSigner) (*kds.Extensions, error) {
 	if cert.Version != 3 {
-		return nil, fmt.Errorf("VCEK certificate version is %v, expected 3", cert.Version)
+		return nil, fmt.Errorf("%v certificate version is %v, expected 3", key, cert.Version)
 	}
 	// Signature algorithm: RSASSA-PSS
 	// Signature hash algorithm sha384
 	if cert.SignatureAlgorithm != x509.SHA384WithRSAPSS {
-		return nil, fmt.Errorf("VCEK certificate signature algorithm is %v, expected SHA-384 with RSASSA-PSS", cert.SignatureAlgorithm)
+		return nil, fmt.Errorf("%v certificate signature algorithm is %v, expected SHA-384 with RSASSA-PSS", key, cert.SignatureAlgorithm)
 	}
 	// Subject Public Key Info ECDSA on curve P-384
 	if cert.PublicKeyAlgorithm != x509.ECDSA {
-		return nil, fmt.Errorf("VCEK certificate public key type is %v, expected ECDSA", cert.PublicKeyAlgorithm)
+		return nil, fmt.Errorf("%v certificate public key type is %v, expected ECDSA", key, cert.PublicKeyAlgorithm)
 	}
 	// Locally bind the public key any type to allow for occurrence typing in the switch statement.
 	switch pub := cert.PublicKey.(type) {
 	case *ecdsa.PublicKey:
 		if pub.Curve.Params().Name != "P-384" {
-			return nil, fmt.Errorf("VCEK certificate public key curve is %s, expected P-384", pub.Curve.Params().Name)
+			return nil, fmt.Errorf("%v certificate public key curve is %s, expected P-384", key, pub.Curve.Params().Name)
 		}
 	default:
-		return nil, fmt.Errorf("VCEK certificate public key not ecdsa PublicKey type %v", pub)
+		return nil, fmt.Errorf("%v certificate public key not ecdsa PublicKey type %v", key, pub)
 	}
 
-	if err := ValidateVcekCertSubject(cert.Subject); err != nil {
+	if err := validateKDSCertSubject(cert.Subject, key); err != nil {
 		return nil, err
 	}
-	exts, err := kds.VcekCertificateExtensions(cert)
+	exts, err := kds.CertificateExtensions(cert, key)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateVcekExtensions(exts); err != nil {
+	if err := validateExtensions(exts, key); err != nil {
 		return nil, err
 	}
 	return exts, nil
 }
 
-func validateVcekCertificateProductSpecifics(r *trust.AMDRootCerts, cert *x509.Certificate, opts *Options) error {
-	if err := ValidateVcekCertIssuer(r, cert.Issuer); err != nil {
+func validateKDSCertificateProductSpecifics(r *trust.AMDRootCerts, cert *x509.Certificate, key abi.ReportSigner, opts *Options) error {
+	if err := validateKDSCertIssuer(r, cert.Issuer, key); err != nil {
 		return err
 	}
-	if _, err := cert.Verify(*r.X509Options(opts.Now)); err != nil {
-		return fmt.Errorf("error verifying VCEK certificate: %v (%v)", err, r.ProductCerts.Ask.IsCA)
+	// ica: Intermediate Certificate Authority.
+	ica := r.ProductCerts.Ask
+	if key == abi.VlekReportSigner {
+		ica = r.ProductCerts.Asvk
+	}
+	if ica == nil {
+		return fmt.Errorf("root of trust missing intermediate certificate authority certificate for key %v", key)
+	}
+	verifyOpts := r.X509Options(opts.Now, key)
+	if verifyOpts == nil {
+		return fmt.Errorf("internal error: could not get X509 options for %v (missing ARK cert or ICA cert)", key)
+	}
+	if _, err := cert.Verify(*verifyOpts); err != nil {
+		return fmt.Errorf("error verifying %v certificate: %v (%v)", key, err, ica.IsCA)
 	}
 	// VCEK is not expected to have a CRL link.
 	return nil
 }
 
-func checkProductName(got, want *spb.SevProduct) error {
+func checkProductName(got, want *spb.SevProduct, key abi.ReportSigner) error {
 	// No constraint
 	if want == nil {
 		return nil
@@ -389,35 +448,44 @@ func checkProductName(got, want *spb.SevProduct) error {
 		return fmt.Errorf("internal error: no product name")
 	}
 	if got.Name != want.Name {
-		return fmt.Errorf("VCEK cert product name %v is not %v", got, want)
+		return fmt.Errorf("%v cert product name %v is not %v", key, got, want)
 	}
-	if got.ModelStepping != want.ModelStepping {
-		return fmt.Errorf("VCEK cert product model-stepping number %02X is not %02X", got.ModelStepping, want.ModelStepping)
+	// The model stepping number is only part of the VLEK product name, not VLEK's.
+	if key == abi.VcekReportSigner && got.ModelStepping != want.ModelStepping {
+		return fmt.Errorf("%v cert product model-stepping number %02X is not %02X",
+			key, got.ModelStepping, want.ModelStepping)
 	}
 	return nil
 }
 
-// decodeCerts checks that the VCEK certificate matches expected fields
+// decodeCerts checks that the V[CL]EK certificate matches expected fields
 // from the KDS specification and also that its certificate chain matches
 // hardcoded trusted root certificates from AMD.
-func decodeCerts(vcek []byte, ask []byte, ark []byte, options *Options) (*x509.Certificate, *trust.AMDRootCerts, error) {
-	vcekCert, err := trust.ParseCert(vcek)
-	if err != nil {
-		return nil, nil, fmt.Errorf("could not interpret VCEK DER bytes: %v", err)
+func decodeCerts(chain *spb.CertificateChain, key abi.ReportSigner, options *Options) (*x509.Certificate, *trust.AMDRootCerts, error) {
+	var ek []byte
+	switch key {
+	case abi.VcekReportSigner:
+		ek = chain.GetVcekCert()
+	case abi.VlekReportSigner:
+		ek = chain.GetVlekCert()
 	}
-	exts, err := validateVcekCertificateProductNonspecific(vcekCert)
+	endorsementKeyCert, err := trust.ParseCert(ek)
+	if err != nil {
+		return nil, nil, fmt.Errorf("could not interpret %v DER bytes: %v", key, err)
+	}
+	exts, err := validateKDSCertificateProductNonspecific(endorsementKeyCert, key)
 	if err != nil {
 		return nil, nil, err
 	}
 	roots := options.TrustedRoots
 
-	product, err := kds.ParseProductName(exts.ProductName)
+	product, err := kds.ParseProductName(exts.ProductName, key)
 	if err != nil {
 		return nil, nil, err
 	}
 	productName := kds.ProductString(product)
 	// Ensure the extension product info matches expectations.
-	if err := checkProductName(product, options.Product); err != nil {
+	if err := checkProductName(product, options.Product, key); err != nil {
 		return nil, nil, err
 	}
 	if len(roots) == 0 {
@@ -428,10 +496,10 @@ func decodeCerts(vcek []byte, ask []byte, ark []byte, options *Options) (*x509.C
 			AskSev: trust.DefaultRootCerts[productName].AskSev,
 			ArkSev: trust.DefaultRootCerts[productName].ArkSev,
 		}
-		if err := root.Decode(ask, ark); err != nil {
+		if err := root.Decode(chain.GetAskCert(), chain.GetArkCert()); err != nil {
 			return nil, nil, err
 		}
-		if err := ValidateX509(root); err != nil {
+		if err := validateX509(root, key); err != nil {
 			return nil, nil, err
 		}
 		roots = map[string][]*trust.AMDRootCerts{
@@ -440,13 +508,13 @@ func decodeCerts(vcek []byte, ask []byte, ark []byte, options *Options) (*x509.C
 	}
 	var lastErr error
 	for _, productRoot := range roots[productName] {
-		if err := validateVcekCertificateProductSpecifics(productRoot, vcekCert, options); err != nil {
+		if err := validateKDSCertificateProductSpecifics(productRoot, endorsementKeyCert, key, options); err != nil {
 			lastErr = err
 			continue
 		}
-		return vcekCert, productRoot, nil
+		return endorsementKeyCert, productRoot, nil
 	}
-	return nil, nil, fmt.Errorf("VCEK could not be verified by any trusted roots. Last error: %v", lastErr)
+	return nil, nil, fmt.Errorf("%v could not be verified by any trusted roots. Last error: %v", key, lastErr)
 }
 
 // SnpReportSignature verifies the attestation report's signature based on the report's
@@ -561,17 +629,22 @@ func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 	// that this is a noop if options.Product began as non-nil.
 	options.Product = attestation.Product
 
+	report := attestation.GetReport()
+	info, err := abi.ParseSignerInfo(report.GetSignerInfo())
+	if err != nil {
+		return err
+	}
 	chain := attestation.GetCertificateChain()
-	vcek, root, err := decodeCerts(chain.GetVcekCert(), chain.GetAskCert(), chain.GetArkCert(), options)
+	endorsementKeyCert, root, err := decodeCerts(chain, info.SigningKey, options)
 	if err != nil {
 		return err
 	}
 	if options != nil && options.CheckRevocations {
-		if err := VcekNotRevoked(root, vcek, options); err != nil {
+		if err := VcekNotRevoked(root, endorsementKeyCert, options); err != nil {
 			return err
 		}
 	}
-	return SnpProtoReportSignature(attestation.GetReport(), vcek)
+	return SnpProtoReportSignature(report, endorsementKeyCert)
 }
 
 // fillInAttestation uses AMD's KDS to populate any empty certificate field in the attestation's
@@ -596,13 +669,17 @@ func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 		getter = trust.DefaultHTTPSGetter()
 	}
 	report := attestation.GetReport()
+	info, err := abi.ParseSignerInfo(report.GetSignerInfo())
+	if err != nil {
+		return err
+	}
 	chain := attestation.GetCertificateChain()
 	if chain == nil {
 		chain = &spb.CertificateChain{}
 		attestation.CertificateChain = chain
 	}
 	if len(chain.GetAskCert()) == 0 || len(chain.GetArkCert()) == 0 {
-		askark, err := trust.GetProductChain(product, getter)
+		askark, err := trust.GetProductChain(product, info.SigningKey, getter)
 		if err != nil {
 			return err
 		}
@@ -614,15 +691,24 @@ func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 			chain.ArkCert = askark.Ark.Raw
 		}
 	}
-	if len(chain.GetVcekCert()) == 0 {
-		vcekURL := kds.VCEKCertURL(product, report.GetChipId(), kds.TCBVersion(report.GetReportedTcb()))
-		vcek, err := getter.Get(vcekURL)
-		if err != nil {
-			return &trust.AttestationRecreationErr{
-				Msg: fmt.Sprintf("could not download VCEK certificate: %v", err),
+	switch info.SigningKey {
+	case abi.VcekReportSigner:
+		if len(chain.GetVcekCert()) == 0 {
+			vcekURL := kds.VCEKCertURL(product, report.GetChipId(), kds.TCBVersion(report.GetReportedTcb()))
+			vcek, err := getter.Get(vcekURL)
+			if err != nil {
+				return &trust.AttestationRecreationErr{
+					Msg: fmt.Sprintf("could not download VCEK certificate: %v", err),
+				}
 			}
+			chain.VcekCert = vcek
 		}
-		chain.VcekCert = vcek
+	case abi.VlekReportSigner:
+		// We can't lazily ask KDS for the certificate as a user. The CSP must cache their provisioned
+		// certificates and provide them in GET_EXT_REPORT.
+		if len(chain.GetVlekCert()) == 0 {
+			return ErrMissingVlek
+		}
 	}
 	return nil
 }
