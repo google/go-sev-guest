@@ -592,11 +592,11 @@ func validateKeyKind(report *spb.Attestation) (*x509.Certificate, error) {
 	}
 	switch info.SigningKey {
 	case abi.VcekReportSigner:
-		if report.GetCertificateChain().VcekCert != nil {
+		if len(report.GetCertificateChain().VcekCert) != 0 {
 			return x509.ParseCertificate(report.GetCertificateChain().VcekCert)
 		}
 	case abi.VlekReportSigner:
-		if report.GetCertificateChain().VlekCert != nil {
+		if len(report.GetCertificateChain().VlekCert) != 0 {
 			return x509.ParseCertificate(report.GetCertificateChain().VlekCert)
 		}
 	case abi.NoneReportSigner:
