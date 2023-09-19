@@ -93,6 +93,31 @@ type Options struct {
 	// TrustedIDKeyHashes is an array of SHA-384 hashes of trusted ID signer keys's public key in
 	// SEV-SNP API format. Not required if TrustedIDKeys is provided.
 	TrustedIDKeyHashes [][]byte
+	// CertTableOptions allows the caller to specify extra validation conditions on non-standard
+	// UUID entries in the certificate table returned by GetExtendedReport.
+	CertTableOptions map[string]*CertEntryOption
+}
+
+// CertEntryKind represents a simple policy kind for cert table entries. If a UUID string key is
+// present in the CertTableOptions, then the Validate function must not error when given both the
+// attestation and the blob associated with the UUID. If a UUID is missing, then the kind matters:
+// should missing entries be considered an error, or an allowed omission?
+type CertEntryKind int
+
+const (
+	// CertEntryAllowMissing will only error if the key is present in the certificate table and
+	// Validate returns an error.
+	CertEntryAllowMissing = iota
+	// CertEntryRequire will cause an error if the certificate table does not include the key.
+	CertEntryRequire
+)
+
+// CertEntryOption represents a pluggable validation option for CertTable entries. This allows for
+// golden measurements (RIMs and the like) to be injected into the guest about various provided
+// infrastructure.
+type CertEntryOption struct {
+	Kind     CertEntryKind
+	Validate func(attestation *spb.Attestation, blob []byte) error
 }
 
 func lengthCheck(name string, length int, value []byte) error {
@@ -605,6 +630,26 @@ func validateKeyKind(report *spb.Attestation) (*x509.Certificate, error) {
 	return nil, fmt.Errorf("unsupported key kind %v", info.SigningKey)
 }
 
+func certTableOptions(attestation *spb.Attestation, options map[string]*CertEntryOption) error {
+	extras := attestation.GetCertificateChain().GetExtras()
+	for key, opt := range options {
+		blob, ok := extras[key]
+		if !ok {
+			if opt.Kind == CertEntryRequire {
+				return fmt.Errorf("required certificate UUID %s not present in certificate table", key)
+			}
+			continue
+		}
+		if opt.Validate == nil {
+			return fmt.Errorf("invalid argument: option for %s missing Validate function", key)
+		}
+		if err := opt.Validate(attestation, blob); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // SnpAttestation validates fields of the protobuf representation of an attestation report against
 // expectations. Does not check the attestation certificates or signature.
 func SnpAttestation(attestation *spb.Attestation, options *Options) error {
@@ -647,7 +692,8 @@ func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 		return fmt.Errorf("report field CHIP_ID %s is not the same as the VCEK certificate's HWID %s",
 			hex.EncodeToString(report.GetChipId()), hex.EncodeToString(exts.HWID[:]))
 	}
-	return nil
+
+	return certTableOptions(attestation, options.CertTableOptions)
 }
 
 // RawSnpAttestation validates fields of a raw attestation report against expectations. Does not

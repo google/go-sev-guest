@@ -72,7 +72,10 @@ message CertificateChain {
 
   // A certificate the host may inject to endorse the measurement of the
   // firmware.
-  bytes firmware_cert = 4;
+  bytes firmware_cert = 4 [deprecated = true];
+
+  // Non-standard certificates the host may inject.
+  map<string, bytes> extras = 7;
 }
 
 // The CPUID[EAX=1] version information includes product info as described in
