@@ -787,14 +787,14 @@ func (c *CertTable) Proto() *pb.CertificateChain {
 			result.Extras[entry.GUID.String()] = entry.RawCert
 		}
 	}
-	if (result.VcekCert == nil) && (result.VlekCert == nil) {
+	if len(result.VcekCert) == 0 && len(result.VlekCert) == 0 {
 		logger.Warning("Warning: Neither VCEK nor VLEK certificate found in data pages")
 	}
 
-	if result.AskCert == nil {
+	if len(result.AskCert) == 0 {
 		logger.Warningf("ASK certificate not found in data pages")
 	}
-	if result.ArkCert == nil {
+	if len(result.ArkCert) == 0 {
 		logger.Warningf("ARK certificate not found in data pages")
 	}
 	return result
