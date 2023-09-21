@@ -212,6 +212,13 @@ func TestSnpPlatformInfo(t *testing.T) {
 	}
 }
 
+func TestCpuid(t *testing.T) {
+	a, b, c, d := cpuid(1)
+	if (a | b | c | d) == 0 {
+		t.Errorf("cpuid(1) = 0, 0, 0, 0")
+	}
+}
+
 func TestCertTableProto(t *testing.T) {
 	headers := make([]CertTableHeaderEntry, 6) // ARK, ASK, VCEK, VLEK, extra, NULL
 	arkraw := []byte("ark")
