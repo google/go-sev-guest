@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/google/go-sev-guest/gce"
 	pb "github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/google/logger"
 	"github.com/pborman/uuid"
@@ -769,33 +768,36 @@ func (c *CertTable) GetByGUIDString(guid string) ([]byte, error) {
 // so missing certificates aren't an error. If certificates are missing, you can
 // choose to fetch them yourself by calling verify.GetAttestationFromReport.
 func (c *CertTable) Proto() *pb.CertificateChain {
-	var vcek, vlek, ask, ark []byte
-	var err, cerr, lerr error
-	// Whereas a host is permitted to populate its certificate chain blob with both a VCEK and VLEK
-	// certificate, doing so is unusual since the choice of VCEK vs VLEK is an infrastructural choice.
-	// To keep the implementation clean, we don't pun vcek and vlek in the same field.
-	vcek, cerr = c.GetByGUIDString(VcekGUID)
-	vlek, lerr = c.GetByGUIDString(VlekGUID)
-	if cerr != nil && lerr != nil {
+	vcekGUID := uuid.Parse(VcekGUID)
+	vlekGUID := uuid.Parse(VlekGUID)
+	askGUID := uuid.Parse(AskGUID)
+	arkGUID := uuid.Parse(ArkGUID)
+	result := &pb.CertificateChain{Extras: make(map[string][]byte)}
+	for _, entry := range c.Entries {
+		switch {
+		case uuid.Equal(entry.GUID, vcekGUID):
+			result.VcekCert = entry.RawCert
+		case uuid.Equal(entry.GUID, vlekGUID):
+			result.VlekCert = entry.RawCert
+		case uuid.Equal(entry.GUID, askGUID):
+			result.AskCert = entry.RawCert
+		case uuid.Equal(entry.GUID, arkGUID):
+			result.ArkCert = entry.RawCert
+		default:
+			result.Extras[entry.GUID.String()] = entry.RawCert
+		}
+	}
+	if len(result.VcekCert) == 0 && len(result.VlekCert) == 0 {
 		logger.Warning("Warning: Neither VCEK nor VLEK certificate found in data pages")
 	}
 
-	ask, err = c.GetByGUIDString(AskGUID)
-	if err != nil {
-		logger.Warningf("ASK certificate not found in data pages: %v", err)
+	if len(result.AskCert) == 0 {
+		logger.Warningf("ASK certificate not found in data pages")
 	}
-	ark, err = c.GetByGUIDString(ArkGUID)
-	if err != nil {
-		logger.Warningf("ARK certificate not found in data pages: %v", err)
+	if len(result.ArkCert) == 0 {
+		logger.Warningf("ARK certificate not found in data pages")
 	}
-	firmware, _ := c.GetByGUIDString(gce.FirmwareCertGUID)
-	return &pb.CertificateChain{
-		VcekCert:     vcek,
-		VlekCert:     vlek,
-		AskCert:      ask,
-		ArkCert:      ark,
-		FirmwareCert: firmware,
-	}
+	return result
 }
 
 // cpuid returns the 4 register results of CPUID[EAX=op,ECX=0].

@@ -15,11 +15,14 @@
 package abi
 
 import (
+	"bytes"
+	"encoding/hex"
 	"math/rand"
 	"strings"
 	"testing"
 
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
+	"github.com/pborman/uuid"
 	"google.golang.org/protobuf/encoding/prototext"
 )
 
@@ -213,5 +216,54 @@ func TestCpuid(t *testing.T) {
 	a, b, c, d := cpuid(1)
 	if (a | b | c | d) == 0 {
 		t.Errorf("cpuid(1) = 0, 0, 0, 0")
+	}
+}
+
+func TestCertTableProto(t *testing.T) {
+	headers := make([]CertTableHeaderEntry, 6) // ARK, ASK, VCEK, VLEK, extra, NULL
+	arkraw := []byte("ark")
+	askraw := []byte("ask")
+	vcekraw := []byte("vcek")
+	vlekraw := []byte("vlek")
+	extraraw := []byte("extra")
+	headers[0].GUID = uuid.Parse(ArkGUID)
+	headers[0].Offset = uint32(len(headers) * CertTableEntrySize)
+	headers[0].Length = uint32(len(arkraw))
+
+	headers[1].GUID = uuid.Parse(AskGUID)
+	headers[1].Offset = headers[0].Offset + headers[0].Length
+	headers[1].Length = uint32(len(askraw))
+
+	headers[2].GUID = uuid.Parse(VcekGUID)
+	headers[2].Offset = headers[1].Offset + headers[1].Length
+	headers[2].Length = uint32(len(vcekraw))
+
+	headers[3].GUID = uuid.Parse(VlekGUID)
+	headers[3].Offset = headers[2].Offset + headers[2].Length
+	headers[3].Length = uint32(len(vlekraw))
+
+	extraGUID := "00000000-0000-c0de-0000-000000000000"
+	headers[4].GUID = uuid.Parse(extraGUID)
+	headers[4].Offset = headers[3].Offset + headers[3].Length
+	headers[4].Length = uint32(len(extraraw))
+
+	result := make([]byte, headers[4].Offset+headers[4].Length)
+	for i, cert := range [][]byte{arkraw, askraw, vcekraw, vlekraw, extraraw} {
+		if err := (&headers[i]).Write(result[i*CertTableEntrySize:]); err != nil {
+			t.Fatalf("could not write header %d: %v", i, err)
+		}
+		copy(result[headers[i].Offset:], cert)
+	}
+	c := new(CertTable)
+	if err := c.Unmarshal(result); err != nil {
+		t.Errorf("c.Unmarshal(%s) = %v, want nil", hex.Dump(result), err)
+	}
+	p := c.Proto()
+	if len(p.Extras) != 1 {
+		t.Fatalf("got cert table Extras length %d, want 1", len(p.Extras))
+	}
+	gotExtra, ok := p.Extras[extraGUID]
+	if !ok || !bytes.Equal(gotExtra, extraraw) {
+		t.Fatalf("Extras[%q] = %v, want %v", extraGUID, gotExtra, extraraw)
 	}
 }

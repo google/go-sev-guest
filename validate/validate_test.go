@@ -16,8 +16,10 @@
 package validate
 
 import (
+	"bytes"
 	_ "embed"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -30,6 +32,7 @@ import (
 	test "github.com/google/go-sev-guest/testing"
 	"github.com/google/go-sev-guest/verify"
 	"go.uber.org/multierr"
+	"google.golang.org/protobuf/encoding/prototext"
 
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
 )
@@ -475,4 +478,51 @@ func TestValidateSnpAttestation(t *testing.T) {
 			t.Errorf("%s: SnpAttestation(%v) errored unexpectedly. Got '%v', want '%s'", tc.name, tc.attestation, err, tc.wantErr)
 		}
 	}
+}
+
+func TestCertTableOptions(t *testing.T) {
+	sign0, err := test.DefaultTestOnlyCertChain("Milan", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := &spb.Report{}
+	if err := prototext.Unmarshal([]byte(test.TestCases()[0].OutputProto), report); err != nil {
+		t.Fatalf("could not unmarshal zero report: %v", err)
+	}
+	attestation := &spb.Attestation{
+		Report: report,
+		CertificateChain: &spb.CertificateChain{
+			VcekCert: sign0.Vcek.Raw,
+			Extras: map[string][]byte{
+				"00000000-0000-c0de-0000-000000000000": []byte("findme"),
+			},
+		},
+	}
+	if err := SnpAttestation(attestation, &Options{
+		GuestPolicy:  abi.SnpPolicy{Debug: true, SMT: true},
+		PlatformInfo: &abi.SnpPlatformInfo{SMTEnabled: true},
+
+		CertTableOptions: map[string]*CertEntryOption{
+			"00000000-feee-feee-0000-000000000000": {Kind: CertEntryRequire, Validate: func(_ *spb.Attestation, blob []byte) error { return nil }},
+		},
+	}); err == nil || !strings.Contains(err.Error(), "required") {
+		t.Errorf("SnpAttestation(_, &Options{CertTableOptions: require feee-feee}) = %v, want error to contain %s", err, "required")
+	}
+	if err := SnpAttestation(attestation, &Options{
+		GuestPolicy:  abi.SnpPolicy{Debug: true, SMT: true},
+		PlatformInfo: &abi.SnpPlatformInfo{SMTEnabled: true},
+		CertTableOptions: map[string]*CertEntryOption{
+			"00000000-0000-c0de-0000-000000000000": {Kind: CertEntryRequire, Validate: func(_ *spb.Attestation, blob []byte) error {
+				want := []byte("findme")
+				if !bytes.Equal(blob, want) {
+					return fmt.Errorf("c0de entry was %v, want %v", blob, want)
+				}
+				return nil
+			}},
+			"00000000-feee-feee-0000-000000000000": {Kind: CertEntryAllowMissing, Validate: func(_ *spb.Attestation, blob []byte) error { return errors.New("don't call me") }},
+		},
+	}); err != nil {
+		t.Errorf("SnpAttestation(_, &Options{CertTableOptions: require c0de, allow feee-fee}) = %v, want nil", err)
+	}
+
 }
