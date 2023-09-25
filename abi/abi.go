@@ -818,11 +818,12 @@ func SevProduct() *pb.SevProduct {
 	// 15:14 reserved
 	// 11:8 Family ID
 	family := (eax >> 8) & 0xf
-	// 7:4 Model, 3:0 Stepping
-	modelStepping := eax & 0xff
+	// 3:0 Stepping
+	stepping := eax & 0xf
 	// Ah, Fh, {0h,1h} values from the KDS specification,
 	// section "Determining the Product Name".
 	var productName pb.SevProduct_SevProductName
+	// Product information specified by processor programming reference publications.
 	if extendedFamily == 0xA && family == 0xF {
 		switch extendedModel {
 		case 0:
@@ -834,12 +835,12 @@ func SevProduct() *pb.SevProduct {
 		}
 	}
 	return &pb.SevProduct{
-		Name:          productName,
-		ModelStepping: modelStepping,
+		Name:     productName,
+		Stepping: stepping,
 	}
 }
 
 // DefaultSevProduct returns the initial product version for a commercially available AMD SEV-SNP chip.
 func DefaultSevProduct() *pb.SevProduct {
-	return &pb.SevProduct{Name: pb.SevProduct_SEV_PRODUCT_MILAN, ModelStepping: 0xB0}
+	return &pb.SevProduct{Name: pb.SevProduct_SEV_PRODUCT_MILAN, Stepping: 1}
 }

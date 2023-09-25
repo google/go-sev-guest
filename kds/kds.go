@@ -84,6 +84,20 @@ var (
 	kdsBaseURL  = "https://" + kdsHostname
 	kdsVcekPath = "/vcek/v1/"
 	kdsVlekPath = "/vlek/v1/"
+
+	// Chip manufacturers assign stepping versions strings that are <letter><number>
+	// to describe a stepping number for a particular model chip. There is no way
+	// other than documentation to map a stepping number to a stepping version and
+	// vice versa.
+	steppingDecoder = map[string]*pb.SevProduct{
+		"Milan-B0": {Name: pb.SevProduct_SEV_PRODUCT_MILAN, Stepping: 0},
+		"Milan-B1": {Name: pb.SevProduct_SEV_PRODUCT_MILAN, Stepping: 1},
+		"Genoa-B0": {Name: pb.SevProduct_SEV_PRODUCT_GENOA, Stepping: 0},
+		"Genoa-B1": {Name: pb.SevProduct_SEV_PRODUCT_GENOA, Stepping: 1},
+		"Genoa-B2": {Name: pb.SevProduct_SEV_PRODUCT_GENOA, Stepping: 2},
+	}
+	milanSteppingVersions = []string{"B0", "B1"}
+	genoaSteppingVersions = []string{"B0", "B1", "B2"}
 )
 
 // TCBVersion is a 64-bit bitfield of different security patch levels of AMD firmware and microcode.
@@ -692,45 +706,55 @@ func ProductName(product *pb.SevProduct) string {
 	if product == nil {
 		product = abi.DefaultSevProduct()
 	}
-	return fmt.Sprintf("%s-%02X", ProductString(product), product.ModelStepping)
+	if product.Stepping > 15 {
+		return "badstepping"
+	}
+	switch product.Name {
+	case pb.SevProduct_SEV_PRODUCT_MILAN:
+		if int(product.Stepping) >= len(milanSteppingVersions) {
+			return "unmappedMilanStepping"
+		}
+		return fmt.Sprintf("Milan-%s", milanSteppingVersions[product.Stepping])
+	case pb.SevProduct_SEV_PRODUCT_GENOA:
+		if int(product.Stepping) >= len(genoaSteppingVersions) {
+			return "unmappedGenoaStepping"
+		}
+		return fmt.Sprintf("Milan-%s", genoaSteppingVersions[product.Stepping])
+	default:
+		return "Unknown"
+	}
+}
+
+func parseProduct(product string) (pb.SevProduct_SevProductName, error) {
+	switch product {
+	case "Milan":
+		return pb.SevProduct_SEV_PRODUCT_MILAN, nil
+	case "Genoa":
+		return pb.SevProduct_SEV_PRODUCT_GENOA, nil
+	default:
+		return pb.SevProduct_SEV_PRODUCT_UNKNOWN, fmt.Errorf("unknown AMD SEV product: %q", product)
+	}
 }
 
 // ParseProductName returns the KDS project input value, and the model, stepping numbers represented
 // by a given V[CL]EK productName extension value, or an error.
 func ParseProductName(productName string, key abi.ReportSigner) (*pb.SevProduct, error) {
-	var product, stepping string
-	var needStepping bool
 	switch key {
 	case abi.VcekReportSigner:
-		subs := strings.SplitN(productName, "-", 2)
-		if len(subs) != 2 {
-			return nil, fmt.Errorf("productName value %q does not match the VCEK expected Name-ModelStepping format", productName)
+		product, ok := steppingDecoder[productName]
+		if !ok {
+			return nil, fmt.Errorf("unknown product name (new stepping published?): %q", productName)
 		}
-		product = subs[0]
-		stepping = subs[1]
-		needStepping = true
+		return product, nil
 	case abi.VlekReportSigner:
 		// VLEK certificates don't carry the stepping value in productName.
-		product = productName
-	}
-	var name pb.SevProduct_SevProductName
-	switch product {
-	case "Milan":
-		name = pb.SevProduct_SEV_PRODUCT_MILAN
-	case "Genoa":
-		name = pb.SevProduct_SEV_PRODUCT_GENOA
-	default:
-		return nil, fmt.Errorf("unknown AMD SEV product: %q", product)
-	}
-	var modelStepping uint64
-	if needStepping {
-		var err error
-		modelStepping, err = strconv.ParseUint(stepping, 16, 8)
+		name, err := parseProduct(productName)
 		if err != nil {
-			return nil, fmt.Errorf("model stepping in productName is not a hexadecimal byte: %q", stepping)
+			return nil, err
 		}
+		return &pb.SevProduct{Name: name}, nil
 	}
-	return &pb.SevProduct{Name: name, ModelStepping: uint32(modelStepping)}, nil
+	return nil, fmt.Errorf("internal: unhandled reportSigner %v", key)
 }
 
 // CrlLinkByKey returns the CRL distribution point for the given key type's

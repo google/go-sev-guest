@@ -90,7 +90,7 @@ message SevProduct {
   }
 
   SevProductName name = 1;
-  uint32 model_stepping = 2;  // Must be a byte
+  uint32 stepping = 2;  // Must be a 4-bit number
 }
 
 message Attestation {

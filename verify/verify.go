@@ -451,9 +451,9 @@ func checkProductName(got, want *spb.SevProduct, key abi.ReportSigner) error {
 		return fmt.Errorf("%v cert product name %v is not %v", key, got, want)
 	}
 	// The model stepping number is only part of the VLEK product name, not VLEK's.
-	if key == abi.VcekReportSigner && got.ModelStepping != want.ModelStepping {
-		return fmt.Errorf("%v cert product model-stepping number %02X is not %02X",
-			key, got.ModelStepping, want.ModelStepping)
+	if key == abi.VcekReportSigner && got.Stepping != want.Stepping {
+		return fmt.Errorf("%v cert product stepping number %02X is not %02X",
+			key, got.Stepping, want.Stepping)
 	}
 	return nil
 }
@@ -483,6 +483,7 @@ func decodeCerts(chain *spb.CertificateChain, key abi.ReportSigner, options *Opt
 	if err != nil {
 		return nil, nil, err
 	}
+	fmt.Println("product", exts.ProductName, product)
 	productName := kds.ProductString(product)
 	// Ensure the extension product info matches expectations.
 	if err := checkProductName(product, options.Product, key); err != nil {
@@ -650,15 +651,13 @@ func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 // fillInAttestation uses AMD's KDS to populate any empty certificate field in the attestation's
 // certificate chain.
 func fillInAttestation(attestation *spb.Attestation, options *Options) error {
+	var productOverridden bool
 	if options.Product != nil {
 		attestation.Product = options.Product
-	}
-	if attestation.Product == nil {
-		// The default product is the first launched SEV-SNP product value.
-		attestation.Product = &spb.SevProduct{
-			Name:          spb.SevProduct_SEV_PRODUCT_MILAN,
-			ModelStepping: 0xB0,
-		}
+		productOverridden = true
+	} else if attestation.Product == nil {
+		attestation.Product = abi.DefaultSevProduct()
+		productOverridden = true
 	}
 	if options.DisableCertFetching {
 		return nil
@@ -702,6 +701,21 @@ func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 				}
 			}
 			chain.VcekCert = vcek
+			if productOverridden {
+				cert, err := x509.ParseCertificate(vcek)
+				if err != nil {
+					return err
+				}
+				exts, err := kds.VcekCertificateExtensions(cert)
+				if err != nil {
+					return err
+				}
+				attestation.Product, err = kds.ParseProductName(exts.ProductName, abi.VcekReportSigner)
+				fmt.Printf("filled in product with %v\n", attestation.Product)
+				if err != nil {
+					return err
+				}
+			}
 		}
 	case abi.VlekReportSigner:
 		// We can't lazily ask KDS for the certificate as a user. The CSP must cache their provisioned
