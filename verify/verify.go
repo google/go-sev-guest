@@ -483,7 +483,7 @@ func decodeCerts(chain *spb.CertificateChain, key abi.ReportSigner, options *Opt
 	if err != nil {
 		return nil, nil, err
 	}
-	fmt.Println("product", exts.ProductName, product)
+
 	productName := kds.ProductString(product)
 	// Ensure the extension product info matches expectations.
 	if err := checkProductName(product, options.Product, key); err != nil {
