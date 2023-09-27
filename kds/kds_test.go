@@ -185,29 +185,29 @@ func TestProductName(t *testing.T) {
 	}{
 		{
 			name: "nil",
-			want: "Milan-B0",
+			want: "Milan-B1",
 		},
 		{
 			name: "unknown",
 			input: &pb.SevProduct{
-				ModelStepping: 0x1A,
+				Stepping: 0x1A,
 			},
-			want: "Unknown-1A",
+			want: "badstepping",
 		},
 		{
-			name: "Milan-00",
+			name: "Milan-B0",
 			input: &pb.SevProduct{
 				Name: pb.SevProduct_SEV_PRODUCT_MILAN,
 			},
-			want: "Milan-00",
+			want: "Milan-B0",
 		},
 		{
 			name: "Genoa-FF",
 			input: &pb.SevProduct{
-				Name:          pb.SevProduct_SEV_PRODUCT_GENOA,
-				ModelStepping: 0xFF,
+				Name:     pb.SevProduct_SEV_PRODUCT_GENOA,
+				Stepping: 0xFF,
 			},
-			want: "Genoa-FF",
+			want: "badstepping",
 		},
 	}
 	for _, tc := range tcs {
@@ -229,35 +229,25 @@ func TestParseProductName(t *testing.T) {
 	}{
 		{
 			name:    "empty",
-			wantErr: "does not match",
-		},
-		{
-			name:    "Too much",
-			input:   "Milan-B0-and some extra",
-			wantErr: "not a hexadecimal byte: \"B0-and some extra\"",
-		},
-		{
-			name:    "start-",
-			input:   "-00",
-			wantErr: "unknown AMD SEV product: \"\"",
-		},
-		{
-			name:    "end-",
-			input:   "Milan-",
-			wantErr: "model stepping in productName is not a hexadecimal byte: \"\"",
+			wantErr: "unknown product name",
 		},
 		{
 			name:    "Too big",
 			input:   "Milan-100",
-			wantErr: "model stepping in productName is not a hexadecimal byte: \"100\"",
+			wantErr: "unknown product name",
 		},
 		{
-			name:  "happy path",
-			input: "Genoa-9C",
+			name:  "happy path Genoa",
+			input: "Genoa-B1",
 			want: &pb.SevProduct{
-				Name:          pb.SevProduct_SEV_PRODUCT_GENOA,
-				ModelStepping: 0x9C,
+				Name:     pb.SevProduct_SEV_PRODUCT_GENOA,
+				Stepping: 1,
 			},
+		},
+		{
+			name:    "bad revision Milan",
+			input:   "Milan-A1",
+			wantErr: "unknown product name",
 		},
 		{
 			name:  "vlek products have no stepping",

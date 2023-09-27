@@ -291,7 +291,7 @@ func TestKdsMetadataLogic(t *testing.T) {
 					},
 				},
 			},
-			wantErr: "unknown AMD SEV product: \"Cookie\"",
+			wantErr: "unknown product",
 		},
 	}
 	for _, tc := range tests {
@@ -474,24 +474,20 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 	options := &Options{TrustedRoots: goodRoots, Getter: kds}
 	badOptions := &Options{TrustedRoots: badRoots, Getter: kds}
 	for _, tc := range tests {
-		t.Run(tc.Name, func(t *testing.T) {
-			if testclient.SkipUnmockableTestCase(&tc) {
-				t.Skip()
-				return
-			}
-
-			for _, getReport := range reportGetters {
+		if testclient.SkipUnmockableTestCase(&tc) {
+			t.Run(tc.Name, func(t *testing.T) { t.Skip() })
+		}
+		for _, getReport := range reportGetters {
+			t.Run(tc.Name+"_"+getReport.name, func(t *testing.T) {
 				if getReport.skipVlek && tc.EK == test.KeyChoiceVlek {
 					t.Skip()
-					continue
 				}
 				if getReport.vlekOnly && tc.EK != test.KeyChoiceVlek {
 					t.Skip()
-					continue
 				}
 				ereport, err := getReport.getter(d, tc.Input)
 				if !test.Match(err, tc.WantErr) {
-					t.Fatalf("%s: %s(d, %v) = %v, %v. Want err: %v", tc.Name, getReport.name, tc.Input, ereport, err, tc.WantErr)
+					t.Fatalf("(d, %v) = %v, %v. Want err: %v", tc.Input, ereport, err, tc.WantErr)
 				}
 				if tc.WantErr == "" {
 					var wantAttestationErr string
@@ -507,12 +503,12 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 						wantBad = getReport.vlekBadRootErr
 					}
 					if err := SnpAttestation(ereport, badOptions); !test.Match(err, wantBad) {
-						t.Errorf("%s: SnpAttestation(_) bad root test errored unexpectedly: %v, want %s",
-							getReport.name, err, wantBad)
+						t.Errorf("SnpAttestation(_) bad root test errored unexpectedly: %v, want %s",
+							err, wantBad)
 					}
 				}
-			}
-		})
+			})
+		}
 	}
 }
 
