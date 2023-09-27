@@ -481,9 +481,11 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 			t.Run(tc.Name+"_"+getReport.name, func(t *testing.T) {
 				if getReport.skipVlek && tc.EK == test.KeyChoiceVlek {
 					t.Skip()
+					return
 				}
 				if getReport.vlekOnly && tc.EK != test.KeyChoiceVlek {
 					t.Skip()
+					return
 				}
 				ereport, err := getReport.getter(d, tc.Input)
 				if !test.Match(err, tc.WantErr) {
