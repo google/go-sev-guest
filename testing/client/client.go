@@ -16,7 +16,6 @@
 package client
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/google/go-sev-guest/abi"
@@ -88,7 +87,6 @@ func GetSevGuest(tcs []test.TestCase, opts *test.DeviceOptions, tb testing.TB) (
 		if err != nil {
 			tb.Fatalf("failed to get product chain for %q: %v", product, err)
 		}
-		fmt.Printf("Making bad root %s %v", product, rootCerts)
 		// By removing the ASK intermediate, we ensure that the attestation will never verify.
 		badSnpRoot[product] = []*trust.AMDRootCerts{{
 			Product: product,

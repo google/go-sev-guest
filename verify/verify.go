@@ -711,7 +711,6 @@ func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 					return err
 				}
 				attestation.Product, err = kds.ParseProductName(exts.ProductName, abi.VcekReportSigner)
-				fmt.Printf("filled in product with %v\n", attestation.Product)
 				if err != nil {
 					return err
 				}
