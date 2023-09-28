@@ -483,7 +483,7 @@ func decodeCerts(chain *spb.CertificateChain, key abi.ReportSigner, options *Opt
 	if err != nil {
 		return nil, nil, err
 	}
-	fmt.Println("product", exts.ProductName, product)
+
 	productName := kds.ProductString(product)
 	// Ensure the extension product info matches expectations.
 	if err := checkProductName(product, options.Product, key); err != nil {
@@ -711,7 +711,6 @@ func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 					return err
 				}
 				attestation.Product, err = kds.ParseProductName(exts.ProductName, abi.VcekReportSigner)
-				fmt.Printf("filled in product with %v\n", attestation.Product)
 				if err != nil {
 					return err
 				}
