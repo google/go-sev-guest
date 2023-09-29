@@ -476,6 +476,7 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 	for _, tc := range tests {
 		if testclient.SkipUnmockableTestCase(&tc) {
 			t.Run(tc.Name, func(t *testing.T) { t.Skip() })
+			continue
 		}
 		for _, getReport := range reportGetters {
 			t.Run(tc.Name+"_"+getReport.name, func(t *testing.T) {
