@@ -27,6 +27,7 @@ import (
 	"github.com/pborman/uuid"
 	"golang.org/x/crypto/cryptobyte"
 	"golang.org/x/crypto/cryptobyte/asn1"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 const (
@@ -835,12 +836,15 @@ func SevProduct() *pb.SevProduct {
 		}
 	}
 	return &pb.SevProduct{
-		Name:     productName,
-		Stepping: stepping,
+		Name:            productName,
+		MachineStepping: &wrapperspb.UInt32Value{Value: stepping},
 	}
 }
 
 // DefaultSevProduct returns the initial product version for a commercially available AMD SEV-SNP chip.
 func DefaultSevProduct() *pb.SevProduct {
-	return &pb.SevProduct{Name: pb.SevProduct_SEV_PRODUCT_MILAN, Stepping: 1}
+	return &pb.SevProduct{
+		Name:            pb.SevProduct_SEV_PRODUCT_MILAN,
+		MachineStepping: &wrapperspb.UInt32Value{Value: 1},
+	}
 }

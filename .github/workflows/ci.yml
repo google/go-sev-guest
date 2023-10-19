@@ -55,6 +55,8 @@ jobs:
         run: go build -v ./...
       - name: Test all packages
         run: go test -v ./...
+      - name: Run Go Vet
+        run: go vet ./...
 
   lint:
     strategy:
@@ -70,7 +72,7 @@ jobs:
         with:
           go-version: ${{ matrix.go-version }}
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v3.3.0
+        uses: golangci/golangci-lint-action@v3.6.0
         with:
           version: latest
           working-directory: ./
@@ -82,6 +84,7 @@ jobs:
             -E revive
             -E gofmt
             -E goimports
+            --out-format=colored-line-number
             --exclude-use-default=false
             --max-same-issues=0
             --max-issues-per-linter=0

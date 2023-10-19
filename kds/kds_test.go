@@ -25,6 +25,7 @@ import (
 	"github.com/google/go-sev-guest/abi"
 	pb "github.com/google/go-sev-guest/proto/sevsnp"
 	"google.golang.org/protobuf/testing/protocmp"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 func TestProductCertChainURL(t *testing.T) {
@@ -190,7 +191,7 @@ func TestProductName(t *testing.T) {
 		{
 			name: "unknown",
 			input: &pb.SevProduct{
-				Stepping: 0x1A,
+				MachineStepping: &wrapperspb.UInt32Value{Value: 0x1A},
 			},
 			want: "badstepping",
 		},
@@ -199,13 +200,21 @@ func TestProductName(t *testing.T) {
 			input: &pb.SevProduct{
 				Name: pb.SevProduct_SEV_PRODUCT_MILAN,
 			},
+			want: "UnknownStepping",
+		},
+		{
+			name: "Milan-B0",
+			input: &pb.SevProduct{
+				Name:            pb.SevProduct_SEV_PRODUCT_MILAN,
+				MachineStepping: &wrapperspb.UInt32Value{Value: 0},
+			},
 			want: "Milan-B0",
 		},
 		{
 			name: "Genoa-FF",
 			input: &pb.SevProduct{
-				Name:     pb.SevProduct_SEV_PRODUCT_GENOA,
-				Stepping: 0xFF,
+				Name:            pb.SevProduct_SEV_PRODUCT_GENOA,
+				MachineStepping: &wrapperspb.UInt32Value{Value: 0xff},
 			},
 			want: "badstepping",
 		},
@@ -240,8 +249,8 @@ func TestParseProductName(t *testing.T) {
 			name:  "happy path Genoa",
 			input: "Genoa-B1",
 			want: &pb.SevProduct{
-				Name:     pb.SevProduct_SEV_PRODUCT_GENOA,
-				Stepping: 1,
+				Name:            pb.SevProduct_SEV_PRODUCT_GENOA,
+				MachineStepping: &wrapperspb.UInt32Value{Value: 1},
 			},
 		},
 		{

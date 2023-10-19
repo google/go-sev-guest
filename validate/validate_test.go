@@ -132,13 +132,13 @@ func TestValidateSnpAttestation(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	sign0, err := test.DefaultTestOnlyCertChain("Milan", now)
+	sign0, err := test.DefaultTestOnlyCertChain(kds.DefaultProductString(), now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	sb := &test.AmdSignerBuilder{
 		Keys:             keys,
-		Product:          "Milan",
+		Product:          kds.DefaultProductString(),
 		ArkCreationTime:  now,
 		AskCreationTime:  now,
 		VcekCreationTime: now,
@@ -481,7 +481,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 }
 
 func TestCertTableOptions(t *testing.T) {
-	sign0, err := test.DefaultTestOnlyCertChain("Milan", time.Now())
+	sign0, err := test.DefaultTestOnlyCertChain(kds.DefaultProductString(), time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/go-sev-guest/abi"
+	"github.com/google/go-sev-guest/kds"
 	checkpb "github.com/google/go-sev-guest/proto/check"
 	kpb "github.com/google/go-sev-guest/proto/fakekds"
 	fakesev "github.com/google/go-sev-guest/testing"
@@ -362,7 +363,7 @@ func TestCheckGoodFlags(t *testing.T) {
 	for _, tc := range testCases() {
 		// Singular good flag
 		t.Run(tc.flag, func(t *testing.T) {
-			cmd := exec.Command(check, withBaseArgs("", fmt.Sprintf("-%s=%s", tc.flag, tc.good))...)
+			cmd := exec.Command(check, withBaseArgs("", fmt.Sprintf("-%s=%s", tc.flag, tc.good), "--product_name=Milan-B0")...)
 			if output, err := cmd.CombinedOutput(); err != nil {
 				t.Errorf("%s failed unexpectedly: %v (%s)", cmd, err, output)
 			}
@@ -375,7 +376,7 @@ func TestCheckBadFlags(t *testing.T) {
 		// Singular bad flags
 		for i, bad := range tc.bad {
 			t.Run(fmt.Sprintf("%s[%d]", tc.flag, i+1), func(t *testing.T) {
-				cmd := exec.Command(check, withBaseArgs("", fmt.Sprintf("-%s=%s", tc.flag, bad))...)
+				cmd := exec.Command(check, withBaseArgs("", fmt.Sprintf("-%s=%s", tc.flag, bad), "--product_name=Milan-B0")...)
 				if output, err := cmd.CombinedOutput(); err == nil {
 					t.Errorf("%s succeeded unexpectedly: %s", cmd, output)
 				}
@@ -392,7 +393,7 @@ func TestCheckGoodFields(t *testing.T) {
 				t.Fatal("unexpected parse failure")
 			}
 			withTestConfig(p, t, func(path string) {
-				cmd := exec.Command(check, withBaseArgs(path)...)
+				cmd := exec.Command(check, withBaseArgs(path, "--product_name=Milan-B0")...)
 				if output, err := cmd.CombinedOutput(); err != nil {
 					t.Errorf("%s (%v) failed unexpectedly: %v, %s", cmd, p, err, output)
 				}
@@ -410,7 +411,7 @@ func TestCheckBadFields(t *testing.T) {
 					return
 				}
 				withTestConfig(p, t, func(path string) {
-					cmd := exec.Command(check, withBaseArgs(path)...)
+					cmd := exec.Command(check, withBaseArgs(path, "--product_name=Milan-B0")...)
 					if output, err := cmd.CombinedOutput(); err == nil {
 						t.Errorf("%s (%v) succeeded unexpectedly: %s", cmd, p, output)
 					}
@@ -429,7 +430,7 @@ func TestCheckGoodFlagOverridesBadField(t *testing.T) {
 					return
 				}
 				withTestConfig(p, t, func(path string) {
-					cmd := exec.Command(check, withBaseArgs(path, fmt.Sprintf("-%s=%s", tc.flag, tc.good))...)
+					cmd := exec.Command(check, withBaseArgs(path, fmt.Sprintf("-%s=%s", tc.flag, tc.good), "--product_name=Milan-B0")...)
 					if output, err := cmd.CombinedOutput(); err != nil {
 						t.Errorf("%s (%v) failed unexpectedly: %v, %s", cmd, p, err, output)
 					}
@@ -448,7 +449,7 @@ func TestCheckBadFlagOverridesGoodField(t *testing.T) {
 					t.Fatal("unexpected parse failure")
 				}
 				withTestConfig(p, t, func(path string) {
-					cmd := exec.Command(check, withBaseArgs(path, fmt.Sprintf("-%s=%s", tc.flag, bad))...)
+					cmd := exec.Command(check, withBaseArgs(path, fmt.Sprintf("-%s=%s", tc.flag, bad), "--product_name=Milan-B0")...)
 					if output, err := cmd.CombinedOutput(); err == nil {
 						t.Errorf("%s (%v) succeeded unexpectedly: %s", cmd, p, output)
 					}
@@ -459,7 +460,7 @@ func TestCheckBadFlagOverridesGoodField(t *testing.T) {
 }
 
 func TestCaBundles(t *testing.T) {
-	signer, err := fakesev.DefaultTestOnlyCertChain("Milan", time.Now())
+	signer, err := fakesev.DefaultTestOnlyCertChain(kds.DefaultProductString(), time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

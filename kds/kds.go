@@ -29,6 +29,7 @@ import (
 	"github.com/google/go-sev-guest/abi"
 	pb "github.com/google/go-sev-guest/proto/sevsnp"
 	"go.uber.org/multierr"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // Encapsulates the rest of the fields after AMD's V{C,L}EK OID classifier prefix 1.3.6.1.4.1.3704.1.
@@ -85,16 +86,19 @@ var (
 	kdsVcekPath = "/vcek/v1/"
 	kdsVlekPath = "/vlek/v1/"
 
+	uint0 = &wrapperspb.UInt32Value{Value: 0}
+	uint1 = &wrapperspb.UInt32Value{Value: 1}
+	uint2 = &wrapperspb.UInt32Value{Value: 2}
 	// Chip manufacturers assign stepping versions strings that are <letter><number>
 	// to describe a stepping number for a particular model chip. There is no way
 	// other than documentation to map a stepping number to a stepping version and
 	// vice versa.
 	steppingDecoder = map[string]*pb.SevProduct{
-		"Milan-B0": {Name: pb.SevProduct_SEV_PRODUCT_MILAN, Stepping: 0},
-		"Milan-B1": {Name: pb.SevProduct_SEV_PRODUCT_MILAN, Stepping: 1},
-		"Genoa-B0": {Name: pb.SevProduct_SEV_PRODUCT_GENOA, Stepping: 0},
-		"Genoa-B1": {Name: pb.SevProduct_SEV_PRODUCT_GENOA, Stepping: 1},
-		"Genoa-B2": {Name: pb.SevProduct_SEV_PRODUCT_GENOA, Stepping: 2},
+		"Milan-B0": {Name: pb.SevProduct_SEV_PRODUCT_MILAN, MachineStepping: uint0},
+		"Milan-B1": {Name: pb.SevProduct_SEV_PRODUCT_MILAN, MachineStepping: uint1},
+		"Genoa-B0": {Name: pb.SevProduct_SEV_PRODUCT_GENOA, MachineStepping: uint0},
+		"Genoa-B1": {Name: pb.SevProduct_SEV_PRODUCT_GENOA, MachineStepping: uint1},
+		"Genoa-B2": {Name: pb.SevProduct_SEV_PRODUCT_GENOA, MachineStepping: uint2},
 	}
 	milanSteppingVersions = []string{"B0", "B1"}
 	genoaSteppingVersions = []string{"B0", "B1", "B2"}
@@ -700,32 +704,43 @@ func ProductString(product *pb.SevProduct) string {
 	}
 }
 
+// DefaultProductString returns the product string of the default SEV product.
+func DefaultProductString() string {
+	return ProductString(abi.DefaultSevProduct())
+}
+
 // ProductName returns the expected productName extension value for the product associated
 // with an attestation report proto.
 func ProductName(product *pb.SevProduct) string {
 	if product == nil {
 		product = abi.DefaultSevProduct()
 	}
-	if product.Stepping > 15 {
+	// Can't produce a product name without a stepping value.
+	if product.MachineStepping == nil {
+		return "UnknownStepping"
+	}
+	stepping := product.MachineStepping.Value
+	if stepping > 15 {
 		return "badstepping"
 	}
 	switch product.Name {
 	case pb.SevProduct_SEV_PRODUCT_MILAN:
-		if int(product.Stepping) >= len(milanSteppingVersions) {
+		if int(stepping) >= len(milanSteppingVersions) {
 			return "unmappedMilanStepping"
 		}
-		return fmt.Sprintf("Milan-%s", milanSteppingVersions[product.Stepping])
+		return fmt.Sprintf("Milan-%s", milanSteppingVersions[stepping])
 	case pb.SevProduct_SEV_PRODUCT_GENOA:
-		if int(product.Stepping) >= len(genoaSteppingVersions) {
+		if int(stepping) >= len(genoaSteppingVersions) {
 			return "unmappedGenoaStepping"
 		}
-		return fmt.Sprintf("Milan-%s", genoaSteppingVersions[product.Stepping])
+		return fmt.Sprintf("Milan-%s", genoaSteppingVersions[stepping])
 	default:
 		return "Unknown"
 	}
 }
 
-func parseProduct(product string) (pb.SevProduct_SevProductName, error) {
+// ParseProduct returns the SevProductName for a product name without the stepping suffix.
+func ParseProduct(product string) (pb.SevProduct_SevProductName, error) {
 	switch product {
 	case "Milan":
 		return pb.SevProduct_SEV_PRODUCT_MILAN, nil
@@ -748,7 +763,7 @@ func ParseProductName(productName string, key abi.ReportSigner) (*pb.SevProduct,
 		return product, nil
 	case abi.VlekReportSigner:
 		// VLEK certificates don't carry the stepping value in productName.
-		name, err := parseProduct(productName)
+		name, err := ParseProduct(productName)
 		if err != nil {
 			return nil, err
 		}

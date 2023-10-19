@@ -21,9 +21,11 @@ import (
 	_ "embed"
 	"encoding/asn1"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"math/rand"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -37,17 +39,22 @@ import (
 	"github.com/google/go-sev-guest/verify/testdata"
 	"github.com/google/go-sev-guest/verify/trust"
 	"github.com/google/logger"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
-
-const product = "Milan"
 
 var (
 	signMu sync.Once
 	signer *test.AmdSigner
 )
 
+func product() string {
+	parts := strings.SplitN(test.GetProductName(), "-", 2)
+	return parts[0]
+}
+
 func initSigner() {
-	newSigner, err := test.DefaultTestOnlyCertChain(product, time.Now())
+
+	newSigner, err := test.DefaultTestOnlyCertChain(product(), time.Now())
 	if err != nil { // Unexpected
 		panic(err)
 	}
@@ -57,6 +64,14 @@ func initSigner() {
 func TestMain(m *testing.M) {
 	logger.Init("VerifyTestLog", false, false, os.Stderr)
 	os.Exit(m.Run())
+}
+
+func testProduct(t testing.TB) *pb.SevProduct {
+	result, err := kds.ParseProductName(test.GetProductName(), abi.VcekReportSigner)
+	if err != nil {
+		t.Errorf("bad product flag %q: %v", test.GetProductName(), err)
+	}
+	return result
 }
 
 func TestEmbeddedCertsAppendixB3Expectations(t *testing.T) {
@@ -76,7 +91,7 @@ func TestFakeCertsKDSExpectations(t *testing.T) {
 	signMu.Do(initSigner)
 	trust.ClearProductCertCache()
 	root := &trust.AMDRootCerts{
-		Product: product,
+		Product: product(),
 		ProductCerts: &trust.ProductCerts{
 			Ark: signer.Ark,
 			Ask: signer.Ask,
@@ -212,14 +227,14 @@ func TestKdsMetadataLogic(t *testing.T) {
 					CRLDistributionPoints: []string{"http://example.com"},
 				},
 			},
-			wantErr: "ARK CRL distribution point is 'http://example.com', want 'https://kdsintf.amd.com/vcek/v1/Milan/crl'",
+			wantErr: fmt.Sprintf("ARK CRL distribution point is 'http://example.com', want 'https://kdsintf.amd.com/vcek/v1/%s/crl'", product()),
 		},
 		{
 			name: "ARK too many CRLs",
 			builder: test.AmdSignerBuilder{
 				Keys: signer.Keys,
 				ArkCustom: test.CertOverride{
-					CRLDistributionPoints: []string{"https://kdsintf.amd.com/vcek/v1/Milan/crl", "http://example.com"},
+					CRLDistributionPoints: []string{fmt.Sprintf("https://kdsintf.amd.com/vcek/v1/%s/crl", product()), "http://example.com"},
 				},
 			},
 			wantErr: "ARK has 2 CRL distribution points, want 1",
@@ -305,18 +320,19 @@ func TestKdsMetadataLogic(t *testing.T) {
 		// won't get tested.
 		options := &Options{
 			TrustedRoots: map[string][]*trust.AMDRootCerts{
-				"Milan": {&trust.AMDRootCerts{
-					Product: "Milan",
+				product(): {&trust.AMDRootCerts{
+					Product: product(),
 					ProductCerts: &trust.ProductCerts{
 						Ark: newSigner.Ark,
 						Ask: newSigner.Ask,
 					},
 				}},
 			},
-			Now: time.Date(1, time.January, 5, 0, 0, 0, 0, time.UTC),
+			Now:     time.Date(1, time.January, 5, 0, 0, 0, 0, time.UTC),
+			Product: testProduct(t),
 		}
 		if tc.wantErr != "" {
-			options = &Options{}
+			options = &Options{Product: testProduct(t)}
 		}
 		vcekPem := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: newSigner.Vcek.Raw})
 		vcek, _, err := decodeCerts(&pb.CertificateChain{VcekCert: vcekPem, AskCert: newSigner.Ask.Raw, ArkCert: newSigner.Ark.Raw}, abi.VcekReportSigner, options)
@@ -337,7 +353,7 @@ func TestCRLRootValidity(t *testing.T) {
 		t.Fatal(err)
 	}
 	sb := &test.AmdSignerBuilder{
-		Product:          "Milan",
+		Product:          product(),
 		ArkCreationTime:  now,
 		AskCreationTime:  now,
 		VcekCreationTime: now,
@@ -373,7 +389,7 @@ func TestCRLRootValidity(t *testing.T) {
 		Number: big.NewInt(1),
 	}
 	root := &trust.AMDRootCerts{
-		Product: "Milan",
+		Product: product(),
 		ProductCerts: &trust.ProductCerts{
 			Ark: signer.Ark,
 			Ask: signer.Ask,
@@ -387,24 +403,24 @@ func TestCRLRootValidity(t *testing.T) {
 	}
 	g2 := test.SimpleGetter(
 		map[string][]byte{
-			"https://kdsintf.amd.com/vcek/v1/Milan/crl": crl,
+			fmt.Sprintf("https://kdsintf.amd.com/vcek/v1/%s/crl", product()): crl,
 		},
 	)
 	wantErr := "CRL is not signed by ARK"
-	if err := VcekNotRevoked(root, signer2.Vcek, &Options{Getter: g2}); !test.Match(err, wantErr) {
+	if err := VcekNotRevoked(root, signer2.Vcek, &Options{Getter: g2, Product: testProduct(t)}); !test.Match(err, wantErr) {
 		t.Errorf("Bad Root: VcekNotRevoked(%v) did not error as expected. Got %v, want %v", signer.Vcek, err, wantErr)
 	}
 
 	// Finally try checking a VCEK that's signed by a revoked ASK.
 	root2 := &trust.AMDRootCerts{
-		Product: "Milan",
+		Product: product(),
 		ProductCerts: &trust.ProductCerts{
 			Ark: signer2.Ark,
 			Ask: signer2.Ask,
 		},
 	}
 	wantErr2 := "ASK was revoked at 2022-06-14 12:01:00 +0000 UTC"
-	if err := VcekNotRevoked(root2, signer2.Vcek, &Options{Getter: g2}); !test.Match(err, wantErr2) {
+	if err := VcekNotRevoked(root2, signer2.Vcek, &Options{Getter: g2, Product: testProduct(t)}); !test.Match(err, wantErr2) {
 		t.Errorf("Bad ASK: VcekNotRevoked(%v) did not error as expected. Got %v, want %v", signer.Vcek, err, wantErr2)
 	}
 }
@@ -471,8 +487,8 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 		},
 	}
 	// Trust the test device's root certs.
-	options := &Options{TrustedRoots: goodRoots, Getter: kds}
-	badOptions := &Options{TrustedRoots: badRoots, Getter: kds}
+	options := &Options{TrustedRoots: goodRoots, Getter: kds, Product: testProduct(t)}
+	badOptions := &Options{TrustedRoots: badRoots, Getter: kds, Product: testProduct(t)}
 	for _, tc := range tests {
 		if testclient.SkipUnmockableTestCase(&tc) {
 			t.Run(tc.Name, func(t *testing.T) { t.Skip() })
@@ -526,7 +542,12 @@ func TestRealAttestationVerification(t *testing.T) {
 			"https://kdsintf.amd.com/vcek/v1/Milan/3ac3fe21e13fb0990eb28a802e3fb6a29483a6b0753590c951bdd3b8e53786184ca39e359669a2b76a1936776b564ea464cdce40c05f63c9b610c5068b006b5d?blSPL=2&teeSPL=0&snpSPL=5&ucodeSPL=68": testdata.VcekBytes,
 		},
 	)
-	if err := RawSnpReport(testdata.AttestationBytes, &Options{Getter: getter}); err != nil {
+	if err := RawSnpReport(testdata.AttestationBytes, &Options{
+		Getter: getter,
+		Product: &pb.SevProduct{
+			Name:            pb.SevProduct_SEV_PRODUCT_MILAN,
+			MachineStepping: &wrapperspb.UInt32Value{Value: 0},
+		}}); err != nil {
 		t.Error(err)
 	}
 }
@@ -538,7 +559,7 @@ func TestKDSCertBackdated(t *testing.T) {
 	getter := test.GetKDS(t)
 	// Throttle requests to KDS.
 	time.Sleep(10 * time.Second)
-	bytes, err := getter.Get("https://kdsintf.amd.com/vcek/v1/Milan/3ac3fe21e13fb0990eb28a802e3fb6a29483a6b0753590c951bdd3b8e53786184ca39e359669a2b76a1936776b564ea464cdce40c05f63c9b610c5068b006b5d?blSPL=2&teeSPL=0&snpSPL=5&ucodeSPL=68")
+	bytes, err := getter.Get(fmt.Sprintf("https://kdsintf.amd.com/vcek/v1/%s/3ac3fe21e13fb0990eb28a802e3fb6a29483a6b0753590c951bdd3b8e53786184ca39e359669a2b76a1936776b564ea464cdce40c05f63c9b610c5068b006b5d?blSPL=2&teeSPL=0&snpSPL=5&ucodeSPL=68", product()))
 	if err != nil {
 		t.Skipf("Live KDS query failed: %v", err)
 	}
