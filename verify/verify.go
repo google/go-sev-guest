@@ -451,9 +451,14 @@ func checkProductName(got, want *spb.SevProduct, key abi.ReportSigner) error {
 		return fmt.Errorf("%v cert product name %v is not %v", key, got, want)
 	}
 	// The model stepping number is only part of the VLEK product name, not VLEK's.
-	if key == abi.VcekReportSigner && got.Stepping != want.Stepping {
-		return fmt.Errorf("%v cert product stepping number %02X is not %02X",
-			key, got.Stepping, want.Stepping)
+	if key == abi.VcekReportSigner && want.MachineStepping != nil {
+		if got.MachineStepping == nil {
+			return fmt.Errorf("stepping value in VCEK certificate should not be nil")
+		}
+		if got.MachineStepping.Value != want.MachineStepping.Value {
+			return fmt.Errorf("%v cert product stepping number %02X is not %02X",
+				key, got.MachineStepping.Value, want.MachineStepping.Value)
+		}
 	}
 	return nil
 }
@@ -612,6 +617,31 @@ func RootOfTrustToOptions(rot *cpb.RootOfTrust) (*Options, error) {
 	}, nil
 }
 
+func updateProductExpectation(product **spb.SevProduct, reportProduct *spb.SevProduct) error {
+	// The expected product in verification options may be under-specified or conflicting with a given
+	// product, so check and update the expectation to match the reported product info.
+	if *product == nil {
+		*product = reportProduct
+		return nil
+	}
+	if (*product).GetName() != reportProduct.GetName() {
+		return fmt.Errorf("expected product name %v, got %v", (*product).GetName(), reportProduct.GetName())
+	}
+	expectStepping := (*product).GetMachineStepping()
+	reportStepping := reportProduct.GetMachineStepping()
+	if expectStepping == nil {
+		(*product).MachineStepping = reportStepping
+		return nil
+	}
+	if reportStepping == nil {
+		return nil
+	}
+	if expectStepping.GetValue() != reportStepping.GetValue() {
+		return fmt.Errorf("expected product stepping %d, got %d", expectStepping.Value, reportStepping.Value)
+	}
+	return nil
+}
+
 // SnpAttestation verifies the protobuf representation of an attestation report's signature based
 // on the report's SignatureAlgo, provided the certificate chain is valid.
 func SnpAttestation(attestation *spb.Attestation, options *Options) error {
@@ -628,7 +658,9 @@ func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 	}
 	// Pass along the expected product information for VcekDER. fillInAttestation will ensure
 	// that this is a noop if options.Product began as non-nil.
-	options.Product = attestation.Product
+	if err := updateProductExpectation(&options.Product, attestation.Product); err != nil {
+		return err
+	}
 
 	report := attestation.GetReport()
 	info, err := abi.ParseSignerInfo(report.GetSignerInfo())

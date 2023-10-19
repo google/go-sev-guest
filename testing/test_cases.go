@@ -22,6 +22,7 @@ import (
 
 	"github.com/google/go-sev-guest/abi"
 	labi "github.com/google/go-sev-guest/client/linuxabi"
+	"github.com/google/go-sev-guest/kds"
 )
 
 // userZeros defines a ReportData example that is all zeros
@@ -158,7 +159,7 @@ type DeviceOptions struct {
 func makeTestCerts(opts *DeviceOptions) ([]byte, *AmdSigner, error) {
 	signer := opts.Signer
 	if signer == nil {
-		s, err := DefaultTestOnlyCertChain("Milan", opts.Now)
+		s, err := DefaultTestOnlyCertChain(kds.DefaultProductString(), opts.Now)
 		if err != nil {
 			return nil, nil, err
 		}

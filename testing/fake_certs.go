@@ -23,8 +23,10 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
+	"flag"
 	"fmt"
 	"math/big"
+	"strings"
 
 	// Insecure randomness for faster testing.
 	"math/rand"
@@ -46,6 +48,19 @@ const (
 	arkRsaBits          = 4096
 	askRsaBits          = 4096
 )
+
+// ProductName decides the fake certificates' product name. It must be parsable by
+// kds.ParseProductName. The flag may also be used to direct the hardware verification options.
+var ProductName = flag.String("product_name", "",
+	"The product name for the SEV-SNP machine tested on.")
+
+// GetProductName returns the --product_name flag value or a valid Default.
+func GetProductName() string {
+	if *ProductName == "" {
+		return kds.ProductName(abi.DefaultSevProduct())
+	}
+	return *ProductName
+}
 
 // AmdSigner encapsulates a key and certificate chain following the format of AMD-SP's VCEK for
 // signing attestation reports.
@@ -353,10 +368,11 @@ func CustomExtensions(tcb kds.TCBParts, hwid []byte, cspid string) []pkix.Extens
 	var productName []byte
 	asn1Zero, _ := asn1.Marshal(0)
 	if hwid != nil {
-		productName, _ = asn1.MarshalWithParams("Milan-B0", "ia5")
+		productName, _ = asn1.MarshalWithParams(GetProductName(), "ia5")
 	} else {
+		parts := strings.SplitN(GetProductName(), "-", 2)
 		// VLEK doesn't have a -stepping component to its productName.
-		productName, _ = asn1.MarshalWithParams("Milan", "ia5")
+		productName, _ = asn1.MarshalWithParams(parts[0], "ia5")
 	}
 	blSpl, _ := asn1.Marshal(int(tcb.BlSpl))
 	teeSpl, _ := asn1.Marshal(int(tcb.TeeSpl))
@@ -440,7 +456,7 @@ func (b *AmdSignerBuilder) certifyVlek() error {
 // TestOnlyCertChain creates a test-only certificate chain from the keys and configurables in b.
 func (b *AmdSignerBuilder) TestOnlyCertChain() (*AmdSigner, error) {
 	if b.Product == "" {
-		b.Product = "Milan" // For terse tests.
+		b.Product = kds.DefaultProductString()
 	}
 	if b.Keys == nil {
 		keys, err := DefaultAmdKeys()
