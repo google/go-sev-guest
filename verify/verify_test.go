@@ -21,6 +21,7 @@ import (
 	_ "embed"
 	"encoding/asn1"
 	"encoding/pem"
+	"flag"
 	"fmt"
 	"math/big"
 	"math/rand"
@@ -43,8 +44,10 @@ import (
 )
 
 var (
-	signMu sync.Once
-	signer *test.AmdSigner
+	signMu       sync.Once
+	signer       *test.AmdSigner
+	requireCache = flag.Bool("require_cert_cache", true,
+		"If true, hardware tests depend on host cache of endorsement key certificates")
 )
 
 func product() string {
@@ -442,6 +445,7 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 		name           string
 		getter         reportGetter
 		skipVlek       bool
+		skipNoCache    bool
 		badRootErr     string
 		vlekOnly       bool
 		vlekErr        string
@@ -459,6 +463,7 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 			badRootErr:     "error verifying VCEK certificate",
 			vlekErr:        "VLEK certificate is missing",
 			vlekBadRootErr: "VLEK certificate is missing",
+			skipNoCache:    true,
 		},
 		{
 			name: "GetReportVlek",
@@ -484,10 +489,16 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 			vlekOnly:       true,
 			badRootErr:     "error verifying VLEK certificate",
 			vlekBadRootErr: "error verifying VLEK certificate",
+			skipNoCache:    true,
 		},
 	}
 	// Trust the test device's root certs.
-	options := &Options{TrustedRoots: goodRoots, Getter: kds, Product: testProduct(t)}
+	options := &Options{
+		TrustedRoots:        goodRoots,
+		Getter:              kds,
+		Product:             testProduct(t),
+		DisableCertFetching: *requireCache && !sg.UseDefaultSevGuest(),
+	}
 	badOptions := &Options{TrustedRoots: badRoots, Getter: kds, Product: testProduct(t)}
 	for _, tc := range tests {
 		if testclient.SkipUnmockableTestCase(&tc) {
@@ -501,6 +512,10 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 					return
 				}
 				if getReport.vlekOnly && tc.EK != test.KeyChoiceVlek {
+					t.Skip()
+					return
+				}
+				if getReport.skipNoCache && *requireCache {
 					t.Skip()
 					return
 				}

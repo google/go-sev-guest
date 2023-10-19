@@ -474,9 +474,12 @@ func decodeCerts(chain *spb.CertificateChain, key abi.ReportSigner, options *Opt
 	case abi.VlekReportSigner:
 		ek = chain.GetVlekCert()
 	}
+	if len(ek) == 0 {
+		return nil, nil, fmt.Errorf("missing %v certificate", key)
+	}
 	endorsementKeyCert, err := trust.ParseCert(ek)
 	if err != nil {
-		return nil, nil, fmt.Errorf("could not interpret %v DER bytes: %v", key, err)
+		return nil, nil, fmt.Errorf("could not interpret %v DER bytes %v: %v", key, ek, err)
 	}
 	exts, err := validateKDSCertificateProductNonspecific(endorsementKeyCert, key)
 	if err != nil {
