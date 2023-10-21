@@ -21,9 +21,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/pborman/uuid"
 	"google.golang.org/protobuf/encoding/prototext"
+	"google.golang.org/protobuf/testing/protocmp"
+	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 var emptyReport = `
@@ -265,5 +268,52 @@ func TestCertTableProto(t *testing.T) {
 	gotExtra, ok := p.Extras[extraGUID]
 	if !ok || !bytes.Equal(gotExtra, extraraw) {
 		t.Fatalf("Extras[%q] = %v, want %v", extraGUID, gotExtra, extraraw)
+	}
+}
+
+func TestSevProduct(t *testing.T) {
+	oldCpuid := cpuid
+	defer func() { cpuid = oldCpuid }()
+	tcs := []struct {
+		eax  uint32
+		want *spb.SevProduct
+	}{
+		{
+			eax: 0x00a00f10,
+			want: &spb.SevProduct{
+				Name:            spb.SevProduct_SEV_PRODUCT_MILAN,
+				MachineStepping: &wrapperspb.UInt32Value{Value: 0}},
+		},
+		{
+			eax: 0x00a00f11,
+			want: &spb.SevProduct{
+				Name:            spb.SevProduct_SEV_PRODUCT_MILAN,
+				MachineStepping: &wrapperspb.UInt32Value{Value: 1}},
+		},
+		{
+			eax: 0x00a10f10,
+			want: &spb.SevProduct{
+				Name:            spb.SevProduct_SEV_PRODUCT_GENOA,
+				MachineStepping: &wrapperspb.UInt32Value{Value: 0}},
+		},
+		{
+			eax: 0x00a10f12,
+			want: &spb.SevProduct{
+				Name:            spb.SevProduct_SEV_PRODUCT_GENOA,
+				MachineStepping: &wrapperspb.UInt32Value{Value: 2}},
+		},
+		{
+			eax: 0x0b010f0,
+			want: &spb.SevProduct{
+				Name:            spb.SevProduct_SEV_PRODUCT_UNKNOWN,
+				MachineStepping: &wrapperspb.UInt32Value{Value: 0}},
+		},
+	}
+	for _, tc := range tcs {
+		cpuid = func(op uint32) (uint32, uint32, uint32, uint32) { return tc.eax, 0, 0, 0 }
+		got := SevProduct()
+		if diff := cmp.Diff(got, tc.want, protocmp.Transform()); diff != "" {
+			t.Errorf("SevProduct() = %+v, want %+v. Diff: %s", got, tc.want, diff)
+		}
 	}
 }

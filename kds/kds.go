@@ -406,6 +406,9 @@ func preEndorsementKeyCertificateExtensions(cert *x509.Certificate) (*Extensions
 // VcekCertificateExtensions returns the x509v3 extensions from the KDS specification of a VCEK
 // certificate interpreted into a struct type.
 func VcekCertificateExtensions(cert *x509.Certificate) (*Extensions, error) {
+	if cert == nil {
+		return nil, fmt.Errorf("cert cannot be nil")
+	}
 	exts, err := preEndorsementKeyCertificateExtensions(cert)
 	if err != nil {
 		return nil, err
@@ -422,6 +425,9 @@ func VcekCertificateExtensions(cert *x509.Certificate) (*Extensions, error) {
 // VlekCertificateExtensions returns the x509v3 extensions from the KDS specification of a VLEK
 // certificate interpreted into a struct type.
 func VlekCertificateExtensions(cert *x509.Certificate) (*Extensions, error) {
+	if cert == nil {
+		return nil, fmt.Errorf("cert cannot be nil")
+	}
 	exts, err := preEndorsementKeyCertificateExtensions(cert)
 	if err != nil {
 		return nil, err
