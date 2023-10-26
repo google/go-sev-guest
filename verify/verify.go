@@ -687,17 +687,18 @@ func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 // certificate chain.
 func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 	var productOverridden bool
-	if options.Product != nil {
-		attestation.Product = options.Product
-		productOverridden = true
-	} else if attestation.Product == nil {
-		attestation.Product = abi.DefaultSevProduct()
+	if attestation.Product == nil {
+		if options.Product != nil {
+			attestation.Product = options.Product
+		} else {
+			attestation.Product = abi.DefaultSevProduct()
+		}
 		productOverridden = true
 	}
 	if options.DisableCertFetching {
 		return nil
 	}
-	product := kds.ProductString(options.Product)
+	product := kds.ProductString(attestation.Product)
 	getter := options.Getter
 	if getter == nil {
 		getter = trust.DefaultHTTPSGetter()
@@ -736,6 +737,8 @@ func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 				}
 			}
 			chain.VcekCert = vcek
+			// An attempt was made with defaults or the option's product, so now use
+			// the VCEK cert to determine the real product info.
 			if productOverridden {
 				cert, err := x509.ParseCertificate(vcek)
 				if err != nil {
@@ -758,7 +761,10 @@ func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 			return ErrMissingVlek
 		}
 	}
-	return nil
+
+	// Pass along the expected product information for VcekDER. fillInAttestation will ensure
+	// that this is a noop if options.Product began as non-nil.
+	return updateProductExpectation(&options.Product, attestation.Product)
 }
 
 // GetAttestationFromReport uses AMD's Key Distribution Service (KDS) to download the certificate

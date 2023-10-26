@@ -25,7 +25,6 @@ import (
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/pkg/errors"
 	"golang.org/x/sys/unix"
-	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // GetReportResponse represents a mocked response to a command request.
@@ -144,10 +143,7 @@ func (d *Device) Ioctl(command uintptr, req any) (uintptr, error) {
 // Product returns the mocked product info or the default.
 func (d *Device) Product() *spb.SevProduct {
 	if d.SevProduct == nil {
-		return &spb.SevProduct{
-			Name:            spb.SevProduct_SEV_PRODUCT_MILAN,
-			MachineStepping: &wrapperspb.UInt32Value{Value: 0},
-		}
+		return abi.DefaultSevProduct()
 	}
 	return d.SevProduct
 }

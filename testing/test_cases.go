@@ -23,6 +23,7 @@ import (
 	"github.com/google/go-sev-guest/abi"
 	labi "github.com/google/go-sev-guest/client/linuxabi"
 	"github.com/google/go-sev-guest/kds"
+	spb "github.com/google/go-sev-guest/proto/sevsnp"
 )
 
 // userZeros defines a ReportData example that is all zeros
@@ -151,15 +152,22 @@ func CreateRawReport(opts *TestReportOptions) [labi.SnpReportRespReportSize]byte
 
 // DeviceOptions specifies customizations for a fake sev-guest device.
 type DeviceOptions struct {
-	Keys   map[string][]byte
-	Now    time.Time
-	Signer *AmdSigner
+	Keys    map[string][]byte
+	Now     time.Time
+	Signer  *AmdSigner
+	Product *spb.SevProduct
 }
 
 func makeTestCerts(opts *DeviceOptions) ([]byte, *AmdSigner, error) {
 	signer := opts.Signer
+	var productString string
+	if opts.Product != nil {
+		productString = kds.ProductString(opts.Product)
+	} else {
+		productString = kds.DefaultProductString()
+	}
 	if signer == nil {
-		s, err := DefaultTestOnlyCertChain(kds.DefaultProductString(), opts.Now)
+		s, err := DefaultTestOnlyCertChain(productString, opts.Now)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -250,5 +258,6 @@ func TcDevice(tcs []TestCase, opts *DeviceOptions) (*Device, error) {
 		Certs:         certs,
 		Signer:        signer,
 		Keys:          opts.Keys,
+		SevProduct:    opts.Product,
 	}, nil
 }
