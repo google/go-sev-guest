@@ -557,13 +557,32 @@ func TestRealAttestationVerification(t *testing.T) {
 			"https://kdsintf.amd.com/vcek/v1/Milan/3ac3fe21e13fb0990eb28a802e3fb6a29483a6b0753590c951bdd3b8e53786184ca39e359669a2b76a1936776b564ea464cdce40c05f63c9b610c5068b006b5d?blSPL=2&teeSPL=0&snpSPL=5&ucodeSPL=68": testdata.VcekBytes,
 		},
 	)
-	if err := RawSnpReport(testdata.AttestationBytes, &Options{
-		Getter: getter,
-		Product: &pb.SevProduct{
-			Name:            pb.SevProduct_SEV_PRODUCT_MILAN,
-			MachineStepping: &wrapperspb.UInt32Value{Value: 0},
-		}}); err != nil {
-		t.Error(err)
+	tcs := []struct {
+		name    string
+		product *pb.SevProduct
+		wantErr string
+	}{
+		{
+			name: "happy path",
+			product: &pb.SevProduct{
+				Name:            pb.SevProduct_SEV_PRODUCT_MILAN,
+				MachineStepping: &wrapperspb.UInt32Value{Value: 0},
+			},
+		},
+		{
+			name: "bad vcek stepping",
+			product: &pb.SevProduct{
+				Name:            pb.SevProduct_SEV_PRODUCT_MILAN,
+				MachineStepping: &wrapperspb.UInt32Value{Value: 12},
+			},
+			wantErr: "expected product stepping 12, got 0",
+		},
+	}
+	for _, tc := range tcs {
+		opts := &Options{Getter: getter, Product: tc.product}
+		if err := RawSnpReport(testdata.AttestationBytes, opts); !test.Match(err, tc.wantErr) {
+			t.Errorf("RawSnpReport(_, %+v) = %v errored unexpectedly. Want %q", opts, err, tc.wantErr)
+		}
 	}
 }
 

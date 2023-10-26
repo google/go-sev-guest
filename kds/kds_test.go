@@ -218,6 +218,30 @@ func TestProductName(t *testing.T) {
 			},
 			want: "badstepping",
 		},
+		{
+			name: "unknown milan stepping",
+			input: &pb.SevProduct{
+				Name:            pb.SevProduct_SEV_PRODUCT_MILAN,
+				MachineStepping: &wrapperspb.UInt32Value{Value: 15},
+			},
+			want: "unmappedMilanStepping",
+		},
+		{
+			name: "unknown genoa stepping",
+			input: &pb.SevProduct{
+				Name:            pb.SevProduct_SEV_PRODUCT_GENOA,
+				MachineStepping: &wrapperspb.UInt32Value{Value: 15},
+			},
+			want: "unmappedGenoaStepping",
+		},
+		{
+			name: "unknown",
+			input: &pb.SevProduct{
+				Name:            pb.SevProduct_SEV_PRODUCT_UNKNOWN,
+				MachineStepping: &wrapperspb.UInt32Value{Value: 15},
+			},
+			want: "Unknown",
+		},
 	}
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
@@ -265,6 +289,12 @@ func TestParseProductName(t *testing.T) {
 			want: &pb.SevProduct{
 				Name: pb.SevProduct_SEV_PRODUCT_GENOA,
 			},
+		},
+		{
+			name:    "Unhandled report signer",
+			input:   "ignored",
+			key:     abi.NoneReportSigner,
+			wantErr: "internal: unhandled reportSigner",
 		},
 	}
 	for _, tc := range tcs {

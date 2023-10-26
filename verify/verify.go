@@ -456,7 +456,7 @@ func checkProductName(got, want *spb.SevProduct, key abi.ReportSigner) error {
 			return fmt.Errorf("stepping value in VCEK certificate should not be nil")
 		}
 		if got.MachineStepping.Value != want.MachineStepping.Value {
-			return fmt.Errorf("%v cert product stepping number %02X is not %02X",
+			return fmt.Errorf("%v cert product stepping number 0x%X is not 0x%X",
 				key, got.MachineStepping.Value, want.MachineStepping.Value)
 		}
 	}
@@ -659,11 +659,6 @@ func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 	if err := fillInAttestation(attestation, options); err != nil {
 		return err
 	}
-	// Pass along the expected product information for VcekDER. fillInAttestation will ensure
-	// that this is a noop if options.Product began as non-nil.
-	if err := updateProductExpectation(&options.Product, attestation.Product); err != nil {
-		return err
-	}
 
 	report := attestation.GetReport()
 	info, err := abi.ParseSignerInfo(report.GetSignerInfo())
@@ -777,6 +772,23 @@ func GetAttestationFromReport(report *spb.Report, options *Options) (*spb.Attest
 	}
 	if err := fillInAttestation(result, options); err != nil {
 		return nil, err
+	}
+	// Attempt to fill in the product field of the attestation. Don't error at this
+	// point since this is not validation.
+	info, _ := abi.ParseSignerInfo(report.SignerInfo)
+	var exts *kds.Extensions
+	parse := func(der []byte) *x509.Certificate {
+		out, _ := x509.ParseCertificate(der)
+		return out
+	}
+	switch info.SigningKey {
+	case abi.VcekReportSigner:
+		exts, _ = kds.VcekCertificateExtensions(parse(result.CertificateChain.VcekCert))
+	case abi.VlekReportSigner:
+		exts, _ = kds.VlekCertificateExtensions(parse(result.CertificateChain.VlekCert))
+	}
+	if exts != nil {
+		result.Product, _ = kds.ParseProductName(exts.ProductName, info.SigningKey)
 	}
 	return result, nil
 }
