@@ -28,7 +28,6 @@ import (
 	cpb "github.com/google/go-sev-guest/proto/check"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/google/go-sev-guest/verify/trust"
-	"github.com/google/logger"
 	"github.com/pborman/uuid"
 	"github.com/pkg/errors"
 	"go.uber.org/multierr"
@@ -498,7 +497,6 @@ func decodeCerts(chain *spb.CertificateChain, key abi.ReportSigner, options *Opt
 		return nil, nil, err
 	}
 	if len(roots) == 0 {
-		logger.Warning("Using embedded AMD certificates for SEV-SNP attestation root of trust")
 		root := &trust.AMDRootCerts{
 			Product: productName,
 			// Require that the root matches embedded root certs.
