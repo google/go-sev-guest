@@ -29,7 +29,7 @@ func SkipUnmockableTestCase(tc *test.TestCase) bool {
 	return !client.UseDefaultSevGuest() && tc.FwErr != 0
 }
 
-// GetSevGuest is a cross-platform testing helper function that retrives the
+// GetSevGuest is a cross-platform testing helper function that retrieves the
 // appropriate SEV-guest device from the flags passed into "go test".
 //
 // If using a test guest device, this will also produce a fake AMD-SP that produces the signed
@@ -75,6 +75,79 @@ func GetSevGuest(tcs []test.TestCase, opts *test.DeviceOptions, tb testing.TB) (
 	}
 
 	client, err := client.OpenDevice()
+	if err != nil {
+		tb.Fatalf("Failed to open SEV guest device: %v", err)
+	}
+	kdsImpl := test.GetKDS(tb)
+
+	badSnpRoot := make(map[string][]*trust.AMDRootCerts)
+	for product, rootCerts := range trust.DefaultRootCerts {
+		// Supplement the defaults with the missing x509 certificates.
+		pc, err := trust.GetProductChain(product, abi.VcekReportSigner, kdsImpl)
+		if err != nil {
+			tb.Fatalf("failed to get product chain for %q: %v", product, err)
+		}
+		// By removing the ASK intermediate, we ensure that the attestation will never verify.
+		badSnpRoot[product] = []*trust.AMDRootCerts{{
+			Product: product,
+			ProductCerts: &trust.ProductCerts{
+				Ark:  pc.Ark,
+				Ask:  pc.Ark,
+				Asvk: pc.Ark,
+			},
+			AskSev: rootCerts.ArkSev,
+			ArkSev: rootCerts.AskSev,
+		}}
+	}
+	return client, nil, badSnpRoot, kdsImpl
+}
+
+// GetSevQuoteProvider is a cross-platform testing helper function that retrieves the
+// appropriate SEV-guest device from the flags passed into "go test".
+//
+// If using a test guest device, this will also produce a fake AMD-SP that produces the signed
+// versions of given attestation reports based on different nonce input. Its returned roots of trust
+// are based on the fake's signing credentials.
+func GetSevQuoteProvider(tcs []test.TestCase, opts *test.DeviceOptions, tb testing.TB) (client.QuoteProvider, map[string][]*trust.AMDRootCerts, map[string][]*trust.AMDRootCerts, trust.HTTPSGetter) {
+	tb.Helper()
+	if client.UseDefaultSevGuest() {
+		sevQp, err := test.TcQuoteProvider(tcs, opts)
+		if err != nil {
+			tb.Fatalf("failed to create test device: %v", err)
+		}
+		goodSnpRoot := map[string][]*trust.AMDRootCerts{
+			"Milan": {
+				{
+					Product: "Milan",
+					ProductCerts: &trust.ProductCerts{
+						Ask:  sevQp.Signer.Ask,
+						Ark:  sevQp.Signer.Ark,
+						Asvk: sevQp.Signer.Asvk,
+					},
+				},
+			},
+		}
+		badSnpRoot := map[string][]*trust.AMDRootCerts{
+			"Milan": {
+				{
+					Product: "Milan",
+					ProductCerts: &trust.ProductCerts{
+						// No ASK, oops.
+						Ask:  sevQp.Signer.Ark,
+						Ark:  sevQp.Signer.Ark,
+						Asvk: sevQp.Signer.Ark,
+					},
+				},
+			},
+		}
+		fakekds, err := test.FakeKDSFromSigner(sevQp.Signer)
+		if err != nil {
+			tb.Fatalf("failed to create fake KDS from signer: %v", err)
+		}
+		return sevQp, goodSnpRoot, badSnpRoot, fakekds
+	}
+
+	client, err := client.GetQuoteProvider()
 	if err != nil {
 		tb.Fatalf("Failed to open SEV guest device: %v", err)
 	}

@@ -428,6 +428,8 @@ func TestCRLRootValidity(t *testing.T) {
 	}
 }
 
+// TestOpenGetExtendedReportVerifyClose tests the SnpAttestation function for the deprecated ioctl
+// API.
 func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 	trust.ClearProductCertCache()
 	tests := test.TestCases()
@@ -543,6 +545,52 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestGetQuoteProviderVerify tests the SnpAttestation function for the configfs-tsm report API.
+func TestGetQuoteProviderVerify(t *testing.T) {
+	trust.ClearProductCertCache()
+	tests := test.TestCases()
+	qp, goodRoots, badRoots, kds := testclient.GetSevQuoteProvider(tests, &test.DeviceOptions{Now: time.Now()}, t)
+	// Trust the test device's root certs.
+	options := &Options{
+		TrustedRoots:        goodRoots,
+		Getter:              kds,
+		Product:             testProduct(t),
+		DisableCertFetching: *requireCache && !sg.UseDefaultSevGuest(),
+	}
+	badOptions := &Options{TrustedRoots: badRoots, Getter: kds, Product: testProduct(t)}
+	for _, tc := range tests {
+		// configfs-tsm doesn't support the key choice parameter for getting an attestation report, and
+		// it doesn't return firmware error codes.
+		if testclient.SkipUnmockableTestCase(&tc) || tc.EK == test.KeyChoiceVlek {
+			t.Run(tc.Name, func(t *testing.T) { t.Skip() })
+			continue
+		}
+		t.Run(tc.Name+"_", func(t *testing.T) {
+			reportcerts, err := qp.GetRawQuote(tc.Input)
+			ereport, _ := abi.ReportCertsToProto(reportcerts)
+			if tc.FwErr != abi.Success {
+				if err == nil {
+					t.Fatalf("(d, %v) = %v. Unexpected success given firmware error: %v", tc.Input, ereport, tc.FwErr)
+				}
+			} else if !test.Match(err, tc.WantErr) {
+				t.Fatalf("(d, %v) = %v, %v. Want err: %v", tc.Input, ereport, err, tc.WantErr)
+			}
+			if tc.WantErr == "" {
+				var wantAttestationErr string
+				if err := SnpAttestation(ereport, options); !test.Match(err, wantAttestationErr) {
+					t.Errorf("SnpAttestation(%v) = %v. Want err: %q", ereport, err, wantAttestationErr)
+				}
+
+				wantBad := "error verifying VCEK certificate"
+				if err := SnpAttestation(ereport, badOptions); !test.Match(err, wantBad) {
+					t.Errorf("SnpAttestation(_) bad root test errored unexpectedly: %v, want %s",
+						err, wantBad)
+				}
+			}
+		})
 	}
 }
 
