@@ -148,6 +148,43 @@ func (d *Device) Product() *spb.SevProduct {
 	return d.SevProduct
 }
 
+// QuoteProvider represents a SEV-SNP backed configfs-tsm with pre-programmed responses to attestations.
+type QuoteProvider struct {
+	ReportDataRsp map[string]any
+	Certs         []byte
+	Signer        *AmdSigner
+	SevProduct    *spb.SevProduct
+}
+
+// IsSupported returns true
+func (*QuoteProvider) IsSupported() bool {
+	return true
+}
+
+// GetRawQuote returns the raw report assigned for given reportData.
+func (p *QuoteProvider) GetRawQuote(reportData [64]byte) ([]uint8, error) {
+	mockRspI, ok := p.ReportDataRsp[hex.EncodeToString(reportData[:])]
+	if !ok {
+		return nil, fmt.Errorf("test error: no response for %v", reportData)
+	}
+	mockRsp, ok := mockRspI.(*GetReportResponse)
+	if !ok {
+		return nil, fmt.Errorf("test error: incorrect response type %v", mockRspI)
+	}
+	if mockRsp.FwErr != 0 {
+		return nil, syscall.Errno(unix.EIO)
+	}
+	report := mockRsp.Resp.Data[:abi.ReportSize]
+	r, s, err := p.Signer.Sign(abi.SignedComponent(report))
+	if err != nil {
+		return nil, fmt.Errorf("test error: could not sign report: %v", err)
+	}
+	if err := abi.SetSignature(r, s, report); err != nil {
+		return nil, fmt.Errorf("test error: could not set signature: %v", err)
+	}
+	return append(report, p.Certs...), nil
+}
+
 // GetResponse controls how often (Occurrences) a certain response should be
 // provided.
 type GetResponse struct {

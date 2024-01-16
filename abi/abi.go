@@ -493,6 +493,27 @@ func ReportToProto(data []uint8) (*pb.Report, error) {
 	return r, nil
 }
 
+// ReportCertsToProto creates a pb.Attestation from the report and certificate table represented in
+// data. The report is expected to take exactly abi.ReportSize bytes, followed by the certificate
+// table.
+func ReportCertsToProto(data []uint8) (*pb.Attestation, error) {
+	var certs []uint8
+	report := data
+	if len(data) >= ReportSize {
+		report = data[:ReportSize]
+		certs = data[ReportSize:]
+	}
+	mreport, err := ReportToProto(report)
+	if err != nil {
+		return nil, err
+	}
+	table := new(CertTable)
+	if err := table.Unmarshal(certs); err != nil {
+		return nil, err
+	}
+	return &pb.Attestation{Report: mreport, CertificateChain: table.Proto()}, nil
+}
+
 func checkReportSizes(r *pb.Report) error {
 	if len(r.FamilyId) != FamilyIDSize {
 		return fmt.Errorf("report family_id length is %d, expect %d", len(r.FamilyId), FamilyIDSize)

@@ -39,6 +39,19 @@ type Device interface {
 	Product() *pb.SevProduct
 }
 
+// LeveledQuoteProvider encapsulates calls to collect an extended attestation report at a given
+// privilege level.
+type LeveledQuoteProvider interface {
+	IsSupported() bool
+	GetRawQuoteAtLevel(reportData [64]byte, vmpl uint) ([]uint8, error)
+}
+
+// QuoteProvider encapsulates calls to collect an extended attestation report.
+type QuoteProvider interface {
+	IsSupported() bool
+	GetRawQuote(reportData [64]byte) ([]uint8, error)
+}
+
 // UseDefaultSevGuest returns true iff -sev_guest_device_path=default.
 func UseDefaultSevGuest() bool {
 	return *sevGuestPath == "default"

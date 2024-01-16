@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/go-configfs-tsm/configfs/linuxtsm"
+	"github.com/google/go-configfs-tsm/report"
 	"github.com/google/go-sev-guest/abi"
 	labi "github.com/google/go-sev-guest/client/linuxabi"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
@@ -122,4 +124,103 @@ func (d *LinuxDevice) Ioctl(command uintptr, req any) (uintptr, error) {
 // Product returns the current CPU's associated AMD SEV product information.
 func (d *LinuxDevice) Product() *spb.SevProduct {
 	return abi.SevProduct()
+}
+
+// LinuxIoctlQuoteProvider implements the QuoteProvider interface to fetch
+// attestation quote via the deprecated /dev/sev-guest ioctl.
+type LinuxIoctlQuoteProvider struct{}
+
+// IsSupported checks if TSM client can be created to use /dev/sev-guest ioctl.
+func (p *LinuxIoctlQuoteProvider) IsSupported() bool {
+	d, err := OpenDevice()
+	if err != nil {
+		return false
+	}
+	d.Close()
+	return true
+}
+
+// GetRawQuoteAtLevel returns byte format attestation plus certificate table via /dev/sev-guest ioctl.
+func (p *LinuxIoctlQuoteProvider) GetRawQuoteAtLevel(reportData [64]byte, level uint) ([]uint8, error) {
+	d, err := OpenDevice()
+	if err != nil {
+		return nil, err
+	}
+	defer d.Close()
+	report, certs, err := GetRawExtendedReportAtVmpl(d, reportData, int(level))
+	if err != nil {
+		return nil, err
+	}
+	return append(report, certs...), nil
+}
+
+// GetRawQuote returns byte format attestation plus certificate table via /dev/sev-guest ioctl.
+func (p *LinuxIoctlQuoteProvider) GetRawQuote(reportData [64]byte) ([]uint8, error) {
+	d, err := OpenDevice()
+	if err != nil {
+		return nil, err
+	}
+	defer d.Close()
+	report, certs, err := GetRawExtendedReport(d, reportData)
+	if err != nil {
+		return nil, err
+	}
+	return append(report, certs...), nil
+}
+
+// LinuxConfigFsQuoteProvider implements the QuoteProvider interface to fetch
+// attestation quote via ConfigFS.
+type LinuxConfigFsQuoteProvider struct{}
+
+// IsSupported checks if TSM client can be created to use ConfigFS system.
+func (p *LinuxConfigFsQuoteProvider) IsSupported() bool {
+	_, err := linuxtsm.MakeClient()
+	return err == nil
+}
+
+// GetRawQuoteAtLevel returns byte format attestation plus certificate table via ConfigFS.
+func (p *LinuxConfigFsQuoteProvider) GetRawQuoteAtLevel(reportData [64]byte, level uint) ([]uint8, error) {
+	req := &report.Request{
+		InBlob:     reportData[:],
+		GetAuxBlob: true,
+		Privilege: &report.Privilege{
+			Level: level,
+		},
+	}
+	resp, err := linuxtsm.GetReport(req)
+	if err != nil {
+		return nil, err
+	}
+	return append(resp.OutBlob, resp.AuxBlob...), nil
+}
+
+// GetRawQuote returns byte format attestation plus certificate table via ConfigFS.
+func (p *LinuxConfigFsQuoteProvider) GetRawQuote(reportData [64]byte) ([]uint8, error) {
+	req := &report.Request{
+		InBlob:     reportData[:],
+		GetAuxBlob: true,
+	}
+	resp, err := linuxtsm.GetReport(req)
+	if err != nil {
+		return nil, err
+	}
+	return append(resp.OutBlob, resp.AuxBlob...), nil
+}
+
+// GetQuoteProvider returns a supported SEV-SNP QuoteProvider.
+func GetQuoteProvider() (QuoteProvider, error) {
+	preferred := &LinuxConfigFsQuoteProvider{}
+	if !preferred.IsSupported() {
+		return &LinuxIoctlQuoteProvider{}, nil
+	}
+	return preferred, nil
+}
+
+// GetLeveledQuoteProvider returns a supported SEV-SNP LeveledQuoteProvider.
+func GetLeveledQuoteProvider() (QuoteProvider, error) {
+	preferred := &LinuxConfigFsQuoteProvider{}
+	if !preferred.IsSupported() {
+		return &LinuxIoctlQuoteProvider{}, nil
+	}
+	return preferred, nil
 }

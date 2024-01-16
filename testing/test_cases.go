@@ -261,3 +261,24 @@ func TcDevice(tcs []TestCase, opts *DeviceOptions) (*Device, error) {
 		SevProduct:    opts.Product,
 	}, nil
 }
+
+// TcQuoteProvider returns a mock quote provider populated from test cases' inputs and expected outputs.
+func TcQuoteProvider(tcs []TestCase, opts *DeviceOptions) (*QuoteProvider, error) {
+	certs, signer, err := makeTestCerts(opts)
+	if err != nil {
+		return nil, fmt.Errorf("test failure creating certificates: %v", err)
+	}
+	responses := map[string]any{}
+	for _, tc := range tcs {
+		responses[hex.EncodeToString(tc.Input[:])] = &GetReportResponse{
+			Resp:  labi.SnpReportRespABI{Data: tc.Output},
+			FwErr: tc.FwErr,
+		}
+	}
+	return &QuoteProvider{
+		ReportDataRsp: responses,
+		Certs:         certs,
+		Signer:        signer,
+		SevProduct:    opts.Product,
+	}, nil
+}
