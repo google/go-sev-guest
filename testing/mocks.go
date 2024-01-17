@@ -150,10 +150,12 @@ func (d *Device) Product() *spb.SevProduct {
 
 // QuoteProvider represents a SEV-SNP backed configfs-tsm with pre-programmed responses to attestations.
 type QuoteProvider struct {
-	ReportDataRsp map[string]any
-	Certs         []byte
-	Signer        *AmdSigner
-	SevProduct    *spb.SevProduct
+	Device *Device
+}
+
+// Product returns the mocked product info or the default.
+func (p *QuoteProvider) Product() *spb.SevProduct {
+	return p.Device.Product()
 }
 
 // IsSupported returns true
@@ -163,7 +165,7 @@ func (*QuoteProvider) IsSupported() bool {
 
 // GetRawQuote returns the raw report assigned for given reportData.
 func (p *QuoteProvider) GetRawQuote(reportData [64]byte) ([]uint8, error) {
-	mockRspI, ok := p.ReportDataRsp[hex.EncodeToString(reportData[:])]
+	mockRspI, ok := p.Device.ReportDataRsp[hex.EncodeToString(reportData[:])]
 	if !ok {
 		return nil, fmt.Errorf("test error: no response for %v", reportData)
 	}
@@ -175,14 +177,14 @@ func (p *QuoteProvider) GetRawQuote(reportData [64]byte) ([]uint8, error) {
 		return nil, syscall.Errno(unix.EIO)
 	}
 	report := mockRsp.Resp.Data[:abi.ReportSize]
-	r, s, err := p.Signer.Sign(abi.SignedComponent(report))
+	r, s, err := p.Device.Signer.Sign(abi.SignedComponent(report))
 	if err != nil {
 		return nil, fmt.Errorf("test error: could not sign report: %v", err)
 	}
 	if err := abi.SetSignature(r, s, report); err != nil {
 		return nil, fmt.Errorf("test error: could not set signature: %v", err)
 	}
-	return append(report, p.Certs...), nil
+	return append(report, p.Device.Certs...), nil
 }
 
 // GetResponse controls how often (Occurrences) a certain response should be

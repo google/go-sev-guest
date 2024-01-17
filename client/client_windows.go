@@ -23,7 +23,6 @@ import (
 )
 
 // WindowsDevice implements the Device interface with Linux ioctls.
-// Deprecated: Use WindowsQuoteProvider.
 type WindowsDevice struct{}
 
 // Open is not supported on Windows.

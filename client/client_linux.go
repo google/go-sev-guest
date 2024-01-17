@@ -168,6 +168,11 @@ func (p *LinuxIoctlQuoteProvider) GetRawQuote(reportData [64]byte) ([]uint8, err
 	return append(report, certs...), nil
 }
 
+// Product returns the current CPU's associated AMD SEV product information.
+func (*LinuxIoctlQuoteProvider) Product() *spb.SevProduct {
+	return abi.SevProduct()
+}
+
 // LinuxConfigFsQuoteProvider implements the QuoteProvider interface to fetch
 // attestation quote via ConfigFS.
 type LinuxConfigFsQuoteProvider struct{}
@@ -207,6 +212,11 @@ func (p *LinuxConfigFsQuoteProvider) GetRawQuote(reportData [64]byte) ([]uint8, 
 	return append(resp.OutBlob, resp.AuxBlob...), nil
 }
 
+// Product returns the current CPU's associated AMD SEV product information.
+func (*LinuxConfigFsQuoteProvider) Product() *spb.SevProduct {
+	return abi.SevProduct()
+}
+
 // GetQuoteProvider returns a supported SEV-SNP QuoteProvider.
 func GetQuoteProvider() (QuoteProvider, error) {
 	preferred := &LinuxConfigFsQuoteProvider{}
@@ -217,7 +227,7 @@ func GetQuoteProvider() (QuoteProvider, error) {
 }
 
 // GetLeveledQuoteProvider returns a supported SEV-SNP LeveledQuoteProvider.
-func GetLeveledQuoteProvider() (QuoteProvider, error) {
+func GetLeveledQuoteProvider() (LeveledQuoteProvider, error) {
 	preferred := &LinuxConfigFsQuoteProvider{}
 	if !preferred.IsSupported() {
 		return &LinuxIoctlQuoteProvider{}, nil

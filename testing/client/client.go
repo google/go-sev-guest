@@ -120,9 +120,9 @@ func GetSevQuoteProvider(tcs []test.TestCase, opts *test.DeviceOptions, tb testi
 				{
 					Product: "Milan",
 					ProductCerts: &trust.ProductCerts{
-						Ask:  sevQp.Signer.Ask,
-						Ark:  sevQp.Signer.Ark,
-						Asvk: sevQp.Signer.Asvk,
+						Ask:  sevQp.Device.Signer.Ask,
+						Ark:  sevQp.Device.Signer.Ark,
+						Asvk: sevQp.Device.Signer.Asvk,
 					},
 				},
 			},
@@ -133,14 +133,14 @@ func GetSevQuoteProvider(tcs []test.TestCase, opts *test.DeviceOptions, tb testi
 					Product: "Milan",
 					ProductCerts: &trust.ProductCerts{
 						// No ASK, oops.
-						Ask:  sevQp.Signer.Ark,
-						Ark:  sevQp.Signer.Ark,
-						Asvk: sevQp.Signer.Ark,
+						Ask:  sevQp.Device.Signer.Ark,
+						Ark:  sevQp.Device.Signer.Ark,
+						Asvk: sevQp.Device.Signer.Ark,
 					},
 				},
 			},
 		}
-		fakekds, err := test.FakeKDSFromSigner(sevQp.Signer)
+		fakekds, err := test.FakeKDSFromSigner(sevQp.Device.Signer)
 		if err != nil {
 			tb.Fatalf("failed to create fake KDS from signer: %v", err)
 		}

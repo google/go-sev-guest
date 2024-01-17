@@ -234,7 +234,7 @@ func TestCases() []TestCase {
 			Name:    "fw oom",
 			Input:   userZeros11,
 			FwErr:   abi.ResourceLimit,
-			WantErr: (&abi.SevFirmwareErr{Status: abi.ResourceLimit}).Error(),
+			WantErr: "input/output error", // All firmware errors get translated to EIO in configfs
 		},
 	}
 }
@@ -264,21 +264,9 @@ func TcDevice(tcs []TestCase, opts *DeviceOptions) (*Device, error) {
 
 // TcQuoteProvider returns a mock quote provider populated from test cases' inputs and expected outputs.
 func TcQuoteProvider(tcs []TestCase, opts *DeviceOptions) (*QuoteProvider, error) {
-	certs, signer, err := makeTestCerts(opts)
+	d, err := TcDevice(tcs, opts)
 	if err != nil {
-		return nil, fmt.Errorf("test failure creating certificates: %v", err)
+		return nil, err
 	}
-	responses := map[string]any{}
-	for _, tc := range tcs {
-		responses[hex.EncodeToString(tc.Input[:])] = &GetReportResponse{
-			Resp:  labi.SnpReportRespABI{Data: tc.Output},
-			FwErr: tc.FwErr,
-		}
-	}
-	return &QuoteProvider{
-		ReportDataRsp: responses,
-		Certs:         certs,
-		Signer:        signer,
-		SevProduct:    opts.Product,
-	}, nil
+	return &QuoteProvider{Device: d}, nil
 }

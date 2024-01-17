@@ -162,7 +162,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	device0, err := test.TcDevice(test.TestCases(), &test.DeviceOptions{Now: now, Signer: sign0})
+	qp0, err := test.TcQuoteProvider(test.TestCases(), &test.DeviceOptions{Now: now, Signer: sign0})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 			}(),
 		},
 	}
-	device, err := test.TcDevice(tcs, opts)
+	qp, err := test.TcQuoteProvider(tcs, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,10 +254,12 @@ func TestValidateSnpAttestation(t *testing.T) {
 		},
 	)
 	attestationFn := func(nonce [64]byte) *spb.Attestation {
-		report, err := sg.GetReport(device, nonce)
+
+		q, err := sg.GetQuoteProto(qp, nonce)
 		if err != nil {
 			t.Fatal(err)
 		}
+		report := q.Report
 		attestation, err := verify.GetAttestationFromReport(report, &verify.Options{Getter: getter})
 		if err != nil {
 			t.Fatal(err)
@@ -279,10 +281,11 @@ func TestValidateSnpAttestation(t *testing.T) {
 		{
 			name: "just reportData",
 			attestation: func() *spb.Attestation {
-				report, err := sg.GetReport(device0, nonce0s1)
+				q, err := sg.GetQuoteProto(qp0, nonce0s1)
 				if err != nil {
 					t.Fatal(err)
 				}
+				report := q.Report
 				return &spb.Attestation{
 					Report: report,
 					CertificateChain: &spb.CertificateChain{

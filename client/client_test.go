@@ -34,6 +34,7 @@ import (
 
 var devMu sync.Once
 var device Device
+var qp QuoteProvider
 var tests []test.TestCase
 
 var guestPolicy = flag.Uint64("guest_policy", abi.SnpPolicyToBytes(abi.SnpPolicy{SMT: true}),
@@ -69,6 +70,7 @@ func initDevice() {
 			panic(err)
 		}
 		device = sevTestDevice
+		qp = &test.QuoteProvider{Device: sevTestDevice}
 		return
 	}
 
@@ -77,6 +79,7 @@ func initDevice() {
 		panic(err)
 	}
 	device = client
+	qp = &test.QuoteProvider{Device: device.(*test.Device)}
 }
 
 func cleanReport(report *spb.Report) {
@@ -129,106 +132,114 @@ func fixRawReportWants(raw []byte) error {
 func TestOpenGetReportClose(t *testing.T) {
 	devMu.Do(initDevice)
 	for _, tc := range tests {
-		reportProto := &spb.Report{}
-		if err := prototext.Unmarshal([]byte(tc.OutputProto), reportProto); err != nil {
-			t.Fatalf("test failure: %v", err)
-		}
-		fixReportWants(reportProto)
-
-		// Does the proto report match expectations?
-		got, err := GetReport(device, tc.Input)
-		if !test.Match(err, tc.WantErr) {
-			t.Fatalf("GetReport(device, %v) = %v, %v. Want err: %v", tc.Input, got, err, tc.WantErr)
-		}
-
-		if tc.WantErr == "" {
-			cleanReport(got)
-			want := reportProto
-			want.Signature = got.Signature // Zeros were placeholders.
-			if diff := cmp.Diff(got, want, protocmp.Transform()); diff != "" {
-				t.Errorf("%s: GetReport(%v) expectation diff %s", tc.Name, tc.Input, diff)
-			}
-		}
-	}
-}
-
-func TestOpenGetRawExtendedReportClose(t *testing.T) {
-	devMu.Do(initDevice)
-	for _, tc := range tests {
-		raw, certs, err := GetRawExtendedReport(device, tc.Input)
-		if !test.Match(err, tc.WantErr) {
-			t.Fatalf("%s: GetRawExtendedReport(device, %v) = %v, %v, %v. Want err: %v", tc.Name, tc.Input, raw, certs, err, tc.WantErr)
-		}
-		if tc.WantErr == "" {
-			if err := cleanRawReport(raw); err != nil {
-				t.Fatal(err)
-			}
-			got := abi.SignedComponent(raw)
-			if err := fixRawReportWants(tc.Output[:]); err != nil {
-				t.Fatal(err)
-			}
-			want := abi.SignedComponent(tc.Output[:])
-			if !bytes.Equal(got, want) {
-				t.Errorf("%s: GetRawExtendedReport(%v) = {data: %v, certs: _} want %v", tc.Name, tc.Input, got, want)
-			}
-			der, err := abi.ReportToSignatureDER(raw)
-			if err != nil {
-				t.Errorf("ReportToSignatureDER(%v) errored unexpectedly: %v", raw, err)
-			}
-			if UseDefaultSevGuest() {
-				tcdev := device.(*test.Device)
-				infoRaw, _ := abi.ReportSignerInfo(raw)
-				info, _ := abi.ParseSignerInfo(infoRaw)
-				reportSigner := tcdev.Signer.Vcek
-				if info.SigningKey == abi.VlekReportSigner {
-					reportSigner = tcdev.Signer.Vlek
-				}
-				if err := reportSigner.CheckSignature(x509.ECDSAWithSHA384, got, der); err != nil {
-					t.Errorf("signature with test keys did not verify: %v", err)
-				}
-			}
-		}
-	}
-}
-
-func TestOpenGetExtendedReportClose(t *testing.T) {
-	devMu.Do(initDevice)
-	for _, tc := range tests {
-		ereport, err := GetExtendedReport(device, tc.Input)
-		if !test.Match(err, tc.WantErr) {
-			t.Fatalf("%s: GetExtendedReport(device, %v) = %v, %v. Want err: %v", tc.Name, tc.Input, ereport, err, tc.WantErr)
-		}
-		if tc.WantErr == "" {
+		t.Run(tc.Name, func(t *testing.T) {
 			reportProto := &spb.Report{}
 			if err := prototext.Unmarshal([]byte(tc.OutputProto), reportProto); err != nil {
 				t.Fatalf("test failure: %v", err)
 			}
 			fixReportWants(reportProto)
 
-			got := ereport.Report
-			cleanReport(got)
-			want := reportProto
-			want.Signature = got.Signature // Zeros were placeholders.
-			if diff := cmp.Diff(got, want, protocmp.Transform()); diff != "" {
-				t.Errorf("%s: GetExtendedReport(%v) = {data: %v, certs: _} want %v. Diff: %s", tc.Name, tc.Input, got, want, diff)
+			// Does the proto report match expectations?
+			attestation, err := GetQuoteProto(qp, tc.Input)
+			if !test.Match(err, tc.WantErr) {
+				t.Fatalf("GetReport(device, %v) = %v, %v. Want err: %v", tc.Input, attestation, err, tc.WantErr)
 			}
 
-			if UseDefaultSevGuest() {
-				tcdev := device.(*test.Device)
-				if !bytes.Equal(ereport.GetCertificateChain().GetArkCert(), tcdev.Signer.Ark.Raw) {
-					t.Errorf("ARK certificate mismatch. Got %v, want %v",
-						ereport.GetCertificateChain().GetArkCert(), tcdev.Signer.Ark.Raw)
-				}
-				if !bytes.Equal(ereport.GetCertificateChain().GetAskCert(), tcdev.Signer.Ask.Raw) {
-					t.Errorf("ASK certificate mismatch. Got %v, want %v",
-						ereport.GetCertificateChain().GetAskCert(), tcdev.Signer.Ask.Raw)
-				}
-				if !bytes.Equal(ereport.GetCertificateChain().GetVcekCert(), tcdev.Signer.Vcek.Raw) {
-					t.Errorf("VCEK certificate mismatch. Got %v, want %v",
-						ereport.GetCertificateChain().GetVcekCert(), tcdev.Signer.Vcek.Raw)
+			if tc.WantErr == "" {
+				got := attestation.Report
+				cleanReport(got)
+				want := reportProto
+				want.Signature = got.Signature // Zeros were placeholders.
+				if diff := cmp.Diff(got, want, protocmp.Transform()); diff != "" {
+					t.Errorf("GetReport(%v) expectation diff %s", tc.Input, diff)
 				}
 			}
-		}
+		})
+	}
+}
+
+func TestOpenGetRawExtendedReportClose(t *testing.T) {
+	devMu.Do(initDevice)
+	for _, tc := range tests {
+		t.Run(tc.Name, func(t *testing.T) {
+			rawcerts, err := qp.GetRawQuote(tc.Input)
+			if !test.Match(err, tc.WantErr) || (tc.WantErr == "" && len(rawcerts) < abi.ReportSize) {
+				t.Fatalf("qp.GetRawQuote(%v) = %v, %v. Want err: %v", tc.Input, rawcerts, err, tc.WantErr)
+			}
+			if tc.WantErr == "" {
+				raw := rawcerts[:abi.ReportSize]
+				if err := cleanRawReport(raw); err != nil {
+					t.Fatal(err)
+				}
+				got := abi.SignedComponent(raw)
+				if err := fixRawReportWants(tc.Output[:]); err != nil {
+					t.Fatal(err)
+				}
+				want := abi.SignedComponent(tc.Output[:])
+				if !bytes.Equal(got, want) {
+					t.Errorf("qp.GetRawQuote(%v) = {data: %v, certs: _} want %v", tc.Input, got, want)
+				}
+				der, err := abi.ReportToSignatureDER(raw)
+				if err != nil {
+					t.Errorf("ReportToSignatureDER(%v) errored unexpectedly: %v", raw, err)
+				}
+				if UseDefaultSevGuest() {
+					tcdev := device.(*test.Device)
+					infoRaw, _ := abi.ReportSignerInfo(raw)
+					info, _ := abi.ParseSignerInfo(infoRaw)
+					reportSigner := tcdev.Signer.Vcek
+					if info.SigningKey == abi.VlekReportSigner {
+						reportSigner = tcdev.Signer.Vlek
+					}
+					if err := reportSigner.CheckSignature(x509.ECDSAWithSHA384, got, der); err != nil {
+						t.Errorf("signature with test keys did not verify: %v", err)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestGetQuoteProto(t *testing.T) {
+	devMu.Do(initDevice)
+	for _, tc := range tests {
+		t.Run(tc.Name, func(t *testing.T) {
+			ereport, err := GetQuoteProto(qp, tc.Input)
+			if !test.Match(err, tc.WantErr) {
+				t.Fatalf("GetQuoteProto(qp, %v) = %v, %v. Want err: %v", tc.Input, ereport, err, tc.WantErr)
+			}
+			if tc.WantErr == "" {
+				reportProto := &spb.Report{}
+				if err := prototext.Unmarshal([]byte(tc.OutputProto), reportProto); err != nil {
+					t.Fatalf("test failure: %v", err)
+				}
+				fixReportWants(reportProto)
+
+				got := ereport.Report
+				cleanReport(got)
+				want := reportProto
+				want.Signature = got.Signature // Zeros were placeholders.
+				if diff := cmp.Diff(got, want, protocmp.Transform()); diff != "" {
+					t.Errorf("GetQuoteProto(qp, %v) = {data: %v, certs: _} want %v. Diff: %s", tc.Input, got, want, diff)
+				}
+
+				if UseDefaultSevGuest() {
+					tcdev := device.(*test.Device)
+					if !bytes.Equal(ereport.GetCertificateChain().GetArkCert(), tcdev.Signer.Ark.Raw) {
+						t.Errorf("ARK certificate mismatch. Got %v, want %v",
+							ereport.GetCertificateChain().GetArkCert(), tcdev.Signer.Ark.Raw)
+					}
+					if !bytes.Equal(ereport.GetCertificateChain().GetAskCert(), tcdev.Signer.Ask.Raw) {
+						t.Errorf("ASK certificate mismatch. Got %v, want %v",
+							ereport.GetCertificateChain().GetAskCert(), tcdev.Signer.Ask.Raw)
+					}
+					if !bytes.Equal(ereport.GetCertificateChain().GetVcekCert(), tcdev.Signer.Vcek.Raw) {
+						t.Errorf("VCEK certificate mismatch. Got %v, want %v",
+							ereport.GetCertificateChain().GetVcekCert(), tcdev.Signer.Vcek.Raw)
+					}
+				}
+			}
+		})
 	}
 }
 

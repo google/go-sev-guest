@@ -21,9 +21,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 
 	"github.com/google/go-sev-guest/abi"
 	"github.com/google/go-sev-guest/client"
+	pb "github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/google/go-sev-guest/tools/lib/cmdline"
 	"github.com/google/logger"
 	"google.golang.org/protobuf/encoding/prototext"
@@ -51,10 +53,11 @@ var (
 	reportDataFile = flag.String("infile", "",
 		"Path to a file containing 64 bytes of REPORT_DATA to include "+
 			"in the output attestation. Stdin is \"-\". Default -inform=bin.")
-	vmpl = flag.Int("vmpl", 0, "The VMPL at which to collect an attestation report")
+	vmpl = flag.String("vmpl", "default", "The VMPL at which to collect an attestation report")
 	out  = flag.String("out", "", "Path to output file to write attestation report to. "+
 		"If unset, outputs to stdout.")
 	verbose = flag.Bool("v", false, "Enable verbose logging.")
+	vmplInt uint
 )
 
 func indata() ([]byte, error) {
@@ -91,17 +94,16 @@ func nonBinOut() func(proto.Message) ([]byte, error) {
 	}
 }
 
-func outputExtendedReport(device client.Device, data [abi.ReportDataSize]byte, out io.Writer) error {
+func outputExtendedReport(data [abi.ReportDataSize]byte, out io.Writer) error {
 	if *outform == "bin" {
-		report, certs, err := client.GetRawExtendedReportAtVmpl(device, data, *vmpl)
+		bin, err := getRaw(data)
 		if err != nil {
 			return err
 		}
-		out.Write(report)
-		out.Write(certs)
+		out.Write(bin)
 		return nil
 	}
-	attestation, err := client.GetExtendedReportAtVmpl(device, data, *vmpl)
+	attestation, err := getProto(data)
 	if err != nil {
 		return err
 	}
@@ -113,20 +115,64 @@ func outputExtendedReport(device client.Device, data [abi.ReportDataSize]byte, o
 	return nil
 }
 
-func outputReport(device client.Device, data [abi.ReportDataSize]byte, out io.Writer) error {
+func getVmpl() (uint, error) {
+	if *vmpl == "default" {
+		return 0, fmt.Errorf("getVmpl should not be called on \"default\"")
+	}
+	vmplInt, err := strconv.ParseUint(*vmpl, 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("--vmpl must be a non-negative integer or \"default\"")
+	}
+	return uint(vmplInt), nil
+}
+
+func getRaw(data [abi.ReportDataSize]byte) ([]byte, error) {
+	if *vmpl == "default" {
+		qp, err := client.GetQuoteProvider()
+		if err != nil {
+			return nil, err
+		}
+		return qp.GetRawQuote(data)
+	}
+	qp, err := client.GetLeveledQuoteProvider()
+	if err != nil {
+		return nil, err
+	}
+	return qp.GetRawQuoteAtLevel(data, vmplInt)
+}
+
+func getProto(data [abi.ReportDataSize]byte) (*pb.Attestation, error) {
+	if *vmpl == "default" {
+		qp, err := client.GetQuoteProvider()
+		if err != nil {
+			return nil, err
+		}
+		return client.GetQuoteProto(qp, data)
+	}
+	qp, err := client.GetLeveledQuoteProvider()
+	if err != nil {
+		return nil, err
+	}
+	return client.GetQuoteProtoAtLevel(qp, data, vmplInt)
+}
+
+func outputReport(data [abi.ReportDataSize]byte, out io.Writer) error {
 	if *outform == "bin" {
-		bytes, err := client.GetRawReportAtVmpl(device, data, *vmpl)
+		bytes, err := getRaw(data)
 		if err != nil {
 			return err
+		}
+		if len(bytes) > abi.ReportSize {
+			bytes = bytes[:abi.ReportSize]
 		}
 		out.Write(bytes)
 		return nil
 	}
-	report, err := client.GetReportAtVmpl(device, data, *vmpl)
+	attestation, err := getProto(data)
 	if err != nil {
 		return err
 	}
-	bytes, err := nonBinOut()(report)
+	bytes, err := nonBinOut()(attestation.Report)
 	if err != nil {
 		return err
 	}
@@ -161,8 +207,12 @@ func main() {
 			*outform)
 	}
 
-	if *vmpl < 0 || *vmpl > 3 {
-		logger.Fatalf("-vmpl is %d. Expect 0-3.", *vmpl)
+	if *vmpl != "default" {
+		vint, err := getVmpl()
+		if err != nil || vint > 3 {
+			logger.Fatalf("--vmpl=%s. Expect 0-3 or \"default\"", *vmpl)
+		}
+		vmplInt = vint
 	}
 
 	outwriter, filetoclose, err := outWriter()
@@ -175,19 +225,14 @@ func main() {
 		}
 	}()
 
-	device, err := client.OpenDevice()
-	if err != nil {
-		logger.Fatal(err)
-	}
-	defer device.Close()
 	var reportData64 [abi.ReportDataSize]byte
 	copy(reportData64[:], reportData)
 	if *extended {
-		if err := outputExtendedReport(device, reportData64, outwriter); err != nil {
+		if err := outputExtendedReport(reportData64, outwriter); err != nil {
 			logger.Fatal(err)
 		}
 	} else {
-		if err := outputReport(device, reportData64, outwriter); err != nil {
+		if err := outputReport(reportData64, outwriter); err != nil {
 			logger.Fatal(err)
 		}
 	}
