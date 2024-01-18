@@ -42,14 +42,22 @@ type Device interface {
 // LeveledQuoteProvider encapsulates calls to collect an extended attestation report at a given
 // privilege level.
 type LeveledQuoteProvider interface {
+	// IsSupported returns whether the kernel supports this implementation.
 	IsSupported() bool
+	// GetRawQuote returns a raw report with the given privilege level.
 	GetRawQuoteAtLevel(reportData [64]byte, vmpl uint) ([]uint8, error)
+	// Product returns AMD SEV-related CPU information of the calling CPU.
+	Product() *pb.SevProduct
 }
 
 // QuoteProvider encapsulates calls to collect an extended attestation report.
 type QuoteProvider interface {
+	// IsSupported returns whether the kernel supports this implementation.
 	IsSupported() bool
+	// GetRawQuote returns a raw report with the default privilege level.
 	GetRawQuote(reportData [64]byte) ([]uint8, error)
+	// Product returns AMD SEV-related CPU information of the calling CPU.
+	Product() *pb.SevProduct
 }
 
 // UseDefaultSevGuest returns true iff -sev_guest_device_path=default.
@@ -76,6 +84,8 @@ func message(d Device, command uintptr, req *labi.SnpUserGuestRequest) error {
 
 // GetRawReportAtVmpl requests for an attestation report at the given VMPL that incorporates the
 // given user data.
+//
+// Deprecated: Use LeveledQuoteProvider.
 func GetRawReportAtVmpl(d Device, reportData [64]byte, vmpl int) ([]byte, error) {
 	var snpReportRsp labi.SnpReportRespABI
 	userGuestReq := labi.SnpUserGuestRequest{
@@ -92,11 +102,15 @@ func GetRawReportAtVmpl(d Device, reportData [64]byte, vmpl int) ([]byte, error)
 }
 
 // GetRawReport requests for an attestation report at VMPL0 that incorporates the given user data.
+//
+// Deprecated: Use QuoteProvider.
 func GetRawReport(d Device, reportData [64]byte) ([]byte, error) {
 	return GetRawReportAtVmpl(d, reportData, 0)
 }
 
 // GetReportAtVmpl gets an attestation report at the given VMPL into its protobuf representation.
+//
+// Deprecated: Use GetQuoteProtoAtLevel.
 func GetReportAtVmpl(d Device, reportData [64]byte, vmpl int) (*pb.Report, error) {
 	data, err := GetRawReportAtVmpl(d, reportData, vmpl)
 	if err != nil {
@@ -106,6 +120,8 @@ func GetReportAtVmpl(d Device, reportData [64]byte, vmpl int) (*pb.Report, error
 }
 
 // GetReport gets an attestation report at VMPL0 into its protobuf representation.
+//
+// Deprecated: Use GetQuoteProto.
 func GetReport(d Device, reportData [64]byte) (*pb.Report, error) {
 	return GetReportAtVmpl(d, reportData, 0)
 }
@@ -152,6 +168,8 @@ func queryCertificateLength(d Device, vmpl int) (uint32, error) {
 
 // GetRawExtendedReportAtVmpl requests for an attestation report that incorporates the given user
 // data at the given VMPL, and additional key certificate information.
+//
+// Deprecated: Use LeveledQuoteProvider.
 func GetRawExtendedReportAtVmpl(d Device, reportData [64]byte, vmpl int) ([]byte, []byte, error) {
 	length, err := queryCertificateLength(d, vmpl)
 	if err != nil {
@@ -167,11 +185,47 @@ func GetRawExtendedReportAtVmpl(d Device, reportData [64]byte, vmpl int) ([]byte
 
 // GetRawExtendedReport requests for an attestation report that incorporates the given user data,
 // and additional key certificate information.
+//
+// Deprecated: Use QuoteProvider.
 func GetRawExtendedReport(d Device, reportData [64]byte) ([]byte, []byte, error) {
 	return GetRawExtendedReportAtVmpl(d, reportData, 0)
 }
 
+// GetQuoteProto uses the given QuoteProvider to return the
+// protobuf representation of an attestation report with cached
+// certificate chain.
+func GetQuoteProto(qp QuoteProvider, reportData [64]byte) (*pb.Attestation, error) {
+	reportcerts, err := qp.GetRawQuote(reportData)
+	if err != nil {
+		return nil, err
+	}
+	attestation, err := abi.ReportCertsToProto(reportcerts)
+	if err != nil {
+		return nil, err
+	}
+	attestation.Product = qp.Product()
+	return attestation, nil
+}
+
+// GetQuoteProtoAtLevel uses the given LeveledQuoteProvider to return the
+// protobuf representation of an attestation report at a given VMPL with cached
+// certificate chain.
+func GetQuoteProtoAtLevel(qp LeveledQuoteProvider, reportData [64]byte, vmpl uint) (*pb.Attestation, error) {
+	reportcerts, err := qp.GetRawQuoteAtLevel(reportData, vmpl)
+	if err != nil {
+		return nil, err
+	}
+	attestation, err := abi.ReportCertsToProto(reportcerts)
+	if err != nil {
+		return nil, err
+	}
+	attestation.Product = qp.Product()
+	return attestation, nil
+}
+
 // GetExtendedReportAtVmpl gets an extended attestation report at the given VMPL into a structured type.
+//
+// Deprecated: Use GetQuoteProtoAtLevel
 func GetExtendedReportAtVmpl(d Device, reportData [64]byte, vmpl int) (*pb.Attestation, error) {
 	reportBytes, certBytes, err := GetRawExtendedReportAtVmpl(d, reportData, vmpl)
 	if err != nil {
@@ -195,6 +249,8 @@ func GetExtendedReportAtVmpl(d Device, reportData [64]byte, vmpl int) (*pb.Attes
 }
 
 // GetExtendedReport gets an extended attestation report at VMPL0 into a structured type.
+//
+// Deprecated: Use GetQuoteProto.
 func GetExtendedReport(d Device, reportData [64]byte) (*pb.Attestation, error) {
 	return GetExtendedReportAtVmpl(d, reportData, 0)
 }

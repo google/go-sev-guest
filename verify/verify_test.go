@@ -161,32 +161,29 @@ func TestVerifyVcekCert(t *testing.T) {
 func TestSnpReportSignature(t *testing.T) {
 	tests := test.TestCases()
 	now := time.Date(2022, time.May, 3, 9, 0, 0, 0, time.UTC)
-	d, err := test.TcDevice(tests, &test.DeviceOptions{Now: now})
+	qp, err := test.TcQuoteProvider(tests, &test.DeviceOptions{Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := d.Open("/dev/sev-guest"); err != nil {
-		t.Error(err)
-	}
-	defer d.Close()
 	for _, tc := range tests {
 		if testclient.SkipUnmockableTestCase(&tc) {
 			continue
 		}
 		// Does the Raw report match expectations?
-		raw, err := sg.GetRawReport(d, tc.Input)
-		if !test.Match(err, tc.WantErr) {
-			t.Fatalf("GetRawReport(d, %v) = %v, %v. Want err: %v", tc.Input, raw, err, tc.WantErr)
+		rawcombo, err := qp.GetRawQuote(tc.Input)
+		if !test.Match(err, tc.WantErr) || (tc.WantErr == "" && len(rawcombo) < abi.ReportSize) {
+			t.Fatalf("GetRawQuote(qp, %v) = %v, %v. Want err: %q", tc.Input, rawcombo, err, tc.WantErr)
 		}
 		if tc.WantErr == "" {
+			raw := rawcombo[:abi.ReportSize]
 			got := abi.SignedComponent(raw)
 			want := abi.SignedComponent(tc.Output[:])
 			if !bytes.Equal(got, want) {
 				t.Errorf("%s: GetRawReport(%v) = %v, want %v", tc.Name, tc.Input, got, want)
 			}
-			key := d.Signer.Vcek
+			key := qp.Device.Signer.Vcek
 			if tc.EK == test.KeyChoiceVlek {
-				key = d.Signer.Vlek
+				key = qp.Device.Signer.Vlek
 			}
 			if err := SnpReportSignature(raw, key); err != nil {
 				t.Errorf("signature with test keys did not verify: %v", err)
@@ -433,15 +430,14 @@ func TestCRLRootValidity(t *testing.T) {
 func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 	trust.ClearProductCertCache()
 	tests := test.TestCases()
-	d, goodRoots, badRoots, kds := testclient.GetSevGuest(tests, &test.DeviceOptions{Now: time.Now()}, t)
-	defer d.Close()
-	type reportGetter func(sg.Device, [64]byte) (*pb.Attestation, error)
-	reportOnly := func(d sg.Device, input [64]byte) (*pb.Attestation, error) {
-		report, err := sg.GetReport(d, input)
+	qp, goodRoots, badRoots, kds := testclient.GetSevQuoteProvider(tests, &test.DeviceOptions{Now: time.Now()}, t)
+	type reportGetter func(sg.QuoteProvider, [64]byte) (*pb.Attestation, error)
+	reportOnly := func(d sg.QuoteProvider, input [64]byte) (*pb.Attestation, error) {
+		attestation, err := sg.GetQuoteProto(qp, input)
 		if err != nil {
 			return nil, err
 		}
-		return &pb.Attestation{Report: report}, nil
+		return &pb.Attestation{Report: attestation.Report}, nil
 	}
 	reportGetters := []struct {
 		name           string
@@ -455,7 +451,7 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 	}{
 		{
 			name:           "GetExtendedReport",
-			getter:         sg.GetExtendedReport,
+			getter:         sg.GetQuoteProto,
 			badRootErr:     "error verifying VCEK certificate",
 			vlekBadRootErr: "error verifying VLEK certificate",
 		},
@@ -469,8 +465,8 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 		},
 		{
 			name: "GetReportVlek",
-			getter: func(d sg.Device, input [64]byte) (*pb.Attestation, error) {
-				attestation, err := reportOnly(d, input)
+			getter: func(qp sg.QuoteProvider, input [64]byte) (*pb.Attestation, error) {
+				attestation, err := reportOnly(qp, input)
 				if err != nil {
 					return nil, err
 				}
@@ -481,8 +477,8 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 				chain := attestation.CertificateChain
 				info, _ := abi.ParseSignerInfo(attestation.GetReport().GetSignerInfo())
 				if sg.UseDefaultSevGuest() && info.SigningKey == abi.VlekReportSigner {
-					if td, ok := d.(*test.Device); ok {
-						chain.VlekCert = td.Signer.Vlek.Raw
+					if td, ok := qp.(*test.QuoteProvider); ok {
+						chain.VlekCert = td.Device.Signer.Vlek.Raw
 					}
 				}
 				return attestation, nil
@@ -521,7 +517,7 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 					t.Skip()
 					return
 				}
-				ereport, err := getReport.getter(d, tc.Input)
+				ereport, err := getReport.getter(qp, tc.Input)
 				if !test.Match(err, tc.WantErr) {
 					t.Fatalf("(d, %v) = %v, %v. Want err: %v", tc.Input, ereport, err, tc.WantErr)
 				}

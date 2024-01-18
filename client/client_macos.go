@@ -26,7 +26,6 @@ import (
 const DefaultSevGuestDevicePath = "unknown"
 
 // MacOSDevice implements the Device interface with Linux ioctls.
-// Deprecated: Use MacOSQuoteProvider.
 type MacOSDevice struct{}
 
 // Open is not supported on MacOS.
