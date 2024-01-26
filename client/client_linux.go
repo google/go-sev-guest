@@ -147,7 +147,13 @@ func (p *LinuxIoctlQuoteProvider) GetRawQuoteAtLevel(reportData [64]byte, level 
 		return nil, err
 	}
 	defer d.Close()
-	report, certs, err := GetRawExtendedReportAtVmpl(d, reportData, int(level))
+	// If there are no certificates, then just return the raw report.
+	length, err := queryCertificateLength(d, int(level))
+	if err != nil {
+		return GetRawReportAtVmpl(d, reportData, int(level))
+	}
+	certs := make([]byte, length)
+	report, _, err := getExtendedReportIn(d, reportData, int(level), certs)
 	if err != nil {
 		return nil, err
 	}
@@ -156,16 +162,7 @@ func (p *LinuxIoctlQuoteProvider) GetRawQuoteAtLevel(reportData [64]byte, level 
 
 // GetRawQuote returns byte format attestation plus certificate table via /dev/sev-guest ioctl.
 func (p *LinuxIoctlQuoteProvider) GetRawQuote(reportData [64]byte) ([]uint8, error) {
-	d, err := OpenDevice()
-	if err != nil {
-		return nil, err
-	}
-	defer d.Close()
-	report, certs, err := GetRawExtendedReport(d, reportData)
-	if err != nil {
-		return nil, err
-	}
-	return append(report, certs...), nil
+	return p.GetRawQuoteAtLevel(reportData, 0)
 }
 
 // Product returns the current CPU's associated AMD SEV product information.
