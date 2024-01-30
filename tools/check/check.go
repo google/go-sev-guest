@@ -33,6 +33,7 @@ import (
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/google/go-sev-guest/testing"
 	"github.com/google/go-sev-guest/tools/lib/cmdline"
+	"github.com/google/go-sev-guest/tools/lib/report"
 	"github.com/google/go-sev-guest/validate"
 	"github.com/google/go-sev-guest/verify"
 	"github.com/google/go-sev-guest/verify/testdata"
@@ -136,74 +137,6 @@ var (
 	}
 	product = &spb.SevProduct{}
 )
-
-func parseAttestationBytes(b []byte) (*spb.Attestation, error) {
-	// This format is the attestation report in AMD's specified ABI format, immediately
-	// followed by the certificate table bytes.
-	if len(b) < abi.ReportSize {
-		return nil, fmt.Errorf("attestation contents too small (0x%x bytes). Want at least 0x%x bytes", len(b), abi.ReportSize)
-	}
-	reportBytes := b[0:abi.ReportSize]
-	certBytes := b[abi.ReportSize:]
-
-	report, err := abi.ReportToProto(reportBytes)
-	if err != nil {
-		return nil, fmt.Errorf("could not parse attestation report: %v", err)
-	}
-
-	certs := new(abi.CertTable)
-	if err := certs.Unmarshal(certBytes); err != nil {
-		return nil, fmt.Errorf("could not parse certificate table: %v", err)
-	}
-	return &spb.Attestation{Report: report, CertificateChain: certs.Proto()}, nil
-}
-
-func parseAttestation(b []byte) (*spb.Attestation, error) {
-	switch *inform {
-	case "bin":
-		return parseAttestationBytes(b)
-	case "proto":
-		result := &spb.Attestation{}
-		if err := proto.Unmarshal(b, result); err != nil {
-			return nil, fmt.Errorf("could not parse %q as proto: %v", *infile, err)
-		}
-	case "textproto":
-		result := &spb.Attestation{}
-		if err := prototext.Unmarshal(b, result); err != nil {
-			return nil, fmt.Errorf("could not parse %q as textproto: %v", *infile, err)
-		}
-	default:
-		return nil, fmt.Errorf("unknown value -inform=%s", *inform)
-	}
-	// This should be impossible.
-	return nil, errors.New("internal error")
-}
-
-func getAttestation() (*spb.Attestation, error) {
-	var in io.Reader
-	var f *os.File
-	if *infile == "-" {
-		in = os.Stdin
-	} else {
-		file, err := os.Open(*infile)
-		if err != nil {
-			return nil, fmt.Errorf("could not open %q: %v", *infile, err)
-		}
-		f = file
-		in = file
-	}
-	defer func() {
-		if f != nil {
-			f.Close()
-		}
-	}()
-
-	contents, err := io.ReadAll(in)
-	if err != nil {
-		return nil, fmt.Errorf("could not read %q: %v", *infile, err)
-	}
-	return parseAttestation(contents)
-}
 
 func parseHashes(s string) ([][]byte, error) {
 	hexhashes := strings.Split(s, ",")
@@ -543,7 +476,7 @@ func main() {
 		die(errors.New("cannot specify both -check_crl=true and -network=false"))
 	}
 
-	attestation, err := getAttestation()
+	attestation, err := report.GetAttestation(*infile, *inform)
 	if err != nil {
 		die(err)
 	}
