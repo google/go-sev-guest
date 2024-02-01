@@ -269,6 +269,10 @@ func TestCertTableProto(t *testing.T) {
 	if !ok || !bytes.Equal(gotExtra, extraraw) {
 		t.Fatalf("Extras[%q] = %v, want %v", extraGUID, gotExtra, extraraw)
 	}
+	bs := c.Marshal()
+	if !bytes.Equal(bs, result) {
+		t.Errorf("c.Marshal() = %v, want %v", bs, result)
+	}
 }
 
 func TestSevProduct(t *testing.T) {

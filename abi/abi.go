@@ -785,6 +785,54 @@ func (c *CertTable) GetByGUIDString(guid string) ([]byte, error) {
 	return nil, fmt.Errorf("cert not found for GUID %s", guid)
 }
 
+// CertsFromProto returns the CertTable represented in the given certificate chain.
+func CertsFromProto(chain *pb.CertificateChain) *CertTable {
+	c := &CertTable{}
+	if len(chain.GetArkCert()) != 0 {
+		c.Entries = append(c.Entries,
+			CertTableEntry{GUID: uuid.Parse(ArkGUID), RawCert: chain.GetArkCert()})
+	}
+	if len(chain.GetAskCert()) != 0 {
+		c.Entries = append(c.Entries,
+			CertTableEntry{GUID: uuid.Parse(AskGUID), RawCert: chain.GetAskCert()})
+	}
+	if len(chain.GetVcekCert()) != 0 {
+		c.Entries = append(c.Entries,
+			CertTableEntry{GUID: uuid.Parse(VcekGUID), RawCert: chain.GetVcekCert()})
+	}
+	if len(chain.GetVlekCert()) != 0 {
+		c.Entries = append(c.Entries,
+			CertTableEntry{GUID: uuid.Parse(VlekGUID), RawCert: chain.GetVlekCert()})
+	}
+	for guid, cert := range chain.GetExtras() {
+		c.Entries = append(c.Entries,
+			CertTableEntry{GUID: uuid.Parse(guid), RawCert: cert})
+	}
+	return c
+}
+
+// Marshal returns the CertTable in its GUID table ABI format.
+func (c *CertTable) Marshal() []byte {
+	if len(c.Entries) == 0 {
+		return nil
+	}
+	headerSize := uint32((len(c.Entries) + 1) * CertTableEntrySize)
+	var dataSize uint32
+	for _, entry := range c.Entries {
+		dataSize += uint32(len(entry.RawCert))
+	}
+	output := make([]byte, dataSize+headerSize)
+	cursor := headerSize
+	for i, entry := range c.Entries {
+		size := uint32(len(entry.RawCert))
+		h := &CertTableHeaderEntry{GUID: entry.GUID, Offset: cursor, Length: size}
+		copy(output[cursor:cursor+size], entry.RawCert)
+		h.Write(output[i*CertTableEntrySize:])
+		cursor += size
+	}
+	return output
+}
+
 // Proto returns the certificate chain represented in an extended guest request's
 // data pages. The GHCB specification allows any number of entries in the pages,
 // so missing certificates aren't an error. If certificates are missing, you can
