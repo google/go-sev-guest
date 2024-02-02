@@ -87,8 +87,8 @@ func ParseAttestation(b []byte, inform string) (*spb.Attestation, error) {
 	return nil, errors.New("internal error")
 }
 
-// GetAttestation reads an attestation report from a file.
-func GetAttestation(infile, inform string) (*spb.Attestation, error) {
+// ReadAttestation reads an attestation report from a file.
+func ReadAttestation(infile, inform string) (*spb.Attestation, error) {
 	var in io.Reader
 	var f *os.File
 	if infile == "-" {

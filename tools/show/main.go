@@ -36,7 +36,7 @@ func main() {
 	logger.Init("", false, false, os.Stderr)
 	flag.Parse()
 
-	attestation, err := report.GetAttestation(*infile, *inform)
+	attestation, err := report.ReadAttestation(*infile, *inform)
 	if err != nil {
 		logger.Fatal(err)
 	}
