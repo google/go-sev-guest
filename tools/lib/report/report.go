@@ -16,7 +16,6 @@
 package report
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -80,11 +79,10 @@ func ParseAttestation(b []byte, inform string) (*spb.Attestation, error) {
 				return nil, fmt.Errorf("could not parse as textproto: %v", multierr.Append(aerr, rerr))
 			}
 		}
+		return result, nil
 	default:
 		return nil, fmt.Errorf("unknown inform: %q", inform)
 	}
-	// This should be impossible.
-	return nil, errors.New("internal error")
 }
 
 // ReadAttestation reads an attestation report from a file.
