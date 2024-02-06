@@ -476,7 +476,7 @@ func main() {
 		die(errors.New("cannot specify both -check_crl=true and -network=false"))
 	}
 
-	attestation, err := report.GetAttestation(*infile, *inform)
+	attestation, err := report.ReadAttestation(*infile, *inform)
 	if err != nil {
 		die(err)
 	}

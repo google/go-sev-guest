@@ -1,8 +1,21 @@
+// Copyright 2024 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // Package report provides functions for reading and writing attestation reports of various formats.
 package report
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -66,15 +79,14 @@ func ParseAttestation(b []byte, inform string) (*spb.Attestation, error) {
 				return nil, fmt.Errorf("could not parse as textproto: %v", multierr.Append(aerr, rerr))
 			}
 		}
+		return result, nil
 	default:
 		return nil, fmt.Errorf("unknown inform: %q", inform)
 	}
-	// This should be impossible.
-	return nil, errors.New("internal error")
 }
 
-// GetAttestation reads an attestation report from a file.
-func GetAttestation(infile, inform string) (*spb.Attestation, error) {
+// ReadAttestation reads an attestation report from a file.
+func ReadAttestation(infile, inform string) (*spb.Attestation, error) {
 	var in io.Reader
 	var f *os.File
 	if infile == "-" {
