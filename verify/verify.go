@@ -28,6 +28,7 @@ import (
 	cpb "github.com/google/go-sev-guest/proto/check"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/google/go-sev-guest/verify/trust"
+	"github.com/google/logger"
 	"github.com/pborman/uuid"
 	"github.com/pkg/errors"
 	"go.uber.org/multierr"
@@ -684,6 +685,7 @@ func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 		if options.Product != nil {
 			attestation.Product = options.Product
 		} else {
+			logger.Warning("Attestation missing product information. KDS certificate may be invalid. Using default Milan-B1")
 			attestation.Product = abi.DefaultSevProduct()
 		}
 		productOverridden = true
