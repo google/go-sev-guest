@@ -53,7 +53,7 @@ func initDevice() {
 	for i := range ones32 {
 		ones32[i] = 1
 	}
-	opts := &test.DeviceOptions{Now: now}
+	opts := &test.DeviceOptions{Now: now, Product: abi.DefaultSevProduct()}
 	tcqp, err := test.TcQuoteProvider(tests, opts)
 	if err != nil {
 		panic(fmt.Sprintf("failed to create test device: %v", err))
@@ -172,26 +172,31 @@ func TestReadAttestation(t *testing.T) {
 
 func TestTransform(t *testing.T) {
 	mu.Do(initDevice)
-	binout, err := Transform(input.attestation, "bin")
-	if err != nil {
-		t.Fatalf("Transform(_, \"bin\") = _, %v. Expect nil.", err)
-	}
-	if !bytes.Equal(binout, input.bincerts) {
-		t.Fatalf("Transform(_, \"bin\") = %v, nil. Expect %v.", binout, input.bincerts)
-	}
-	protoout, err := Transform(input.attestation, "proto")
-	if err != nil {
-		t.Fatalf("Transform(_, \"proto\") = _, %v. Expect nil.", err)
-	}
-	if !bytes.Equal(protoout, input.protocerts) {
-		t.Fatalf("Transform(_, \"proto\") = %v, nil. Expect %v.", protoout, input.protocerts)
-	}
-	textout, err := Transform(input.attestation, "textproto")
-	if err != nil {
-		t.Fatalf("Transform(_, \"textproto\") = _, %v. Expect nil.", err)
-	}
-	if !bytes.Equal(textout, input.textcerts) {
-		t.Fatalf("Transform(_, \"textproto\") = %v, nil. Expect %v.", string(textout), string(input.textcerts))
-	}
-
+	t.Run("bin", func(t *testing.T) {
+		binout, err := Transform(input.attestation, "bin")
+		if err != nil {
+			t.Fatalf("Transform(_, \"bin\") = _, %v. Expect nil.", err)
+		}
+		if !bytes.Equal(binout, input.bincerts) {
+			t.Fatalf("Transform(_, \"bin\") = %v, nil. Expect %v.", binout, input.bincerts)
+		}
+	})
+	t.Run("proto", func(t *testing.T) {
+		protoout, err := Transform(input.attestation, "proto")
+		if err != nil {
+			t.Fatalf("Transform(_, \"proto\") = _, %v. Expect nil.", err)
+		}
+		if !bytes.Equal(protoout, input.protocerts) {
+			t.Fatalf("Transform(_, \"proto\") = %v, nil. Expect %v.", protoout, input.protocerts)
+		}
+	})
+	t.Run("textproto", func(t *testing.T) {
+		textout, err := Transform(input.attestation, "textproto")
+		if err != nil {
+			t.Fatalf("Transform(_, \"textproto\") = _, %v. Expect nil.", err)
+		}
+		if !bytes.Equal(textout, input.textcerts) {
+			t.Fatalf("Transform(_, \"textproto\") = %v, nil. Expect %v.", string(textout), string(input.textcerts))
+		}
+	})
 }

@@ -677,13 +677,48 @@ func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 	return SnpProtoReportSignature(report, endorsementKeyCert)
 }
 
+func getProductFromCerts(attestation *spb.Attestation) *spb.SevProduct {
+	certs := abi.CertsFromProto(attestation.CertificateChain)
+	blob, err := certs.GetByGUIDString(abi.ExtraPlatformInfoGUID)
+	if err != nil {
+		return nil
+	}
+	info, err := abi.ParseExtraPlatformInfo(blob)
+	if err != nil {
+		return nil
+	}
+	return abi.SevProductFromCpuid1Eax(info.Cpuid1Eax)
+}
+
+// Returns the product information in the attestation.
+func getProduct(attestation *spb.Attestation) *spb.SevProduct {
+	product := getProductFromCerts(attestation)
+	if product != nil {
+		return product
+	}
+	// TODO(Issue#109): Remove.
+	return attestation.Product
+}
+
+// Updates the attestation representation of the product. This is lossy given the product -> Cpuid1Eax translation.
+func setProduct(attestation *spb.Attestation, product *spb.SevProduct) {
+	blob, _ := (&abi.ExtraPlatformInfo{
+		Size:      abi.ExtraPlatformInfoV0Size,
+		Cpuid1Eax: abi.MaskedCpuid1EaxFromSevProduct(product),
+	}).Marshal()
+	attestation.CertificateChain.Extras[abi.ExtraPlatformInfoGUID] = blob
+	// TODO(Issue#109): Remove
+	attestation.Product = product
+}
+
 // fillInAttestation uses AMD's KDS to populate any empty certificate field in the attestation's
 // certificate chain.
 func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 	var productOverridden bool
-	if attestation.Product == nil {
+	product := getProduct(attestation)
+	if product == nil {
 		if options.Product != nil {
-			attestation.Product = options.Product
+			product = options.Product
 		} else {
 			logger.Warning("Attestation missing product information. KDS certificate may be invalid. Using default Milan-B1")
 			attestation.Product = abi.DefaultSevProduct()
@@ -693,7 +728,7 @@ func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 	if options.DisableCertFetching {
 		return nil
 	}
-	product := kds.ProductString(attestation.Product)
+	productStr := kds.ProductString(product)
 	getter := options.Getter
 	if getter == nil {
 		getter = trust.DefaultHTTPSGetter()
@@ -709,7 +744,7 @@ func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 		attestation.CertificateChain = chain
 	}
 	if len(chain.GetAskCert()) == 0 || len(chain.GetArkCert()) == 0 {
-		askark, err := trust.GetProductChain(product, info.SigningKey, getter)
+		askark, err := trust.GetProductChain(productStr, info.SigningKey, getter)
 		if err != nil {
 			return err
 		}
@@ -724,7 +759,7 @@ func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 	switch info.SigningKey {
 	case abi.VcekReportSigner:
 		if len(chain.GetVcekCert()) == 0 {
-			vcekURL := kds.VCEKCertURL(product, report.GetChipId(), kds.TCBVersion(report.GetReportedTcb()))
+			vcekURL := kds.VCEKCertURL(productStr, report.GetChipId(), kds.TCBVersion(report.GetReportedTcb()))
 			vcek, err := getter.Get(vcekURL)
 			if err != nil {
 				return &trust.AttestationRecreationErr{
@@ -743,7 +778,7 @@ func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 				if err != nil {
 					return err
 				}
-				attestation.Product, err = kds.ParseProductName(exts.ProductName, abi.VcekReportSigner)
+				product, err = kds.ParseProductName(exts.ProductName, abi.VcekReportSigner)
 				if err != nil {
 					return err
 				}
@@ -759,7 +794,7 @@ func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 
 	// Pass along the expected product information for VcekDER. fillInAttestation will ensure
 	// that this is a noop if options.Product began as non-nil.
-	return updateProductExpectation(&options.Product, attestation.Product)
+	return updateProductExpectation(&options.Product, product)
 }
 
 // GetAttestationFromReport uses AMD's Key Distribution Service (KDS) to download the certificate
@@ -768,7 +803,7 @@ func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 func GetAttestationFromReport(report *spb.Report, options *Options) (*spb.Attestation, error) {
 	result := &spb.Attestation{
 		Report:           report,
-		CertificateChain: &spb.CertificateChain{},
+		CertificateChain: &spb.CertificateChain{Extras: map[string][]byte{}},
 	}
 	if err := fillInAttestation(result, options); err != nil {
 		return nil, err
@@ -788,7 +823,8 @@ func GetAttestationFromReport(report *spb.Report, options *Options) (*spb.Attest
 		exts, _ = kds.VlekCertificateExtensions(parse(result.CertificateChain.VlekCert))
 	}
 	if exts != nil {
-		result.Product, _ = kds.ParseProductName(exts.ProductName, info.SigningKey)
+		product, _ := kds.ParseProductName(exts.ProductName, info.SigningKey)
+		setProduct(result, product)
 	}
 	return result, nil
 }

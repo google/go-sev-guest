@@ -110,6 +110,22 @@ const (
 	// a single machine can use both VCEK and VLEK report signing.
 	AsvkGUID = "00000000-0000-0000-0000-000000000000"
 
+	// ExtraPlatformInfoGUID represents more information about the machine collecting an attestation
+	// report than just the report to help interpret the attestation report.
+	ExtraPlatformInfoGUID = "ecae0c0f-9502-43b1-afa2-0ae2e0d565b6"
+	// ExtraPlatformInfoV0Size is the minimum size for an ExtraPlatformInfo blob.
+	ExtraPlatformInfoV0Size = 8
+
+	// CpuidProductMask keeps only the SevProduct-relevant bits from the CPUID(1).EAX result.
+	CpuidProductMask    = 0x0fff0f0f
+	extendedFamilyShift = 20
+	extendedModelShift  = 16
+	familyShift         = 8
+	sevExtendedFamily   = 0xA
+	sevFamily           = 0xF
+	milanExtendedModel  = 0
+	genoaExtendedModel  = 1
+
 	// ExpectedReportVersion is set by the SNP API specification
 	// https://www.amd.com/system/files/TechDocs/56860.pdf
 	ExpectedReportVersion = 2
@@ -874,39 +890,77 @@ func (c *CertTable) Proto() *pb.CertificateChain {
 // See assembly implementations in cpuid_*.s
 var cpuid func(op uint32) (eax, ebx, ecx, edx uint32)
 
-// SevProduct returns the SEV product enum for the CPU that runs this
-// function. Ought to be called from the client, not the verifier.
-func SevProduct() *pb.SevProduct {
-	// CPUID[EAX=1] is the processor info. The only bits we care about are in
-	// the eax result.
-	eax, _, _, _ := cpuid(1)
+// SevProductFromCpuid1Eax returns the SevProduct that is represented by cpuid(1).eax.
+func SevProductFromCpuid1Eax(eax uint32) *pb.SevProduct {
 	// 31:28 reserved
 	// 27:20 Extended Family ID
-	extendedFamily := (eax >> 20) & 0xff
+	extendedFamily := (eax >> extendedFamilyShift) & 0xff
 	// 19:16 Extended Model ID
-	extendedModel := (eax >> 16) & 0xf
+	extendedModel := (eax >> extendedModelShift) & 0xf
 	// 15:14 reserved
 	// 11:8 Family ID
-	family := (eax >> 8) & 0xf
+	family := (eax >> familyShift) & 0xf
 	// 3:0 Stepping
 	stepping := eax & 0xf
 	// Ah, Fh, {0h,1h} values from the KDS specification,
 	// section "Determining the Product Name".
 	var productName pb.SevProduct_SevProductName
 	// Product information specified by processor programming reference publications.
-	if extendedFamily == 0xA && family == 0xF {
+	if extendedFamily == sevExtendedFamily && family == sevFamily {
 		switch extendedModel {
-		case 0:
+		case milanExtendedModel:
 			productName = pb.SevProduct_SEV_PRODUCT_MILAN
-		case 1:
+		case genoaExtendedModel:
 			productName = pb.SevProduct_SEV_PRODUCT_GENOA
 		default:
 			productName = pb.SevProduct_SEV_PRODUCT_UNKNOWN
+			stepping = 0 // Reveal nothing.
 		}
 	}
 	return &pb.SevProduct{
 		Name:            productName,
 		MachineStepping: &wrapperspb.UInt32Value{Value: stepping},
+	}
+}
+
+// MaskedCpuid1EaxFromSevProduct returns the Cpuid1Eax value expected from the given product
+// when masked with CpuidProductMask.
+func MaskedCpuid1EaxFromSevProduct(product *pb.SevProduct) uint32 {
+	var stepping uint32
+	if product.MachineStepping != nil {
+		stepping = product.MachineStepping.Value & 0xf
+	}
+	extendedFamily := uint32(sevExtendedFamily) << extendedFamilyShift
+	family := uint32(sevFamily) << familyShift
+
+	var extendedModel uint32
+	switch product.Name {
+	case pb.SevProduct_SEV_PRODUCT_MILAN:
+		extendedModel = milanExtendedModel
+	case pb.SevProduct_SEV_PRODUCT_GENOA:
+		extendedModel = genoaExtendedModel
+	default:
+		return 0
+	}
+	return extendedFamily | family | stepping | (extendedModel << extendedModelShift)
+}
+
+// SevProduct returns the SEV product enum for the CPU that runs this
+// function. Ought to be called from the client, not the verifier.
+func SevProduct() *pb.SevProduct {
+	// CPUID[EAX=1] is the processor info. The only bits we care about are in
+	// the eax result.
+	eax, _, _, _ := cpuid(1)
+	return SevProductFromCpuid1Eax(eax & CpuidProductMask)
+}
+
+// MakeExtraPlatformInfo returns the representation of platform info needed on top of what an
+// attestation report provides in order to interpret it with the help of the AMD KDS.
+func MakeExtraPlatformInfo() *ExtraPlatformInfo {
+	eax, _, _, _ := cpuid(1)
+	return &ExtraPlatformInfo{
+		Size:      ExtraPlatformInfoV0Size,
+		Cpuid1Eax: eax & CpuidProductMask,
 	}
 }
 
@@ -916,4 +970,65 @@ func DefaultSevProduct() *pb.SevProduct {
 		Name:            pb.SevProduct_SEV_PRODUCT_MILAN,
 		MachineStepping: &wrapperspb.UInt32Value{Value: 1},
 	}
+}
+
+// ExtraPlatformInfo represents environment information needed to interpret an attestation report when
+// the VCEK certificate is not available in the auxblob.
+type ExtraPlatformInfo struct {
+	Size      uint32 // Size doubles as Version, following the Linux ABI expansion methodology.
+	Cpuid1Eax uint32 // Provides product information
+}
+
+// ParseExtraPlatformInfo extracts an ExtraPlatformInfo from a blob if it matches expectations, or
+// errors.
+func ParseExtraPlatformInfo(data []byte) (*ExtraPlatformInfo, error) {
+	if len(data) < ExtraPlatformInfoV0Size {
+		return nil, fmt.Errorf("%d bytes is too small for ExtraPlatformInfoSize. Want >= %d bytes",
+			len(data), ExtraPlatformInfoV0Size)
+	}
+	// Populate V0 data.
+	result := &ExtraPlatformInfo{
+		Size:      binary.LittleEndian.Uint32(data[0:0x04]),
+		Cpuid1Eax: binary.LittleEndian.Uint32(data[0x04:0x08]),
+	}
+	if uint32(len(data)) != result.Size {
+		return nil, fmt.Errorf("actual size %d bytes != reported size %d bytes", len(data), result.Size)
+	}
+	return result, nil
+}
+
+// Marshal returns ExtraPlatformInfo in its ABI format or errors.
+func (i *ExtraPlatformInfo) Marshal() ([]byte, error) {
+	if i.Size != ExtraPlatformInfoV0Size {
+		return nil, fmt.Errorf("unsupported ExtraPlatformInfo size %d bytes", i.Size)
+	}
+	data := make([]byte, ExtraPlatformInfoV0Size)
+	binary.LittleEndian.PutUint32(data[0:0x04], i.Size)
+	binary.LittleEndian.PutUint32(data[0x04:0x08], i.Cpuid1Eax)
+	return data, nil
+}
+
+// ExtendPlatformCertTable is a convenience function for parsing a CertTable, adding the
+// ExtraPlatformInfoGUID entry, and returning the marshaled extended table.
+func ExtendPlatformCertTable(data []byte, info *ExtraPlatformInfo) ([]byte, error) {
+	certs := new(CertTable)
+	if err := certs.Unmarshal(data); err != nil {
+		return nil, err
+	}
+	// A directly constructed info cannot have a marshaling error.
+	extra, err := info.Marshal()
+	if err != nil {
+		return nil, fmt.Errorf("could not marshal ExtraPlatformInfo: %v", err)
+	}
+	certs.Entries = append(certs.Entries, CertTableEntry{
+		GUID:    uuid.Parse(ExtraPlatformInfoGUID),
+		RawCert: extra,
+	})
+	return certs.Marshal(), nil
+}
+
+// ExtendedPlatformCertTable is a convenience function for parsing a CertTable, adding the
+// ExtraPlatformInfoGUID entry, and returning the marshaled extended table.
+func ExtendedPlatformCertTable(data []byte) ([]byte, error) {
+	return ExtendPlatformCertTable(data, MakeExtraPlatformInfo())
 }

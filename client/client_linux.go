@@ -157,7 +157,12 @@ func (p *LinuxIoctlQuoteProvider) GetRawQuoteAtLevel(reportData [64]byte, level 
 	if err != nil {
 		return nil, err
 	}
-	return append(report, certs...), nil
+	// Mix the platform info in with the auxblob.
+	extended, err := abi.ExtendedPlatformCertTable(certs)
+	if err != nil {
+		return nil, fmt.Errorf("invalid certificate table: %v", err)
+	}
+	return append(report, extended...), nil
 }
 
 // GetRawQuote returns byte format attestation plus certificate table via /dev/sev-guest ioctl.
@@ -166,6 +171,8 @@ func (p *LinuxIoctlQuoteProvider) GetRawQuote(reportData [64]byte) ([]uint8, err
 }
 
 // Product returns the current CPU's associated AMD SEV product information.
+//
+// Deprecated: Use ExtraPlatformInfoGUID from the cert table.
 func (*LinuxIoctlQuoteProvider) Product() *spb.SevProduct {
 	return abi.SevProduct()
 }
@@ -193,7 +200,12 @@ func (p *LinuxConfigFsQuoteProvider) GetRawQuoteAtLevel(reportData [64]byte, lev
 	if err != nil {
 		return nil, err
 	}
-	return append(resp.OutBlob, resp.AuxBlob...), nil
+	// Mix the platform info in with the auxblob.
+	extended, err := abi.ExtendedPlatformCertTable(resp.AuxBlob)
+	if err != nil {
+		return nil, fmt.Errorf("invalid certificate table: %v", err)
+	}
+	return append(resp.OutBlob, extended...), nil
 }
 
 // GetRawQuote returns byte format attestation plus certificate table via ConfigFS.
@@ -206,10 +218,17 @@ func (p *LinuxConfigFsQuoteProvider) GetRawQuote(reportData [64]byte) ([]uint8, 
 	if err != nil {
 		return nil, err
 	}
-	return append(resp.OutBlob, resp.AuxBlob...), nil
+	// Mix the platform info in with the auxblob.
+	extended, err := abi.ExtendedPlatformCertTable(resp.AuxBlob)
+	if err != nil {
+		return nil, fmt.Errorf("invalid certificate table: %v", err)
+	}
+	return append(resp.OutBlob, extended...), nil
 }
 
 // Product returns the current CPU's associated AMD SEV product information.
+//
+// Deprecated: Use ExtraPlatformInfoGUID from the cert table.
 func (*LinuxConfigFsQuoteProvider) Product() *spb.SevProduct {
 	return abi.SevProduct()
 }

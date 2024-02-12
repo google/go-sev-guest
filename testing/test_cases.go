@@ -24,6 +24,7 @@ import (
 	labi "github.com/google/go-sev-guest/client/linuxabi"
 	"github.com/google/go-sev-guest/kds"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
+	"github.com/google/logger"
 )
 
 // userZeros defines a ReportData example that is all zeros
@@ -253,12 +254,17 @@ func TcDevice(tcs []TestCase, opts *DeviceOptions) (*Device, error) {
 			EsResult: tc.EsResult,
 		}
 	}
+	product := opts.Product
+	if product == nil {
+		logger.Warning("test missing sevproduct")
+		product = abi.DefaultSevProduct()
+	}
 	return &Device{
 		ReportDataRsp: responses,
 		Certs:         certs,
 		Signer:        signer,
 		Keys:          opts.Keys,
-		SevProduct:    opts.Product,
+		SevProduct:    product,
 	}, nil
 }
 
