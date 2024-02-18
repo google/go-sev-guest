@@ -507,7 +507,15 @@ func TestCertTableOptions(t *testing.T) {
 		PlatformInfo: &abi.SnpPlatformInfo{SMTEnabled: true},
 
 		CertTableOptions: map[string]*CertEntryOption{
-			"00000000-feee-feee-0000-000000000000": {Kind: CertEntryRequire, Validate: func(*spb.Attestation, []byte) error { return nil }},
+			"00000000-feee-feee-0000-000000000000": {
+				Kind: CertEntryRequire,
+				Validate: func(_ *spb.Attestation, blob []byte) error {
+					if blob == nil {
+						return fmt.Errorf("local data is required")
+					}
+					return nil
+				},
+			},
 		},
 	}); err == nil || !strings.Contains(err.Error(), "required") {
 		t.Errorf("SnpAttestation(_, &Options{CertTableOptions: require feee-feee}) = %v, want error to contain %s", err, "required")

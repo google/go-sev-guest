@@ -30,6 +30,7 @@ import (
 	"github.com/google/go-sev-guest/kds"
 	cpb "github.com/google/go-sev-guest/proto/check"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
+	"github.com/google/logger"
 	"go.uber.org/multierr"
 )
 
@@ -633,18 +634,14 @@ func validateKeyKind(report *spb.Attestation) (*x509.Certificate, error) {
 func certTableOptions(attestation *spb.Attestation, options map[string]*CertEntryOption) error {
 	extras := attestation.GetCertificateChain().GetExtras()
 	for key, opt := range options {
-		blob, ok := extras[key]
-		if !ok {
-			if opt.Kind == CertEntryRequire {
-				return fmt.Errorf("required certificate UUID %s not present in certificate table", key)
-			}
-			continue
-		}
 		if opt.Validate == nil {
 			return fmt.Errorf("invalid argument: option for %s missing Validate function", key)
 		}
-		if err := opt.Validate(attestation, blob); err != nil {
-			return err
+		if err := opt.Validate(attestation, extras[key]); err != nil {
+			if opt.Kind == CertEntryRequire {
+				return err
+			}
+			logger.Warningf("Missing cert entry for %s", key)
 		}
 	}
 	return nil
