@@ -184,7 +184,17 @@ func (p *QuoteProvider) GetRawQuote(reportData [64]byte) ([]uint8, error) {
 	if err := abi.SetSignature(r, s, report); err != nil {
 		return nil, fmt.Errorf("test error: could not set signature: %v", err)
 	}
-	return append(report, p.Device.Certs...), nil
+	if p.Device.SevProduct == nil {
+		return nil, fmt.Errorf("mock SevProduct must not be nil")
+	}
+	extended, err := abi.ExtendPlatformCertTable(p.Device.Certs, &abi.ExtraPlatformInfo{
+		Size:      abi.ExtraPlatformInfoV0Size,
+		Cpuid1Eax: abi.MaskedCpuid1EaxFromSevProduct(p.Device.SevProduct),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return append(report, extended...), nil
 }
 
 // GetResponse controls how often (Occurrences) a certain response should be

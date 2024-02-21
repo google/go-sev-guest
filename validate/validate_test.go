@@ -162,7 +162,8 @@ func TestValidateSnpAttestation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	qp0, err := test.TcQuoteProvider(test.TestCases(), &test.DeviceOptions{Now: now, Signer: sign0})
+	qp0, err := test.TcQuoteProvider(test.TestCases(),
+		&test.DeviceOptions{Now: now, Signer: sign0, Product: abi.DefaultSevProduct()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -506,7 +507,7 @@ func TestCertTableOptions(t *testing.T) {
 		PlatformInfo: &abi.SnpPlatformInfo{SMTEnabled: true},
 
 		CertTableOptions: map[string]*CertEntryOption{
-			"00000000-feee-feee-0000-000000000000": {Kind: CertEntryRequire, Validate: func(_ *spb.Attestation, blob []byte) error { return nil }},
+			"00000000-feee-feee-0000-000000000000": {Kind: CertEntryRequire, Validate: func(*spb.Attestation, []byte) error { return nil }},
 		},
 	}); err == nil || !strings.Contains(err.Error(), "required") {
 		t.Errorf("SnpAttestation(_, &Options{CertTableOptions: require feee-feee}) = %v, want error to contain %s", err, "required")
@@ -522,7 +523,7 @@ func TestCertTableOptions(t *testing.T) {
 				}
 				return nil
 			}},
-			"00000000-feee-feee-0000-000000000000": {Kind: CertEntryAllowMissing, Validate: func(_ *spb.Attestation, blob []byte) error { return errors.New("don't call me") }},
+			"00000000-feee-feee-0000-000000000000": {Kind: CertEntryAllowMissing, Validate: func(*spb.Attestation, []byte) error { return errors.New("don't call me") }},
 		},
 	}); err != nil {
 		t.Errorf("SnpAttestation(_, &Options{CertTableOptions: require c0de, allow feee-fee}) = %v, want nil", err)

@@ -161,7 +161,7 @@ func TestVerifyVcekCert(t *testing.T) {
 func TestSnpReportSignature(t *testing.T) {
 	tests := test.TestCases()
 	now := time.Date(2022, time.May, 3, 9, 0, 0, 0, time.UTC)
-	qp, err := test.TcQuoteProvider(tests, &test.DeviceOptions{Now: now})
+	qp, err := test.TcQuoteProvider(tests, &test.DeviceOptions{Now: now, Product: abi.DefaultSevProduct()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,7 +432,7 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 	tests := test.TestCases()
 	qp, goodRoots, badRoots, kds := testclient.GetSevQuoteProvider(tests, &test.DeviceOptions{Now: time.Now()}, t)
 	type reportGetter func(sg.QuoteProvider, [64]byte) (*pb.Attestation, error)
-	reportOnly := func(d sg.QuoteProvider, input [64]byte) (*pb.Attestation, error) {
+	reportOnly := func(qp sg.QuoteProvider, input [64]byte) (*pb.Attestation, error) {
 		attestation, err := sg.GetQuoteProto(qp, input)
 		if err != nil {
 			return nil, err

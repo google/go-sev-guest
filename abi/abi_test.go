@@ -222,7 +222,15 @@ func TestCpuid(t *testing.T) {
 	}
 }
 
-func TestCertTableProto(t *testing.T) {
+type testCertTable struct {
+	table    []byte
+	extraraw []byte
+}
+
+const extraGUID = "00000000-0000-c0de-0000-000000000000"
+
+func testRawCertTable(t testing.TB) *testCertTable {
+	t.Helper()
 	headers := make([]CertTableHeaderEntry, 6) // ARK, ASK, VCEK, VLEK, extra, NULL
 	arkraw := []byte("ark")
 	askraw := []byte("ask")
@@ -245,33 +253,40 @@ func TestCertTableProto(t *testing.T) {
 	headers[3].Offset = headers[2].Offset + headers[2].Length
 	headers[3].Length = uint32(len(vlekraw))
 
-	extraGUID := "00000000-0000-c0de-0000-000000000000"
 	headers[4].GUID = uuid.Parse(extraGUID)
 	headers[4].Offset = headers[3].Offset + headers[3].Length
 	headers[4].Length = uint32(len(extraraw))
 
-	result := make([]byte, headers[4].Offset+headers[4].Length)
+	result := &testCertTable{
+		table:    make([]byte, headers[4].Offset+headers[4].Length),
+		extraraw: extraraw,
+	}
 	for i, cert := range [][]byte{arkraw, askraw, vcekraw, vlekraw, extraraw} {
-		if err := (&headers[i]).Write(result[i*CertTableEntrySize:]); err != nil {
+		if err := (&headers[i]).Write(result.table[i*CertTableEntrySize:]); err != nil {
 			t.Fatalf("could not write header %d: %v", i, err)
 		}
-		copy(result[headers[i].Offset:], cert)
+		copy(result.table[headers[i].Offset:], cert)
 	}
+	return result
+}
+
+func TestCertTableProto(t *testing.T) {
+	result := testRawCertTable(t)
 	c := new(CertTable)
-	if err := c.Unmarshal(result); err != nil {
-		t.Errorf("c.Unmarshal(%s) = %v, want nil", hex.Dump(result), err)
+	if err := c.Unmarshal(result.table); err != nil {
+		t.Errorf("c.Unmarshal(%s) = %v, want nil", hex.Dump(result.table), err)
 	}
 	p := c.Proto()
 	if len(p.Extras) != 1 {
 		t.Fatalf("got cert table Extras length %d, want 1", len(p.Extras))
 	}
 	gotExtra, ok := p.Extras[extraGUID]
-	if !ok || !bytes.Equal(gotExtra, extraraw) {
-		t.Fatalf("Extras[%q] = %v, want %v", extraGUID, gotExtra, extraraw)
+	if !ok || !bytes.Equal(gotExtra, result.extraraw) {
+		t.Fatalf("Extras[%q] = %v, want %v", extraGUID, gotExtra, result.extraraw)
 	}
 	bs := c.Marshal()
-	if !bytes.Equal(bs, result) {
-		t.Errorf("c.Marshal() = %v, want %v", bs, result)
+	if !bytes.Equal(bs, result.table) {
+		t.Errorf("c.Marshal() = %v, want %v", bs, result.table)
 	}
 }
 
@@ -314,10 +329,71 @@ func TestSevProduct(t *testing.T) {
 		},
 	}
 	for _, tc := range tcs {
-		cpuid = func(op uint32) (uint32, uint32, uint32, uint32) { return tc.eax, 0, 0, 0 }
+		cpuid = func(uint32) (uint32, uint32, uint32, uint32) { return tc.eax, 0, 0, 0 }
 		got := SevProduct()
 		if diff := cmp.Diff(got, tc.want, protocmp.Transform()); diff != "" {
 			t.Errorf("SevProduct() = %+v, want %+v. Diff: %s", got, tc.want, diff)
 		}
+		got2 := SevProductFromCpuid1Eax(tc.eax)
+		if diff := cmp.Diff(got2, got, protocmp.Transform()); diff != "" {
+			t.Errorf("SevProductFromCpuid1Eax(0x%x) = %+v, want %+v. Diff: %s", tc.eax, got2, tc.want, diff)
+		}
+	}
+}
+
+func TestExtendedPlatformCertTable(t *testing.T) {
+	oldCpuid := cpuid
+	defer func() { cpuid = oldCpuid }()
+	table := testRawCertTable(t).table
+	oldt := new(CertTable)
+	_ = oldt.Unmarshal(table)
+	pold := oldt.Proto()
+
+	tcs := []struct {
+		name     string
+		pname    spb.SevProduct_SevProductName
+		eax      uint32
+		stepping uint32
+	}{
+		{name: "Genoa-B2 cruft", pname: spb.SevProduct_SEV_PRODUCT_GENOA, eax: 0x00a10f12, stepping: 2},
+		{name: "Milan-B1 cruft", pname: spb.SevProduct_SEV_PRODUCT_MILAN, eax: 0x00a00f11, stepping: 1},
+		{name: "Milan-B0", pname: spb.SevProduct_SEV_PRODUCT_MILAN, eax: 0x00a00f00, stepping: 0},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			cpuid = func(uint32) (uint32, uint32, uint32, uint32) { return tc.eax, 0, 0, 0 }
+			nextTable, err := ExtendedPlatformCertTable(table)
+			if err != nil {
+				t.Fatalf("ExtendedPlatformCertTable(%v) =_, %v. Want nil", table, err)
+			}
+
+			newt := new(CertTable)
+			if err := newt.Unmarshal(nextTable); err != nil {
+				t.Fatalf("ExtendedPlatformCertTable(_) _ %v, which could not be unmarshaled: %v", nextTable, err)
+			}
+			pnew := newt.Proto()
+			if len(pnew.Extras) != len(pold.Extras)+1 {
+				t.Fatalf("ExtendedPlatformCertTable(_) table extras size is %d, want %d", len(pnew.Extras), len(pold.Extras)+1)
+			}
+			blob, ok := pnew.Extras[ExtraPlatformInfoGUID]
+			if !ok {
+				t.Fatalf("ExtendedPlatfromCertTable(_) table %v extras missing ExtraPlatformInfoGUID", pnew)
+			}
+			info, err := ParseExtraPlatformInfo(blob)
+			if err != nil {
+				t.Fatalf("ParseExtraPlatformInfo(%v) = _, %v. Want nil", blob, err)
+			}
+			if info.Size != ExtraPlatformInfoV0Size {
+				t.Errorf("ExtraPltaformInfo Size %d is not %d", info.Size, ExtraPlatformInfoV0Size)
+			}
+			if info.Cpuid1Eax != tc.eax&CpuidProductMask {
+				t.Errorf("ExtraPlatformInfo Cpuid1Eax 0x%x is not 0x%x", info.Cpuid1Eax, tc.eax&CpuidProductMask)
+			}
+			got := SevProductFromCpuid1Eax(info.Cpuid1Eax)
+			want := &spb.SevProduct{Name: tc.pname, MachineStepping: &wrapperspb.UInt32Value{Value: tc.stepping}}
+			if diff := cmp.Diff(got, want, protocmp.Transform()); diff != "" {
+				t.Errorf("ExtraPlatformInfo Cpuid1Eax product %v is not %v: %s", got, want, diff)
+			}
+		})
 	}
 }

@@ -132,7 +132,7 @@ func setField(p *checkpb.Policy, name string, value any) {
 }
 
 func bytesSetter(name string) setterFn {
-	return func(p *checkpb.Policy, value string, t *testing.T) bool {
+	return func(p *checkpb.Policy, value string, _ *testing.T) bool {
 		v, err := hex.DecodeString(value)
 		if err != nil {
 			return true
@@ -143,14 +143,14 @@ func bytesSetter(name string) setterFn {
 }
 
 func stringSetter(name string) setterFn {
-	return func(p *checkpb.Policy, value string, t *testing.T) bool {
+	return func(p *checkpb.Policy, value string, _ *testing.T) bool {
 		setField(p, name, value)
 		return false
 	}
 }
 
 func boolSetter(name string) setterFn {
-	return func(p *checkpb.Policy, value string, t *testing.T) bool {
+	return func(p *checkpb.Policy, value string, _ *testing.T) bool {
 		switch value {
 		case "true":
 			setField(p, name, true)
@@ -165,7 +165,7 @@ func boolSetter(name string) setterFn {
 }
 
 func uint64setter(name string) setterFn {
-	return func(p *checkpb.Policy, value string, t *testing.T) bool {
+	return func(p *checkpb.Policy, value string, _ *testing.T) bool {
 		u, err := strconv.ParseUint(value, 10, 64)
 		if err != nil {
 			return true
@@ -176,7 +176,7 @@ func uint64setter(name string) setterFn {
 }
 
 func uint32setter(name string) setterFn {
-	return func(p *checkpb.Policy, value string, t *testing.T) bool {
+	return func(p *checkpb.Policy, value string, _ *testing.T) bool {
 		u, err := strconv.ParseUint(value, 10, 32)
 		if err != nil {
 			return true
@@ -187,7 +187,7 @@ func uint32setter(name string) setterFn {
 }
 
 func uint32valueSetter(name string) setterFn {
-	return func(p *checkpb.Policy, value string, t *testing.T) bool {
+	return func(p *checkpb.Policy, value string, _ *testing.T) bool {
 		u, err := strconv.ParseUint(value, 10, 32)
 		if err != nil {
 			return true
@@ -198,7 +198,7 @@ func uint32valueSetter(name string) setterFn {
 }
 
 func uint64valueSetter(name string) setterFn {
-	return func(p *checkpb.Policy, value string, t *testing.T) bool {
+	return func(p *checkpb.Policy, value string, _ *testing.T) bool {
 		u, err := strconv.ParseUint(value, 10, 64)
 		if err != nil {
 			return true

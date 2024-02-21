@@ -47,6 +47,8 @@ type LeveledQuoteProvider interface {
 	// GetRawQuote returns a raw report with the given privilege level.
 	GetRawQuoteAtLevel(reportData [64]byte, vmpl uint) ([]uint8, error)
 	// Product returns AMD SEV-related CPU information of the calling CPU.
+	//
+	// Deprecated: Use abi.ExtraPlatformInfoGUID in raw quote certificate table.
 	Product() *pb.SevProduct
 }
 
@@ -57,6 +59,8 @@ type QuoteProvider interface {
 	// GetRawQuote returns a raw report with the default privilege level.
 	GetRawQuote(reportData [64]byte) ([]uint8, error)
 	// Product returns AMD SEV-related CPU information of the calling CPU.
+	//
+	// Deprecated: Use abi.ExtraPlatformInfoGUID in the raw quote certificate table.
 	Product() *pb.SevProduct
 }
 
@@ -203,6 +207,7 @@ func GetQuoteProto(qp QuoteProvider, reportData [64]byte) (*pb.Attestation, erro
 	if err != nil {
 		return nil, err
 	}
+	// TODO(Issue#109): Remove when Product is removed.
 	attestation.Product = qp.Product()
 	return attestation, nil
 }
