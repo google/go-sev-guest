@@ -270,6 +270,27 @@ func testRawCertTable(t testing.TB) *testCertTable {
 	return result
 }
 
+func testRawCertTableNoVcek(t testing.TB) *testCertTable {
+	t.Helper()
+	headers := make([]CertTableHeaderEntry, 2) // extra, NULL
+	extraraw := []byte("extra")
+
+	headers[0].GUID = uuid.Parse(extraGUID)
+	headers[0].Offset = uint32(len(headers) * CertTableEntrySize)
+	headers[0].Length = uint32(len(extraraw))
+	result := &testCertTable{
+		table:    make([]byte, headers[0].Offset+headers[0].Length),
+		extraraw: extraraw,
+	}
+	for i, cert := range [][]byte{extraraw} {
+		if err := (&headers[i]).Write(result.table[i*CertTableEntrySize:]); err != nil {
+			t.Fatalf("could not write header %d: %v", i, err)
+		}
+		copy(result.table[headers[i].Offset:], cert)
+	}
+	return result
+}
+
 func TestCertTableProto(t *testing.T) {
 	result := testRawCertTable(t)
 	c := new(CertTable)
@@ -341,10 +362,32 @@ func TestSevProduct(t *testing.T) {
 	}
 }
 
+func TestExtendedPlatformCertTableConservation(t *testing.T) {
+	// If VCEK is in the cert table, then the product info isn't added to the cert table.
+	table := testRawCertTable(t).table
+	oldt := new(CertTable)
+	_ = oldt.Unmarshal(table)
+	pold := oldt.Proto()
+
+	nextTable, err := ExtendedPlatformCertTable(table)
+	if err != nil {
+		t.Fatalf("ExtendedPlatformCertTable(%v) =_, %v. Want nil", table, err)
+	}
+
+	newt := new(CertTable)
+	if err := newt.Unmarshal(nextTable); err != nil {
+		t.Fatalf("ExtendedPlatformCertTable(_) _ %v, which could not be unmarshaled: %v", nextTable, err)
+	}
+	pnew := newt.Proto()
+	if len(pnew.Extras) != len(pold.Extras) {
+		t.Fatalf("ExtendedPlatformCertTable(_) table extras size is %d, want %d", len(pnew.Extras), len(pold.Extras))
+	}
+}
+
 func TestExtendedPlatformCertTable(t *testing.T) {
 	oldCpuid := cpuid
 	defer func() { cpuid = oldCpuid }()
-	table := testRawCertTable(t).table
+	table := testRawCertTableNoVcek(t).table
 	oldt := new(CertTable)
 	_ = oldt.Unmarshal(table)
 	pold := oldt.Proto()

@@ -1015,6 +1015,11 @@ func ExtendPlatformCertTable(data []byte, info *ExtraPlatformInfo) ([]byte, erro
 	if err := certs.Unmarshal(data); err != nil {
 		return nil, err
 	}
+	// Don't extend the entries with unnecessary information about the platform
+	// since the VCEK certificate already contains it in an extension.
+	if _, err := certs.GetByGUIDString(VcekGUID); err == nil {
+		return data, nil
+	}
 	// A directly constructed info cannot have a marshaling error.
 	extra, err := info.Marshal()
 	if err != nil {
