@@ -23,12 +23,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-sev-guest/abi"
 	"github.com/google/go-sev-guest/client"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
 	test "github.com/google/go-sev-guest/testing"
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/testing/protocmp"
 )
 
 var qp client.QuoteProvider
@@ -170,6 +172,35 @@ func TestReadAttestation(t *testing.T) {
 	}
 }
 
+func protoAttestationDiff(left, right []byte) string {
+	leftp := &spb.Attestation{}
+	rightp := &spb.Attestation{}
+	if err := proto.Unmarshal(left, leftp); err != nil {
+		return fmt.Sprintf("left parse: %v", err)
+	}
+	if err := proto.Unmarshal(right, rightp); err != nil {
+		return fmt.Sprintf("right parse: %v", err)
+	}
+	return cmp.Diff(leftp, rightp, protocmp.Transform())
+}
+
+func binAttestationDiff(left, right []byte) string {
+	if diff := cmp.Diff(left[:abi.ReportSize], right[:abi.ReportSize]); diff != "" {
+		return fmt.Sprintf("Report diff: %s", diff)
+	}
+	leftcerts := left[abi.ReportSize:]
+	rightcerts := right[abi.ReportSize:]
+	leftt := new(abi.CertTable)
+	rightt := new(abi.CertTable)
+	if err := leftt.Unmarshal(leftcerts); err != nil {
+		return "bad left"
+	}
+	if err := rightt.Unmarshal(rightcerts); err != nil {
+		return "bad right"
+	}
+	return cmp.Diff(leftt.Proto(), rightt.Proto(), protocmp.Transform())
+}
+
 func TestTransform(t *testing.T) {
 	mu.Do(initDevice)
 	t.Run("bin", func(t *testing.T) {
@@ -177,8 +208,8 @@ func TestTransform(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Transform(_, \"bin\") = _, %v. Expect nil.", err)
 		}
-		if !bytes.Equal(binout, input.bincerts) {
-			t.Fatalf("Transform(_, \"bin\") = %v, nil. Expect %v.", binout, input.bincerts)
+		if diff := binAttestationDiff(binout, input.bincerts); diff != "" {
+			t.Fatalf("Transform(_, \"bin\") = %v, nil. Expect %v.\nDiff: %s", binout, input.bincerts, diff)
 		}
 	})
 	t.Run("proto", func(t *testing.T) {
@@ -186,8 +217,8 @@ func TestTransform(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Transform(_, \"proto\") = _, %v. Expect nil.", err)
 		}
-		if !bytes.Equal(protoout, input.protocerts) {
-			t.Fatalf("Transform(_, \"proto\") = %v, nil. Expect %v.", protoout, input.protocerts)
+		if diff := protoAttestationDiff(protoout, input.protocerts); diff != "" {
+			t.Fatalf("Transform(_, \"proto\") = %v, nil. Expect %v.\nDiff: %s", protoout, input.protocerts, diff)
 		}
 	})
 	t.Run("textproto", func(t *testing.T) {
