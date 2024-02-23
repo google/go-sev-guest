@@ -59,7 +59,7 @@ message Policy {
 // certificates to use for verifying attestation report signatures.
 message RootOfTrust {
   // The expected AMD product the attestation was collected from. Default "Milan".
-  string product = 1;
+  string product = 1 [deprecated = true];
 
   // Paths to CA bundles for the AMD product.
   // Must be in PEM format, AS[V]K, then ARK certificates.
@@ -76,6 +76,9 @@ message RootOfTrust {
 
   // If true, then check is not permitted to download necessary files for verification.
   bool disallow_network = 5;
+
+  // The expected AMD product line the attestation was collected from. Default "Milan".
+  string product_line = 6;
 }
 
 // Config is the overall message input for the check tool. This provides all

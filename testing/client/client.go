@@ -45,7 +45,8 @@ func GetSevGuest(tcs []test.TestCase, opts *test.DeviceOptions, tb testing.TB) (
 		goodSnpRoot := map[string][]*trust.AMDRootCerts{
 			"Milan": {
 				{
-					Product: "Milan",
+					Product:     "Milan", // TODO(Issue#114): Remove
+					ProductLine: "Milan",
 					ProductCerts: &trust.ProductCerts{
 						Ask:  sevTestDevice.Signer.Ask,
 						Ark:  sevTestDevice.Signer.Ark,
@@ -57,7 +58,8 @@ func GetSevGuest(tcs []test.TestCase, opts *test.DeviceOptions, tb testing.TB) (
 		badSnpRoot := map[string][]*trust.AMDRootCerts{
 			"Milan": {
 				{
-					Product: "Milan",
+					Product:     "Milan", // TODO(Issue#114): Remove
+					ProductLine: "Milan",
 					ProductCerts: &trust.ProductCerts{
 						// No ASK, oops.
 						Ask:  sevTestDevice.Signer.Ark,
@@ -81,15 +83,16 @@ func GetSevGuest(tcs []test.TestCase, opts *test.DeviceOptions, tb testing.TB) (
 	kdsImpl := test.GetKDS(tb)
 
 	badSnpRoot := make(map[string][]*trust.AMDRootCerts)
-	for product, rootCerts := range trust.DefaultRootCerts {
+	for productLine, rootCerts := range trust.DefaultRootCerts {
 		// Supplement the defaults with the missing x509 certificates.
-		pc, err := trust.GetProductChain(product, abi.VcekReportSigner, kdsImpl)
+		pc, err := trust.GetProductChain(productLine, abi.VcekReportSigner, kdsImpl)
 		if err != nil {
-			tb.Fatalf("failed to get product chain for %q: %v", product, err)
+			tb.Fatalf("failed to get product chain for %q: %v", productLine, err)
 		}
 		// By removing the ASK intermediate, we ensure that the attestation will never verify.
-		badSnpRoot[product] = []*trust.AMDRootCerts{{
-			Product: product,
+		badSnpRoot[productLine] = []*trust.AMDRootCerts{{
+			Product:     productLine, // TODO(Issue#114): Remove
+			ProductLine: productLine,
 			ProductCerts: &trust.ProductCerts{
 				Ark:  pc.Ark,
 				Ask:  pc.Ark,
@@ -118,7 +121,8 @@ func GetSevQuoteProvider(tcs []test.TestCase, opts *test.DeviceOptions, tb testi
 		goodSnpRoot := map[string][]*trust.AMDRootCerts{
 			"Milan": {
 				{
-					Product: "Milan",
+					Product:     "Milan", // TODO(Issue#114): Remove
+					ProductLine: "Milan",
 					ProductCerts: &trust.ProductCerts{
 						Ask:  sevQp.Device.Signer.Ask,
 						Ark:  sevQp.Device.Signer.Ark,
@@ -130,7 +134,8 @@ func GetSevQuoteProvider(tcs []test.TestCase, opts *test.DeviceOptions, tb testi
 		badSnpRoot := map[string][]*trust.AMDRootCerts{
 			"Milan": {
 				{
-					Product: "Milan",
+					Product:     "Milan", // TODO(Issue#114): Remove
+					ProductLine: "Milan",
 					ProductCerts: &trust.ProductCerts{
 						// No ASK, oops.
 						Ask:  sevQp.Device.Signer.Ark,
@@ -154,15 +159,16 @@ func GetSevQuoteProvider(tcs []test.TestCase, opts *test.DeviceOptions, tb testi
 	kdsImpl := test.GetKDS(tb)
 
 	badSnpRoot := make(map[string][]*trust.AMDRootCerts)
-	for product, rootCerts := range trust.DefaultRootCerts {
+	for productLine, rootCerts := range trust.DefaultRootCerts {
 		// Supplement the defaults with the missing x509 certificates.
-		pc, err := trust.GetProductChain(product, abi.VcekReportSigner, kdsImpl)
+		pc, err := trust.GetProductChain(productLine, abi.VcekReportSigner, kdsImpl)
 		if err != nil {
-			tb.Fatalf("failed to get product chain for %q: %v", product, err)
+			tb.Fatalf("failed to get product chain for %q: %v", productLine, err)
 		}
 		// By removing the ASK intermediate, we ensure that the attestation will never verify.
-		badSnpRoot[product] = []*trust.AMDRootCerts{{
-			Product: product,
+		badSnpRoot[productLine] = []*trust.AMDRootCerts{{
+			Product:     productLine, // TODO(Issue#114): Remove
+			ProductLine: productLine,
 			ProductCerts: &trust.ProductCerts{
 				Ark:  pc.Ark,
 				Ask:  pc.Ark,

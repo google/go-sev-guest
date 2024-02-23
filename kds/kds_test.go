@@ -91,8 +91,8 @@ func TestParseProductBaseURL(t *testing.T) {
 				if diff := cmp.Diff(parsed.simpleURL, tc.wantURL); diff != "" {
 					t.Errorf("parseBaseProductURL(%q) returned unexpected diff (-want +got):\n%s", tc.url, diff)
 				}
-				if parsed.product != tc.wantProduct {
-					t.Errorf("parseBaseProductURL(%q) = %q, _, _ want %q", tc.url, parsed.product, tc.wantProduct)
+				if parsed.productLine != tc.wantProduct {
+					t.Errorf("parseBaseProductURL(%q) = %q, _, _ want %q", tc.url, parsed.productLine, tc.wantProduct)
 				}
 			}
 		})
@@ -140,7 +140,7 @@ func TestParseVCEKCertURL(t *testing.T) {
 		{
 			name: "happy path",
 			url:  VCEKCertURL("Milan", hwid, TCBVersion(0)),
-			want: VCEKCert{Product: "Milan", HWID: hwid, TCB: 0},
+			want: VCEKCert{Product: "Milan", ProductLine: "Milan", HWID: hwid, TCB: 0},
 		},
 		{
 			name:    "bad query format",

@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"testing"
 
 	// Insecure randomness for faster testing.
 	"math/rand"
@@ -34,6 +35,7 @@ import (
 
 	"github.com/google/go-sev-guest/abi"
 	"github.com/google/go-sev-guest/kds"
+	spb "github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/pborman/uuid"
 )
 
@@ -49,10 +51,18 @@ const (
 	askRsaBits          = 4096
 )
 
-// ProductName decides the fake certificates' product name. It must be parsable by
-// kds.ParseProductName. The flag may also be used to direct the hardware verification options.
-var ProductName = flag.String("product_name", "",
-	"The product name for the SEV-SNP machine tested on.")
+var (
+	// Product decides the expected product for attestation report validation. If empty, inferred
+	// to be the ProductLine of --product_name.
+	Product = flag.String("product", "",
+		"The product string for the SEV-SNP machine tested on. The stepping version is ignored.")
+
+	// ProductName decides the fake certificates' product name. It must be parsable by
+	// kds.ParseProductName. The flag may also be used to direct the hardware verification options.
+	// If empty, defined to be kds.ProductName(abi.DefaultSevProduct()).
+	ProductName = flag.String("product_name", "",
+		"The product name for the SEV-SNP machine tested on. Overrides --product.")
+)
 
 // GetProductName returns the --product_name flag value or a valid Default.
 func GetProductName() string {
@@ -60,6 +70,34 @@ func GetProductName() string {
 		return kds.ProductName(abi.DefaultSevProduct())
 	}
 	return *ProductName
+}
+
+// GetProductLine returns the actual or inferred value of --product.
+func GetProductLine() string {
+	if *Product == "" {
+		return kds.ProductLineOfProductName(GetProductName())
+	}
+	return *Product
+}
+
+// GetProduct returns the expected product for validation.
+func GetProduct(t testing.TB) *spb.SevProduct {
+	if *Product == "ignore" {
+		return nil
+	}
+	// If a specific product name is not given, then use the product line.
+	if *ProductName == "" {
+		product, err := kds.ParseProductLine(GetProductLine())
+		if err != nil {
+			t.Fatalf("ParseProductLine(%s) = _, %v errored unexpectedly", GetProductLine(), err)
+		}
+		return product
+	}
+	product, err := kds.ParseProductName(*ProductName, abi.VcekReportSigner)
+	if err != nil {
+		t.Fatalf("ParseProductName(%s) = _, %v errored unexpectedly", *ProductName, err)
+	}
+	return product
 }
 
 // AmdSigner encapsulates a key and certificate chain following the format of AMD-SP's VCEK for
@@ -136,7 +174,7 @@ type CertOverride struct {
 type AmdSignerBuilder struct {
 	// Keys contains the private keys that will get a certificate chain structure.
 	Keys             *AmdKeys
-	Product          string
+	ProductName      string
 	ArkCreationTime  time.Time
 	AskCreationTime  time.Time
 	AsvkCreationTime time.Time
@@ -158,6 +196,17 @@ type AmdSignerBuilder struct {
 	Vlek *x509.Certificate
 }
 
+func (b *AmdSignerBuilder) productName() string {
+	if b.ProductName == "" {
+		return GetProductName()
+	}
+	return b.ProductName
+}
+
+func (b *AmdSignerBuilder) productLine() string {
+	return kds.ProductLineOfProductName(b.productName())
+}
+
 func amdPkixName(commonName string, serialNumber string) pkix.Name {
 	return pkix.Name{
 		Organization:       []string{"Advanced Micro Devices"},
@@ -170,31 +219,31 @@ func amdPkixName(commonName string, serialNumber string) pkix.Name {
 	}
 }
 
-func arkName(product, serialNumber string) pkix.Name {
-	return amdPkixName(fmt.Sprintf("ARK-%s", product), serialNumber)
+func arkName(productLine, serialNumber string) pkix.Name {
+	return amdPkixName(fmt.Sprintf("ARK-%s", productLine), serialNumber)
 }
 
-func askName(product, serialNumber string) pkix.Name {
-	return amdPkixName(fmt.Sprintf("SEV-%s", product), serialNumber)
+func askName(productLine, serialNumber string) pkix.Name {
+	return amdPkixName(fmt.Sprintf("SEV-%s", productLine), serialNumber)
 }
 
-func asvkName(product, serialNumber string) pkix.Name {
-	return amdPkixName(fmt.Sprintf("SEV-VLEK-%s", product), serialNumber)
+func asvkName(productLine, serialNumber string) pkix.Name {
+	return amdPkixName(fmt.Sprintf("SEV-VLEK-%s", productLine), serialNumber)
 }
 
 func (b *AmdSignerBuilder) unsignedRoot(arkName pkix.Name, key abi.ReportSigner, subjectSerial *big.Int, creationTime time.Time, expirationYears int) *x509.Certificate {
 	var subject pkix.Name
 	issuer := arkName
 	cert := &x509.Certificate{}
-	crl := kds.CrlLinkByKey(b.Product, key)
+	crl := kds.CrlLinkByKey(b.productLine(), key)
 	sn := fmt.Sprintf("%x", subjectSerial)
 	switch key {
 	case abi.VcekReportSigner:
-		subject = askName(b.Product, sn)
+		subject = askName(b.productLine(), sn)
 	case abi.VlekReportSigner:
-		subject = asvkName(b.Product, sn)
+		subject = asvkName(b.productLine(), sn)
 	case abi.NoneReportSigner:
-		crl = kds.CrlLinkByKey(b.Product, abi.VcekReportSigner)
+		crl = kds.CrlLinkByKey(b.productLine(), abi.VcekReportSigner)
 		subject = arkName
 	}
 	cert.NotBefore = creationTime
@@ -307,7 +356,7 @@ func DefaultAmdKeys() (*AmdKeys, error) {
 
 func (b *AmdSignerBuilder) certifyArk() error {
 	sn := big.NewInt(0xc0dec0de)
-	name := arkName(b.Product, fmt.Sprintf("%x", sn))
+	name := arkName(b.productLine(), fmt.Sprintf("%x", sn))
 	cert := b.unsignedRoot(name, abi.NoneReportSigner, sn, b.ArkCreationTime, arkExpirationYears)
 	cert.KeyUsage = x509.KeyUsageCertSign | x509.KeyUsageCRLSign
 
@@ -364,15 +413,15 @@ func (b *AmdSignerBuilder) certifyAsvk() error {
 
 // CustomExtensions returns an array of extensions following the KDS specification
 // for the given values.
-func CustomExtensions(tcb kds.TCBParts, hwid []byte, cspid string) []pkix.Extension {
-	var productName []byte
+func CustomExtensions(tcb kds.TCBParts, hwid []byte, cspid, productName string) []pkix.Extension {
+	var productNameAsn1 []byte
 	asn1Zero, _ := asn1.Marshal(0)
 	if hwid != nil {
-		productName, _ = asn1.MarshalWithParams(GetProductName(), "ia5")
+		productNameAsn1, _ = asn1.MarshalWithParams(productName, "ia5")
 	} else {
-		parts := strings.SplitN(GetProductName(), "-", 2)
+		parts := strings.SplitN(productName, "-", 2)
 		// VLEK doesn't have a -stepping component to its productName.
-		productName, _ = asn1.MarshalWithParams(parts[0], "ia5")
+		productNameAsn1, _ = asn1.MarshalWithParams(parts[0], "ia5")
 	}
 	blSpl, _ := asn1.Marshal(int(tcb.BlSpl))
 	teeSpl, _ := asn1.Marshal(int(tcb.TeeSpl))
@@ -384,7 +433,7 @@ func CustomExtensions(tcb kds.TCBParts, hwid []byte, cspid string) []pkix.Extens
 	ucodeSpl, _ := asn1.Marshal(int(tcb.UcodeSpl))
 	exts := []pkix.Extension{
 		{Id: kds.OidStructVersion, Value: asn1Zero},
-		{Id: kds.OidProductName1, Value: productName},
+		{Id: kds.OidProductName1, Value: productNameAsn1},
 		{Id: kds.OidBlSpl, Value: blSpl},
 		{Id: kds.OidTeeSpl, Value: teeSpl},
 		{Id: kds.OidSnpSpl, Value: snpSpl},
@@ -418,12 +467,12 @@ func (b *AmdSignerBuilder) endorsementKeyPrecert(creationTime time.Time, hwid []
 		Version:            3,
 		SignatureAlgorithm: x509.SHA384WithRSAPSS,
 		PublicKeyAlgorithm: x509.ECDSA,
-		Issuer:             amdPkixName(fmt.Sprintf("SEV-%s", b.Product), ica.Subject.SerialNumber),
+		Issuer:             amdPkixName(fmt.Sprintf("SEV-%s", b.productLine()), ica.Subject.SerialNumber),
 		Subject:            subject,
 		SerialNumber:       serialNumber,
 		NotBefore:          time.Time{},
 		NotAfter:           creationTime.Add(vcekExpirationYears * 365 * 24 * time.Hour),
-		ExtraExtensions:    CustomExtensions(kds.TCBParts{}, hwid, b.CSPID),
+		ExtraExtensions:    CustomExtensions(kds.TCBParts{}, hwid, b.CSPID, b.productName()),
 	}
 }
 
@@ -455,9 +504,6 @@ func (b *AmdSignerBuilder) certifyVlek() error {
 
 // TestOnlyCertChain creates a test-only certificate chain from the keys and configurables in b.
 func (b *AmdSignerBuilder) TestOnlyCertChain() (*AmdSigner, error) {
-	if b.Product == "" {
-		b.Product = kds.DefaultProductString()
-	}
 	if b.Keys == nil {
 		keys, err := DefaultAmdKeys()
 		if err != nil {
@@ -503,7 +549,7 @@ func DefaultTestOnlyCertChain(productName string, creationTime time.Time) (*AmdS
 	}
 	b := &AmdSignerBuilder{
 		Keys:             keys,
-		Product:          productName,
+		ProductName:      productName,
 		CSPID:            "go-sev-guest",
 		ArkCreationTime:  creationTime,
 		AskCreationTime:  creationTime,

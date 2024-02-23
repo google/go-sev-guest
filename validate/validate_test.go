@@ -132,13 +132,14 @@ func TestValidateSnpAttestation(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	sign0, err := test.DefaultTestOnlyCertChain(kds.DefaultProductString(), now)
+	productName := kds.ProductName(abi.DefaultSevProduct())
+	sign0, err := test.DefaultTestOnlyCertChain(productName, now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	sb := &test.AmdSignerBuilder{
 		Keys:             keys,
-		Product:          kds.DefaultProductString(),
+		ProductName:      productName,
 		ArkCreationTime:  now,
 		AskCreationTime:  now,
 		VcekCreationTime: now,
@@ -148,6 +149,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 				goodtcb,
 				chipID[:],
 				"",
+				productName,
 			),
 		},
 		VlekCustom: test.CertOverride{
@@ -155,6 +157,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 				goodtcb,
 				nil,
 				"Cloud Service Provider",
+				productName,
 			),
 		},
 	}
@@ -485,7 +488,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 }
 
 func TestCertTableOptions(t *testing.T) {
-	sign0, err := test.DefaultTestOnlyCertChain(kds.DefaultProductString(), time.Now())
+	sign0, err := test.DefaultTestOnlyCertChain(test.GetProductName(), time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}

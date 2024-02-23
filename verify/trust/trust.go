@@ -47,8 +47,8 @@ var (
 	askArkMilanVcekBytes []byte
 
 	// A cache of product certificate KDS results per product.
-	prodCacheMu      sync.Mutex
-	productCertCache map[string]*ProductCerts
+	prodCacheMu          sync.Mutex
+	productLineCertCache map[string]*ProductCerts
 )
 
 // Communication with AMD suggests repeat requests of the same arguments will
@@ -64,8 +64,12 @@ type ProductCerts struct {
 
 // AMDRootCerts encapsulates the certificates that represent root of trust in AMD.
 type AMDRootCerts struct {
-	// Product is the expected CPU product name, e.g., Milan, Turin, Genoa.
+	// Product is the expected CPU product line, e.g., Milan, Turin, Genoa.
+	//
+	// Deprecated: Use ProductLine.
 	Product string
+	// Product is the expected CPU product line, e.g., Milan, Turin, Genoa.
+	ProductLine string
 	// ProductCerts contains the root key and signing key devoted to a given product line.
 	ProductCerts *ProductCerts
 	// AskSev is the AMD certificate representation of the AMD signing key that certifies
@@ -79,6 +83,22 @@ type AMDRootCerts struct {
 	// CRL is the certificate revocation list for this AMD product. Populated once, only when a
 	// revocation is checked.
 	CRL *x509.RevocationList
+}
+
+// GetProductLine returns the product line the certificate chain is associated with.
+func (r *AMDRootCerts) GetProductLine() string {
+	if r.ProductLine != "" {
+		return r.ProductLine
+	}
+	return r.Product
+}
+
+// AMDRootCertsProduct returns a new *AMDRootCerts for a given product line.
+func AMDRootCertsProduct(productLine string) *AMDRootCerts {
+	return &AMDRootCerts{
+		Product:     productLine, // TODO(Issue#114): Remove,
+		ProductLine: productLine,
+	}
 }
 
 // HTTPSGetter represents the ability to fetch data from the internet from an HTTP URL.
@@ -261,21 +281,21 @@ func (r *ProductCerts) X509Options(now time.Time, key abi.ReportSigner) *x509.Ve
 // multiple roots of trust.
 func ClearProductCertCache() {
 	prodCacheMu.Lock()
-	productCertCache = nil
+	productLineCertCache = nil
 	prodCacheMu.Unlock()
 }
 
-// GetProductChain returns the ASK and ARK certificates of the given product, either from getter
+// GetProductChain returns the ASK and ARK certificates of the given product line, either from getter
 // or from a cache of the results from the last successful call.
-func GetProductChain(product string, s abi.ReportSigner, getter HTTPSGetter) (*ProductCerts, error) {
-	if productCertCache == nil {
+func GetProductChain(productLine string, s abi.ReportSigner, getter HTTPSGetter) (*ProductCerts, error) {
+	if productLineCertCache == nil {
 		prodCacheMu.Lock()
-		productCertCache = make(map[string]*ProductCerts)
+		productLineCertCache = make(map[string]*ProductCerts)
 		prodCacheMu.Unlock()
 	}
-	result, ok := productCertCache[product]
+	result, ok := productLineCertCache[productLine]
 	if !ok {
-		askark, err := getter.Get(kds.ProductCertChainURL(s, product))
+		askark, err := getter.Get(kds.ProductCertChainURL(s, productLine))
 		if err != nil {
 			return nil, &AttestationRecreationErr{
 				Msg: fmt.Sprintf("could not download ASK and ARK certificates: %v", err),
@@ -297,7 +317,7 @@ func GetProductChain(product string, s abi.ReportSigner, getter HTTPSGetter) (*P
 		}
 		result = &ProductCerts{Ask: askCert, Ark: arkCert}
 		prodCacheMu.Lock()
-		productCertCache[product] = result
+		productLineCertCache[productLine] = result
 		prodCacheMu.Unlock()
 	}
 	return result, nil

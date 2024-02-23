@@ -119,7 +119,7 @@ func validateAmdLocation(name pkix.Name, role string) error {
 	return checkSingletonList(name.OrganizationalUnit, "organizational unit", "organizational uints", "Engineering")
 }
 
-func validateRootX509(product string, x *x509.Certificate, version int, role, cn string) error {
+func validateRootX509(productLine string, x *x509.Certificate, version int, role, cn string) error {
 	// Additionally check that the X.509 cert's public key matches the SEV format cert.
 	if x == nil {
 		return fmt.Errorf("no X.509 certificate for %s", role)
@@ -137,7 +137,7 @@ func validateRootX509(product string, x *x509.Certificate, version int, role, cn
 	if cn != "" && x.Subject.CommonName != cn {
 		return fmt.Errorf("%s common-name is %s. Expected %s", role, x.Subject.CommonName, cn)
 	}
-	return validateCRLlink(x, product, role)
+	return validateCRLlink(x, productLine, role)
 }
 
 // validateAskX509 checks expected metadata about the ASK X.509 certificate. It does not verify the
@@ -146,8 +146,8 @@ func validateAskX509(r *trust.AMDRootCerts) error {
 	if r == nil {
 		r = trust.DefaultRootCerts["Milan"]
 	}
-	cn := intermediateKeyCommonName(r.Product, abi.VcekReportSigner)
-	if err := validateRootX509(r.Product, r.ProductCerts.Ask, askX509Version, "ASK", cn); err != nil {
+	cn := intermediateKeyCommonName(r.GetProductLine(), abi.VcekReportSigner)
+	if err := validateRootX509(r.GetProductLine(), r.ProductCerts.Ask, askX509Version, "ASK", cn); err != nil {
 		return err
 	}
 	if r.AskSev != nil {
@@ -160,13 +160,13 @@ func endorsementKeyCommonName(key abi.ReportSigner) string {
 	return fmt.Sprintf("SEV-%v", key)
 }
 
-func intermediateKeyCommonName(product string, key abi.ReportSigner) string {
-	if product != "" {
+func intermediateKeyCommonName(productLine string, key abi.ReportSigner) string {
+	if productLine != "" {
 		switch key {
 		case abi.VcekReportSigner:
-			return fmt.Sprintf("SEV-%s", product)
+			return fmt.Sprintf("SEV-%s", productLine)
 		case abi.VlekReportSigner:
-			return fmt.Sprintf("SEV-VLEK-%s", product)
+			return fmt.Sprintf("SEV-VLEK-%s", productLine)
 		}
 	}
 	return ""
@@ -178,9 +178,9 @@ func validateAsvkX509(r *trust.AMDRootCerts) error {
 	if r == nil {
 		r = trust.DefaultRootCerts["Milan"]
 	}
-	cn := intermediateKeyCommonName(r.Product, abi.VlekReportSigner)
+	cn := intermediateKeyCommonName(r.GetProductLine(), abi.VlekReportSigner)
 	// There is no ASVK SEV ABI key released by AMD to cross-check.
-	return validateRootX509(r.Product, r.ProductCerts.Asvk, asvkX509Version, "ASVK", cn)
+	return validateRootX509(r.GetProductLine(), r.ProductCerts.Asvk, asvkX509Version, "ASVK", cn)
 }
 
 // ValidateArkX509 checks expected metadata about the ARK X.509 certificate. It does not verify the
@@ -190,10 +190,10 @@ func validateArkX509(r *trust.AMDRootCerts) error {
 		r = trust.DefaultRootCerts["Milan"]
 	}
 	var cn string
-	if r.Product != "" {
-		cn = fmt.Sprintf("ARK-%s", r.Product)
+	if r.GetProductLine() != "" {
+		cn = fmt.Sprintf("ARK-%s", r.GetProductLine())
 	}
-	if err := validateRootX509(r.Product, r.ProductCerts.Ark, arkX509Version, "ARK", cn); err != nil {
+	if err := validateRootX509(r.GetProductLine(), r.ProductCerts.Ark, arkX509Version, "ARK", cn); err != nil {
 		return err
 	}
 	if r.ArkSev != nil {
@@ -274,7 +274,7 @@ func validateKDSCertIssuer(r *trust.AMDRootCerts, issuer pkix.Name, key abi.Repo
 	if err := validateAmdLocation(issuer, fmt.Sprintf("%v issuer", key)); err != nil {
 		return err
 	}
-	cn := intermediateKeyCommonName(r.Product, key)
+	cn := intermediateKeyCommonName(r.GetProductLine(), key)
 	if issuer.CommonName != cn {
 		return fmt.Errorf("%s certificate issuer common name %v not expected. Expected %s", key, issuer.CommonName, cn)
 	}
@@ -356,8 +356,8 @@ func VcekNotRevoked(r *trust.AMDRootCerts, _ *x509.Certificate, options *Options
 
 // product is expected to be of form "Milan" or "Genoa".
 // role is expected to be one of "ARK", "ASK", "ASVK".
-func validateCRLlink(x *x509.Certificate, product, role string) error {
-	url := kds.CrlLinkByRole(product, role)
+func validateCRLlink(x *x509.Certificate, productLine, role string) error {
+	url := kds.CrlLinkByRole(productLine, role)
 	if len(x.CRLDistributionPoints) != 1 {
 		return fmt.Errorf("%s has %d CRL distribution points, want 1", role, len(x.CRLDistributionPoints))
 	}
@@ -492,17 +492,17 @@ func decodeCerts(chain *spb.CertificateChain, key abi.ReportSigner, options *Opt
 		return nil, nil, err
 	}
 
-	productName := kds.ProductString(product)
+	productLine := kds.ProductLine(product)
 	// Ensure the extension product info matches expectations.
 	if err := checkProductName(product, options.Product, key); err != nil {
 		return nil, nil, err
 	}
 	if len(roots) == 0 {
 		root := &trust.AMDRootCerts{
-			Product: productName,
+			Product: productLine,
 			// Require that the root matches embedded root certs.
-			AskSev: trust.DefaultRootCerts[productName].AskSev,
-			ArkSev: trust.DefaultRootCerts[productName].ArkSev,
+			AskSev: trust.DefaultRootCerts[productLine].AskSev,
+			ArkSev: trust.DefaultRootCerts[productLine].ArkSev,
 		}
 		if err := root.Decode(chain.GetAskCert(), chain.GetArkCert()); err != nil {
 			return nil, nil, err
@@ -511,11 +511,11 @@ func decodeCerts(chain *spb.CertificateChain, key abi.ReportSigner, options *Opt
 			return nil, nil, err
 		}
 		roots = map[string][]*trust.AMDRootCerts{
-			productName: {root},
+			productLine: {root},
 		}
 	}
 	var lastErr error
-	for _, productRoot := range roots[productName] {
+	for _, productRoot := range roots[productLine] {
 		if err := validateKDSCertificateProductSpecifics(productRoot, endorsementKeyCert, key, options); err != nil {
 			lastErr = err
 			continue
@@ -589,18 +589,18 @@ func DefaultOptions() *Options {
 func getTrustedRoots(rot *cpb.RootOfTrust) (map[string][]*trust.AMDRootCerts, error) {
 	result := map[string][]*trust.AMDRootCerts{}
 	for _, path := range rot.CabundlePaths {
-		root := &trust.AMDRootCerts{Product: rot.Product}
+		root := trust.AMDRootCertsProduct(rot.ProductLine)
 		if err := root.FromKDSCert(path); err != nil {
 			return nil, fmt.Errorf("could not parse CA bundle %q: %v", path, err)
 		}
-		result[rot.Product] = append(result[rot.Product], root)
+		result[rot.ProductLine] = append(result[rot.ProductLine], root)
 	}
 	for _, cabundle := range rot.Cabundles {
-		root := &trust.AMDRootCerts{Product: rot.Product}
+		root := trust.AMDRootCertsProduct(rot.ProductLine)
 		if err := root.FromKDSCertBytes([]byte(cabundle)); err != nil {
 			return nil, fmt.Errorf("could not parse CA bundle bytes: %v", err)
 		}
-		result[rot.Product] = append(result[rot.Product], root)
+		result[rot.ProductLine] = append(result[rot.ProductLine], root)
 	}
 	return result, nil
 }
@@ -728,7 +728,7 @@ func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 	if options.DisableCertFetching {
 		return nil
 	}
-	productStr := kds.ProductString(product)
+	productLine := kds.ProductLine(product)
 	getter := options.Getter
 	if getter == nil {
 		getter = trust.DefaultHTTPSGetter()
@@ -744,7 +744,7 @@ func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 		attestation.CertificateChain = chain
 	}
 	if len(chain.GetAskCert()) == 0 || len(chain.GetArkCert()) == 0 {
-		askark, err := trust.GetProductChain(productStr, info.SigningKey, getter)
+		askark, err := trust.GetProductChain(productLine, info.SigningKey, getter)
 		if err != nil {
 			return err
 		}
@@ -759,7 +759,7 @@ func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 	switch info.SigningKey {
 	case abi.VcekReportSigner:
 		if len(chain.GetVcekCert()) == 0 {
-			vcekURL := kds.VCEKCertURL(productStr, report.GetChipId(), kds.TCBVersion(report.GetReportedTcb()))
+			vcekURL := kds.VCEKCertURL(productLine, report.GetChipId(), kds.TCBVersion(report.GetReportedTcb()))
 			vcek, err := getter.Get(vcekURL)
 			if err != nil {
 				return &trust.AttestationRecreationErr{
