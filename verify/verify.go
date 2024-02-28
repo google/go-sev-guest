@@ -20,6 +20,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"flag"
 	"fmt"
 	"time"
 
@@ -47,7 +48,9 @@ const (
 var (
 	// ErrMissingVlek is returned when attempting to verify a VLEK-signed report that doesn't also
 	// have its VLEK certificate attached.
-	ErrMissingVlek = errors.New("report signed with VLEK, but VLEK certificate is missing")
+	ErrMissingVlek     = errors.New("report signed with VLEK, but VLEK certificate is missing")
+	workaroundStepping = flag.Bool("workaround_kds_productname", false, "If true, don't compare "+
+		"stepping values from the VCEK certificate and the attestation's or options' Product")
 )
 
 func askVerifiedBy(signee, signer *abi.AskCert, signeeName, signerName string) error {
@@ -455,7 +458,7 @@ func checkProductName(got, want *spb.SevProduct, key abi.ReportSigner) error {
 		if got.MachineStepping == nil {
 			return fmt.Errorf("stepping value in VCEK certificate should not be nil")
 		}
-		if got.MachineStepping.Value != want.MachineStepping.Value {
+		if got.MachineStepping.Value != want.MachineStepping.Value && !*workaroundStepping {
 			return fmt.Errorf("%v cert product stepping number 0x%X is not 0x%X",
 				key, got.MachineStepping.Value, want.MachineStepping.Value)
 		}
@@ -623,7 +626,11 @@ func updateProductExpectation(product **spb.SevProduct, reportProduct *spb.SevPr
 	// The expected product in verification options may be under-specified or conflicting with a given
 	// product, so check and update the expectation to match the reported product info.
 	if *product == nil {
-		*product = reportProduct
+		if *workaroundStepping && reportProduct != nil {
+			*product = &spb.SevProduct{Name: reportProduct.Name}
+		} else {
+			*product = reportProduct
+		}
 		return nil
 	}
 	if (*product).GetName() != reportProduct.GetName() {
@@ -632,12 +639,16 @@ func updateProductExpectation(product **spb.SevProduct, reportProduct *spb.SevPr
 	expectStepping := (*product).GetMachineStepping()
 	reportStepping := reportProduct.GetMachineStepping()
 	if expectStepping == nil {
-		(*product).MachineStepping = reportStepping
+		if !*workaroundStepping {
+			(*product).MachineStepping = reportStepping
+		}
 		return nil
 	}
 	if reportStepping == nil {
 		return nil
 	}
+	// This check is not skipped for Issue#115 since we only want to skip inferred stepping, not
+	// explicitly expected stepping.
 	if expectStepping.GetValue() != reportStepping.GetValue() {
 		return fmt.Errorf("expected product stepping %d, got %d", expectStepping.Value, reportStepping.Value)
 	}

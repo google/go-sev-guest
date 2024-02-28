@@ -33,7 +33,7 @@ import (
 	"github.com/google/go-sev-guest/abi"
 	sg "github.com/google/go-sev-guest/client"
 	"github.com/google/go-sev-guest/kds"
-	pb "github.com/google/go-sev-guest/proto/sevsnp"
+	spb "github.com/google/go-sev-guest/proto/sevsnp"
 	test "github.com/google/go-sev-guest/testing"
 	testclient "github.com/google/go-sev-guest/testing/client"
 	"github.com/google/go-sev-guest/verify/testdata"
@@ -321,7 +321,7 @@ func TestKdsMetadataLogic(t *testing.T) {
 			options = &Options{Product: abi.DefaultSevProduct()}
 		}
 		vcekPem := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: newSigner.Vcek.Raw})
-		vcek, _, err := decodeCerts(&pb.CertificateChain{VcekCert: vcekPem, AskCert: newSigner.Ask.Raw, ArkCert: newSigner.Ark.Raw}, abi.VcekReportSigner, options)
+		vcek, _, err := decodeCerts(&spb.CertificateChain{VcekCert: vcekPem, AskCert: newSigner.Ask.Raw, ArkCert: newSigner.Ark.Raw}, abi.VcekReportSigner, options)
 		if !test.Match(err, tc.wantErr) {
 			t.Errorf("%s: decodeCerts(...) = %+v, %v did not error as expected. Want %q", tc.name, vcek, err, tc.wantErr)
 		}
@@ -417,13 +417,13 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 	trust.ClearProductCertCache()
 	tests := test.TestCases()
 	qp, goodRoots, badRoots, kds := testclient.GetSevQuoteProvider(tests, &test.DeviceOptions{Now: time.Now()}, t)
-	type reportGetter func(sg.QuoteProvider, [64]byte) (*pb.Attestation, error)
-	reportOnly := func(qp sg.QuoteProvider, input [64]byte) (*pb.Attestation, error) {
+	type reportGetter func(sg.QuoteProvider, [64]byte) (*spb.Attestation, error)
+	reportOnly := func(qp sg.QuoteProvider, input [64]byte) (*spb.Attestation, error) {
 		attestation, err := sg.GetQuoteProto(qp, input)
 		if err != nil {
 			return nil, err
 		}
-		return &pb.Attestation{Report: attestation.Report}, nil
+		return &spb.Attestation{Report: attestation.Report}, nil
 	}
 	reportGetters := []struct {
 		name           string
@@ -451,14 +451,14 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 		},
 		{
 			name: "GetReportVlek",
-			getter: func(qp sg.QuoteProvider, input [64]byte) (*pb.Attestation, error) {
+			getter: func(qp sg.QuoteProvider, input [64]byte) (*spb.Attestation, error) {
 				attestation, err := reportOnly(qp, input)
 				if err != nil {
 					return nil, err
 				}
 				// If fake, we can provide the VLEK. Otherwise we have to error.
 				if attestation.CertificateChain == nil {
-					attestation.CertificateChain = &pb.CertificateChain{}
+					attestation.CertificateChain = &spb.CertificateChain{}
 				}
 				chain := attestation.CertificateChain
 				info, _ := abi.ParseSignerInfo(attestation.GetReport().GetSignerInfo())
@@ -576,6 +576,93 @@ func TestGetQuoteProviderVerify(t *testing.T) {
 	}
 }
 
+func TestGetQuoteProviderVerifyProductNameSteppingMismatch(t *testing.T) {
+	trust.ClearProductCertCache()
+	tests := test.TestCases()
+	signerMilan0, err := test.DefaultTestOnlyCertChain("Milan-B0", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	qp, goodRoots, _, kds := testclient.GetSevQuoteProvider(tests, &test.DeviceOptions{
+		Now:    time.Now(),
+		Signer: signerMilan0,
+		// Mismatch cpuid product with certs.
+		Product: &spb.SevProduct{Name: spb.SevProduct_SEV_PRODUCT_MILAN, MachineStepping: wrapperspb.UInt32(1)},
+	}, t)
+	tc := tests[0]
+	options := &Options{
+		TrustedRoots:        goodRoots,
+		Getter:              kds,
+		DisableCertFetching: *requireCache && !sg.UseDefaultSevGuest(),
+	}
+	withProduct := func(p *spb.SevProduct) *Options {
+		op := *options
+		op.Product = p
+		return &op
+	}
+	reportcerts, err := qp.GetRawQuote(tc.Input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ereport, _ := abi.ReportCertsToProto(reportcerts)
+
+	ops := []struct {
+		name          string
+		options       *Options
+		workaround115 bool
+		wantErr       string
+	}{
+		{
+			name:          "no product expectation with workaround",
+			options:       withProduct(nil),
+			workaround115: true,
+		},
+		{
+			name:    "no product expectation without workaround",
+			options: withProduct(nil),
+			wantErr: "0x0 is not 0x1", // decodeCerts error
+		},
+		{
+			name:          "Milan expectation without stepping, with workaround",
+			options:       withProduct(&spb.SevProduct{Name: spb.SevProduct_SEV_PRODUCT_MILAN}),
+			workaround115: true,
+		},
+		{
+			name:    "Milan expectation without stepping without workaround",
+			options: withProduct(&spb.SevProduct{Name: spb.SevProduct_SEV_PRODUCT_MILAN}),
+			wantErr: "0x0 is not 0x1", // decodeCerts error
+		},
+		{
+			name:    "Milan-B1 expectation without workaround",
+			options: withProduct(&spb.SevProduct{Name: spb.SevProduct_SEV_PRODUCT_MILAN, MachineStepping: wrapperspb.UInt32(1)}),
+			wantErr: "0x0 is not 0x1",
+		},
+		{
+			name:          "Milan-B0 expectation with workaround",
+			options:       withProduct(&spb.SevProduct{Name: spb.SevProduct_SEV_PRODUCT_MILAN, MachineStepping: wrapperspb.UInt32(0)}),
+			workaround115: true,
+			// an explicit expectation should not step this check against CPUID.
+			wantErr: "expected product stepping 0, got 1",
+		},
+		{
+			name:    "Milan-B0 expectation without workaround",
+			options: withProduct(&spb.SevProduct{Name: spb.SevProduct_SEV_PRODUCT_MILAN, MachineStepping: wrapperspb.UInt32(0)}),
+			wantErr: "expected product stepping 0, got 1",
+		},
+	}
+	origWorkaround := *workaroundStepping
+	defer func() { *workaroundStepping = origWorkaround }()
+
+	for _, op := range ops {
+		t.Run(op.name, func(t *testing.T) {
+			*workaroundStepping = op.workaround115
+			if err := SnpAttestation(ereport, op.options); !test.Match(err, op.wantErr) {
+				t.Errorf("SnpAttestation(%v, %v) = %v. Want err: %q", ereport, op.options, err, op.wantErr)
+			}
+		})
+	}
+}
+
 func TestRealAttestationVerification(t *testing.T) {
 	trust.ClearProductCertCache()
 	var nonce [64]byte
@@ -589,20 +676,20 @@ func TestRealAttestationVerification(t *testing.T) {
 	)
 	tcs := []struct {
 		name    string
-		product *pb.SevProduct
+		product *spb.SevProduct
 		wantErr string
 	}{
 		{
 			name: "happy path",
-			product: &pb.SevProduct{
-				Name:            pb.SevProduct_SEV_PRODUCT_MILAN,
+			product: &spb.SevProduct{
+				Name:            spb.SevProduct_SEV_PRODUCT_MILAN,
 				MachineStepping: &wrapperspb.UInt32Value{Value: 0},
 			},
 		},
 		{
 			name: "bad vcek stepping",
-			product: &pb.SevProduct{
-				Name:            pb.SevProduct_SEV_PRODUCT_MILAN,
+			product: &spb.SevProduct{
+				Name:            spb.SevProduct_SEV_PRODUCT_MILAN,
 				MachineStepping: &wrapperspb.UInt32Value{Value: 12},
 			},
 			wantErr: "expected product stepping 12, got 0",
