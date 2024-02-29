@@ -282,7 +282,8 @@ type RootOfTrust struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	// The expected AMD product the attestation was collected from. Default "Milan".
+	// The expected AMD product the attestation was collected from. Default
+	// "Milan".
 	//
 	// Deprecated: Marked as deprecated in check.proto.
 	Product string `protobuf:"bytes,1,opt,name=product,proto3" json:"product,omitempty"`

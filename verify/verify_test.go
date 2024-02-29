@@ -79,14 +79,12 @@ func TestEmbeddedCertsAppendixB3Expectations(t *testing.T) {
 func TestFakeCertsKDSExpectations(t *testing.T) {
 	signMu.Do(initSigner)
 	trust.ClearProductCertCache()
-	root := &trust.AMDRootCerts{
-		Product: test.GetProductLine(),
-		ProductCerts: &trust.ProductCerts{
-			Ark: signer.Ark,
-			Ask: signer.Ask,
-		},
-		// No ArkSev or AskSev intentionally for test certs.
+	root := trust.AMDRootCertsProduct(test.GetProductLine())
+	root.ProductCerts = &trust.ProductCerts{
+		Ark: signer.Ark,
+		Ask: signer.Ask,
 	}
+	// No ArkSev or AskSev intentionally for test certs.
 	if err := validateArkX509(root); err != nil {
 		t.Errorf("fake ARK validation error: %v", err)
 	}
@@ -306,13 +304,14 @@ func TestKdsMetadataLogic(t *testing.T) {
 		// won't get tested.
 		options := &Options{
 			TrustedRoots: map[string][]*trust.AMDRootCerts{
-				test.GetProductLine(): {&trust.AMDRootCerts{
-					Product: test.GetProductLine(),
-					ProductCerts: &trust.ProductCerts{
+				test.GetProductLine(): {func() *trust.AMDRootCerts {
+					r := trust.AMDRootCertsProduct(test.GetProductLine())
+					r.ProductCerts = &trust.ProductCerts{
 						Ark: newSigner.Ark,
 						Ask: newSigner.Ask,
-					},
-				}},
+					}
+					return r
+				}()},
 			},
 			Now:     time.Date(1, time.January, 5, 0, 0, 0, 0, time.UTC),
 			Product: abi.DefaultSevProduct(),
@@ -374,12 +373,10 @@ func TestCRLRootValidity(t *testing.T) {
 		},
 		Number: big.NewInt(1),
 	}
-	root := &trust.AMDRootCerts{
-		Product: test.GetProductLine(),
-		ProductCerts: &trust.ProductCerts{
-			Ark: signer.Ark,
-			Ask: signer.Ask,
-		},
+	root := trust.AMDRootCertsProduct(test.GetProductLine())
+	root.ProductCerts = &trust.ProductCerts{
+		Ark: signer.Ark,
+		Ask: signer.Ask,
 	}
 
 	// Now try signing a CRL with a different root that certifies Vcek with a different serial number.
@@ -398,12 +395,10 @@ func TestCRLRootValidity(t *testing.T) {
 	}
 
 	// Finally try checking a VCEK that's signed by a revoked ASK.
-	root2 := &trust.AMDRootCerts{
-		Product: test.GetProductLine(),
-		ProductCerts: &trust.ProductCerts{
-			Ark: signer2.Ark,
-			Ask: signer2.Ask,
-		},
+	root2 := trust.AMDRootCertsProduct(test.GetProductLine())
+	root2.ProductCerts = &trust.ProductCerts{
+		Ark: signer2.Ark,
+		Ask: signer2.Ask,
 	}
 	wantErr2 := "ASK was revoked at 2022-06-14 12:01:00 +0000 UTC"
 	if err := VcekNotRevoked(root2, signer2.Vcek, &Options{Getter: g2}); !test.Match(err, wantErr2) {
