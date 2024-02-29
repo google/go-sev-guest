@@ -58,7 +58,8 @@ message Policy {
 // RootOfTrust represents configuration for which hardware root of trust
 // certificates to use for verifying attestation report signatures.
 message RootOfTrust {
-  // The expected AMD product the attestation was collected from. Default "Milan".
+  // The expected AMD product the attestation was collected from. Default
+  // "Milan".
   string product = 1 [deprecated = true];
 
   // Paths to CA bundles for the AMD product.

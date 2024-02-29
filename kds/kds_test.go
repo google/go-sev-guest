@@ -140,7 +140,12 @@ func TestParseVCEKCertURL(t *testing.T) {
 		{
 			name: "happy path",
 			url:  VCEKCertURL("Milan", hwid, TCBVersion(0)),
-			want: VCEKCert{Product: "Milan", ProductLine: "Milan", HWID: hwid, TCB: 0},
+			want: func() VCEKCert {
+				c := VCEKCertProduct("Milan")
+				c.HWID = hwid
+				c.TCB = 0
+				return c
+			}(),
 		},
 		{
 			name:    "bad query format",

@@ -539,6 +539,14 @@ type VCEKCert struct {
 	TCB         uint64
 }
 
+// VCEKCertProduct returns a VCEKCert with the product line set to productLine.
+func VCEKCertProduct(productLine string) VCEKCert {
+	return VCEKCert{
+		Product:     productLine, // TODO(Issue#114): Remove
+		ProductLine: productLine,
+	}
+}
+
 // VLEKCert represents the attestation report components represented in a KDS VLEK certificate
 // request URL.
 type VLEKCert struct {
@@ -787,23 +795,23 @@ func ProductName(product *pb.SevProduct) string {
 //
 // Deprecated: Use ParseProductLine
 func ParseProduct(productLine string) (pb.SevProduct_SevProductName, error) {
-	switch productLine {
-	case "Milan":
-		return pb.SevProduct_SEV_PRODUCT_MILAN, nil
-	case "Genoa":
-		return pb.SevProduct_SEV_PRODUCT_GENOA, nil
-	default:
-		return pb.SevProduct_SEV_PRODUCT_UNKNOWN, fmt.Errorf("unknown AMD SEV product: %q", productLine)
+	p, err := ParseProductLine(productLine)
+	if err != nil {
+		return pb.SevProduct_SEV_PRODUCT_UNKNOWN, nil
 	}
+	return p.Name, nil
 }
 
 // ParseProductLine returns the SevProductName for a product name without the stepping suffix.
 func ParseProductLine(productLine string) (*pb.SevProduct, error) {
-	name, err := ParseProduct(productLine)
-	if err != nil {
-		return nil, err
+	switch productLine {
+	case "Milan":
+		return &pb.SevProduct{Name: pb.SevProduct_SEV_PRODUCT_MILAN}, nil
+	case "Genoa":
+		return &pb.SevProduct{Name: pb.SevProduct_SEV_PRODUCT_GENOA}, nil
+	default:
+		return nil, fmt.Errorf("unknown AMD SEV product: %q", productLine)
 	}
-	return &pb.SevProduct{Name: name}, nil
 }
 
 // ParseProductName returns the KDS project input value, and the model, stepping numbers represented
