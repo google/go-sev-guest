@@ -124,9 +124,8 @@ var (
 	trustedidkeys       = flag.String("trusted_id_keys", "", "Colon-separated paths to x.509 certificates of trusted author keys")
 	trustedidkeyhashes  = flag.String("trusted_id_key_hashes", "", "Comma-separated hex-encoded SHA-384 hash values of trusted identity keys in AMD public key format")
 
-	productString = flag.String("product", "", "The AMD product name for the chip that generated the attestation report.")
-	stepping      = flag.String("stepping", "", "The machine stepping for the chip that generated the attestation report. Default unchecked.")
-	cabundles     = flag.String("product_key_path", "",
+	stepping  = flag.String("stepping", "", "The machine stepping for the chip that generated the attestation report. Default unchecked.")
+	cabundles = flag.String("product_key_path", "",
 		"Colon-separated paths to CA bundles for the AMD product. Must be in PEM format, ASK, then ARK certificates. If unset, uses embedded root certificates.")
 	verbose     = flag.Bool("v", false, "Enable verbose logging.")
 	testKdsFile = flag.String("kdsdatabase", "", "Path to a fakekds.Certificates binary cache of AMD KDS")
@@ -341,11 +340,11 @@ func setString(dest *string, _, flag string, defaultValue string) {
 
 func populateProduct() error {
 	// The SevProduct can come from either product_name or the combination of product and stepping.
-	if *testing.ProductName != "" && (*productString != "" || *stepping != "") {
+	if *testing.ProductName != "" && (*testing.Product != "" || *stepping != "") {
 		return fmt.Errorf("--product_name is mutually exclusive with both --product and --stepping")
 	}
 	// No arguments for product lead to a default value.
-	if *testing.ProductName == "" && *productString == "" && *stepping == "" {
+	if *testing.ProductName == "" && *testing.Product == "" && *stepping == "" {
 		*testing.ProductName = testing.GetProductName()
 	}
 
@@ -358,9 +357,9 @@ func populateProduct() error {
 		return nil
 	}
 
-	product.Name, err = kds.ParseProduct(*productString)
+	product, err = kds.ParseProductLine(*testing.Product)
 	if err != nil {
-		return fmt.Errorf("--product=%q invalid: %v", *productString, err)
+		return fmt.Errorf("--product=%q invalid: %v", *testing.Product, err)
 	}
 	return setUInt32Value(&product.MachineStepping, "stepping", *stepping)
 }
@@ -378,7 +377,7 @@ func populateRootOfTrust() error {
 		return err
 	}
 	rot.DisallowNetwork = !networkValue
-	rot.Product = kds.ProductString(product)
+	rot.ProductLine = kds.ProductLine(product)
 
 	paths, err := parsePaths(*cabundles)
 	if err != nil {

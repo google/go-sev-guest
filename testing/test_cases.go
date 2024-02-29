@@ -161,14 +161,14 @@ type DeviceOptions struct {
 
 func makeTestCerts(opts *DeviceOptions) ([]byte, *AmdSigner, error) {
 	signer := opts.Signer
-	var productString string
+	var productName string
 	if opts.Product != nil {
-		productString = kds.ProductString(opts.Product)
+		productName = kds.ProductName(opts.Product)
 	} else {
-		productString = kds.DefaultProductString()
+		productName = GetProductName()
 	}
 	if signer == nil {
-		s, err := DefaultTestOnlyCertChain(productString, opts.Now)
+		s, err := DefaultTestOnlyCertChain(productName, opts.Now)
 		if err != nil {
 			return nil, nil, err
 		}

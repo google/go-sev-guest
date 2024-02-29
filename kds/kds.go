@@ -496,16 +496,16 @@ func productBaseURL(s abi.ReportSigner, name string) string {
 
 // ProductCertChainURL returns the AMD KDS URL for retrieving the ARK and AS(V)K
 // certificates on the given product in ??? format.
-func ProductCertChainURL(s abi.ReportSigner, product string) string {
-	return fmt.Sprintf("%s/cert_chain", productBaseURL(s, product))
+func ProductCertChainURL(s abi.ReportSigner, productLine string) string {
+	return fmt.Sprintf("%s/cert_chain", productBaseURL(s, productLine))
 }
 
 // VCEKCertURL returns the AMD KDS URL for retrieving the VCEK on a given product
 // at a given TCB version. The hwid is the CHIP_ID field in an attestation report.
-func VCEKCertURL(product string, hwid []byte, tcb TCBVersion) string {
+func VCEKCertURL(productLine string, hwid []byte, tcb TCBVersion) string {
 	parts := DecomposeTCBVersion(tcb)
 	return fmt.Sprintf("%s/%s?blSPL=%d&teeSPL=%d&snpSPL=%d&ucodeSPL=%d",
-		productBaseURL(abi.VcekReportSigner, product),
+		productBaseURL(abi.VcekReportSigner, productLine),
 		hex.EncodeToString(hwid),
 		parts.BlSpl,
 		parts.TeeSpl,
@@ -516,10 +516,10 @@ func VCEKCertURL(product string, hwid []byte, tcb TCBVersion) string {
 
 // VLEKCertURL returns the GET URL for retrieving a VLEK certificate, but without the necessary
 // CSP secret in the HTTP headers that makes the request validate to the KDS.
-func VLEKCertURL(product string, tcb TCBVersion) string {
+func VLEKCertURL(productLine string, tcb TCBVersion) string {
 	parts := DecomposeTCBVersion(tcb)
 	return fmt.Sprintf("%s/cert?blSPL=%d&teeSPL=%d&snpSPL=%d&ucodeSPL=%d",
-		productBaseURL(abi.VlekReportSigner, product),
+		productBaseURL(abi.VlekReportSigner, productLine),
 		parts.BlSpl,
 		parts.TeeSpl,
 		parts.SnpSpl,
@@ -530,16 +530,24 @@ func VLEKCertURL(product string, tcb TCBVersion) string {
 // VCEKCert represents the attestation report components represented in a KDS VCEK certificate
 // request URL.
 type VCEKCert struct {
-	Product string
-	HWID    []byte
-	TCB     uint64
+	// Product is the product string (no stepping value) present in the VCEK cert url
+	//
+	// Deprecated: Use ProductLine.
+	Product     string
+	ProductLine string
+	HWID        []byte
+	TCB         uint64
 }
 
 // VLEKCert represents the attestation report components represented in a KDS VLEK certificate
 // request URL.
 type VLEKCert struct {
-	Product string
-	TCB     uint64
+	// Product is the product string (no stepping value) present in the VCEK cert url
+	//
+	// Deprecated: Use ProductLine.
+	Product     string
+	ProductLine string
+	TCB         uint64
 }
 
 // CertFunction is an enumeration of which endorsement key type is getting certified.
@@ -555,9 +563,9 @@ const (
 )
 
 type parsedURL struct {
-	product   string
-	simpleURL *url.URL
-	function  CertFunction
+	productLine string
+	simpleURL   *url.URL
+	function    CertFunction
 }
 
 // parseBaseProductURL returns the product name for a root certificate chain URL if it is one,
@@ -593,7 +601,7 @@ func parseBaseProductURL(kdsurl string) (*parsedURL, error) {
 		return nil, fmt.Errorf("url has unexpected endpoint %q not product/endpoint", function)
 	}
 
-	result.product = pieces[0]
+	result.productLine = pieces[0]
 	// Set the URL's path to the rest of the path without the API or product prefix.
 	u.Path = pieces[1]
 	result.simpleURL = u
@@ -610,7 +618,7 @@ func ParseProductCertChainURL(kdsurl string) (string, CertFunction, error) {
 	if parsed.simpleURL.Path != "cert_chain" {
 		return "", UnknownCertFunction, fmt.Errorf("unexpected AMD KDS URL path %q, want \"cert_chain\"", parsed.simpleURL.Path)
 	}
-	return parsed.product, parsed.function, nil
+	return parsed.productLine, parsed.function, nil
 }
 
 func parseTCBURL(u *url.URL) (uint64, error) {
@@ -659,7 +667,8 @@ func ParseVCEKCertURL(kdsurl string) (VCEKCert, error) {
 	if parsed.function != VcekCertFunction {
 		return result, fmt.Errorf("not a VCEK certificate URL: %s", kdsurl)
 	}
-	result.Product = parsed.product
+	result.Product = parsed.productLine // TODO(Issue#114): Remove.
+	result.ProductLine = parsed.productLine
 	hwid, err := hex.DecodeString(parsed.simpleURL.Path)
 	if err != nil {
 		return result, fmt.Errorf("hwid component of KDS URL is not a hex string: %q", parsed.simpleURL.Path)
@@ -685,7 +694,8 @@ func ParseVLEKCertURL(kdsurl string) (VLEKCert, error) {
 	if parsed.function != VlekCertFunction {
 		return result, fmt.Errorf("not a VLEK certificate URL: %s", kdsurl)
 	}
-	result.Product = parsed.product
+	result.Product = parsed.productLine // TODO(Issue#114): Remove.
+	result.ProductLine = parsed.productLine
 	if parsed.simpleURL.Path != "cert" {
 		return result, fmt.Errorf("vlek function is %q, want 'cert'", parsed.simpleURL.Path)
 	}
@@ -696,7 +706,15 @@ func ParseVLEKCertURL(kdsurl string) (VLEKCert, error) {
 
 // ProductString returns the KDS product argument to use for the product associated with
 // an attestation report proto.
+//
+// Deprecated: Use ProductLine()
 func ProductString(product *pb.SevProduct) string {
+	return ProductLine(product)
+}
+
+// ProductLine returns the KDS product argument to use for the product associated with
+// an attestation report proto.
+func ProductLine(product *pb.SevProduct) string {
 	if product == nil {
 		product = abi.DefaultSevProduct()
 	}
@@ -710,9 +728,29 @@ func ProductString(product *pb.SevProduct) string {
 	}
 }
 
-// DefaultProductString returns the product string of the default SEV product.
+// ProductLineOfProductName returns the product represented by productNameOrProductLine, i.e.,
+// without the stepping suffix.
+func ProductLineOfProductName(productNameOrProductLine string) string {
+	product, err := ParseProductLine(productNameOrProductLine)
+	if err != nil {
+		product, err = ParseProductName(productNameOrProductLine, abi.VcekReportSigner)
+	}
+	if err != nil {
+		return "Unknown"
+	}
+	return ProductLine(product)
+}
+
+// DefaultProductString returns the product line of the default SEV product.
+//
+// Deprecated: Use DefaultProductLine()
 func DefaultProductString() string {
-	return ProductString(abi.DefaultSevProduct())
+	return DefaultProductLine()
+}
+
+// DefaultProductLine returns the product line of the default SEV product.
+func DefaultProductLine() string {
+	return ProductLine(abi.DefaultSevProduct())
 }
 
 // ProductName returns the expected productName extension value for the product associated
@@ -746,15 +784,26 @@ func ProductName(product *pb.SevProduct) string {
 }
 
 // ParseProduct returns the SevProductName for a product name without the stepping suffix.
-func ParseProduct(product string) (pb.SevProduct_SevProductName, error) {
-	switch product {
+//
+// Deprecated: Use ParseProductLine
+func ParseProduct(productLine string) (pb.SevProduct_SevProductName, error) {
+	switch productLine {
 	case "Milan":
 		return pb.SevProduct_SEV_PRODUCT_MILAN, nil
 	case "Genoa":
 		return pb.SevProduct_SEV_PRODUCT_GENOA, nil
 	default:
-		return pb.SevProduct_SEV_PRODUCT_UNKNOWN, fmt.Errorf("unknown AMD SEV product: %q", product)
+		return pb.SevProduct_SEV_PRODUCT_UNKNOWN, fmt.Errorf("unknown AMD SEV product: %q", productLine)
 	}
+}
+
+// ParseProductLine returns the SevProductName for a product name without the stepping suffix.
+func ParseProductLine(productLine string) (*pb.SevProduct, error) {
+	name, err := ParseProduct(productLine)
+	if err != nil {
+		return nil, err
+	}
+	return &pb.SevProduct{Name: name}, nil
 }
 
 // ParseProductName returns the KDS project input value, and the model, stepping numbers represented
@@ -769,11 +818,7 @@ func ParseProductName(productName string, key abi.ReportSigner) (*pb.SevProduct,
 		return product, nil
 	case abi.VlekReportSigner:
 		// VLEK certificates don't carry the stepping value in productName.
-		name, err := ParseProduct(productName)
-		if err != nil {
-			return nil, err
-		}
-		return &pb.SevProduct{Name: name}, nil
+		return ParseProductLine(productName)
 	}
 	return nil, fmt.Errorf("internal: unhandled reportSigner %v", key)
 }
@@ -781,17 +826,17 @@ func ParseProductName(productName string, key abi.ReportSigner) (*pb.SevProduct,
 // CrlLinkByKey returns the CRL distribution point for the given key type's
 // product. If key is VlekReportSigner, then we use the vlek endpoint. The ASK
 // and ARK are both on the vcek endpoint.
-func CrlLinkByKey(product string, key abi.ReportSigner) string {
-	return fmt.Sprintf("%s/crl", productBaseURL(key, product))
+func CrlLinkByKey(productLine string, key abi.ReportSigner) string {
+	return fmt.Sprintf("%s/crl", productBaseURL(key, productLine))
 }
 
 // CrlLinkByRole returns the CRL distribution point for the given key role's
 // product. If role is "ASVK", then we use the vlek endpoint. The ASK and ARK
 // are both on the vcek endpoint.
-func CrlLinkByRole(product, role string) string {
+func CrlLinkByRole(productLine, role string) string {
 	key := abi.VcekReportSigner
 	if role == "ASVK" {
 		key = abi.VlekReportSigner
 	}
-	return CrlLinkByKey(product, key)
+	return CrlLinkByKey(productLine, key)
 }

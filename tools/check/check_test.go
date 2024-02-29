@@ -460,7 +460,7 @@ func TestCheckBadFlagOverridesGoodField(t *testing.T) {
 }
 
 func TestCaBundles(t *testing.T) {
-	signer, err := fakesev.DefaultTestOnlyCertChain(kds.DefaultProductString(), time.Now())
+	signer, err := fakesev.DefaultTestOnlyCertChain(kds.DefaultProductLine(), time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
