@@ -572,6 +572,10 @@ func TestGetQuoteProviderVerify(t *testing.T) {
 }
 
 func TestGetQuoteProviderVerifyProductNameSteppingMismatch(t *testing.T) {
+	if !sg.UseDefaultSevGuest() {
+		t.Skip("Cannot override true cpuid in hardware for negative testing")
+		return
+	}
 	trust.ClearProductCertCache()
 	tests := test.TestCases()
 	signerMilan0, err := test.DefaultTestOnlyCertChain("Milan-B0", time.Now())
