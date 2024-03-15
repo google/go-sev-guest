@@ -103,12 +103,13 @@ func GetProduct(t testing.TB) *spb.SevProduct {
 // AmdSigner encapsulates a key and certificate chain following the format of AMD-SP's VCEK for
 // signing attestation reports.
 type AmdSigner struct {
-	Ark  *x509.Certificate
-	Ask  *x509.Certificate
-	Asvk *x509.Certificate
-	Vcek *x509.Certificate
-	Vlek *x509.Certificate
-	Keys *AmdKeys
+	Ark    *x509.Certificate
+	Ask    *x509.Certificate
+	Asvk   *x509.Certificate
+	Vcek   *x509.Certificate
+	Vlek   *x509.Certificate
+	Extras map[string][]byte
+	Keys   *AmdKeys
 	// This identity does not match AMD's notion of an HWID. It is purely to combine expectations of
 	// report data -> KDS URL construction for the fake KDS implementation.
 	HWID [abi.ChipIDSize]byte
@@ -189,11 +190,12 @@ type AmdSignerBuilder struct {
 	HWID             [abi.ChipIDSize]byte
 	TCB              kds.TCBVersion
 	// Intermediate built certificates
-	Ark  *x509.Certificate
-	Ask  *x509.Certificate
-	Asvk *x509.Certificate
-	Vcek *x509.Certificate
-	Vlek *x509.Certificate
+	Ark    *x509.Certificate
+	Ask    *x509.Certificate
+	Asvk   *x509.Certificate
+	Vcek   *x509.Certificate
+	Vlek   *x509.Certificate
+	Extras map[string][]byte
 }
 
 func (b *AmdSignerBuilder) productName() string {
@@ -529,13 +531,14 @@ func (b *AmdSignerBuilder) TestOnlyCertChain() (*AmdSigner, error) {
 		}
 	}
 	s := &AmdSigner{
-		Ark:  b.Ark,
-		Ask:  b.Ask,
-		Asvk: b.Asvk,
-		Vcek: b.Vcek,
-		Vlek: b.Vlek,
-		Keys: b.Keys,
-		TCB:  b.TCB,
+		Ark:    b.Ark,
+		Ask:    b.Ask,
+		Asvk:   b.Asvk,
+		Vcek:   b.Vcek,
+		Vlek:   b.Vlek,
+		Keys:   b.Keys,
+		Extras: b.Extras,
+		TCB:    b.TCB,
 	}
 	copy(s.HWID[:], b.HWID[:])
 	return s, nil
@@ -563,7 +566,9 @@ func DefaultTestOnlyCertChain(productName string, creationTime time.Time) (*AmdS
 // CertTableBytes outputs the certificates in AMD's ABI format.
 func (s *AmdSigner) CertTableBytes() ([]byte, error) {
 	// Calculate the output size and the offset at which to copy each certificate.
-	headers := make([]abi.CertTableHeaderEntry, 6) // ARK, ASK, VCEK, VLEK, ASVK, NULL
+	const baseEntries = 6 // ARK, ASK, VCEK, VLEK, ASVK, NULL
+	entries := baseEntries + len(s.Extras)
+	headers := make([]abi.CertTableHeaderEntry, entries)
 	headers[0].GUID = uuid.Parse(abi.ArkGUID)
 	headers[0].Offset = uint32(len(headers) * abi.CertTableEntrySize)
 	headers[0].Length = uint32(len(s.Ark.Raw))
@@ -584,9 +589,20 @@ func (s *AmdSigner) CertTableBytes() ([]byte, error) {
 	headers[4].Offset = headers[3].Offset + headers[3].Length
 	headers[4].Length = uint32(len(s.Asvk.Raw))
 
+	index := 4
+	blobs := [][]byte{s.Ark.Raw, s.Ask.Raw, s.Vcek.Raw, s.Vlek.Raw, s.Asvk.Raw}
+	for guid, data := range s.Extras {
+		prior := index
+		index++
+		headers[index].GUID = uuid.Parse(guid)
+		headers[index].Offset = headers[prior].Offset + headers[prior].Length
+		headers[index].Length = uint32(len(data))
+		blobs = append(blobs, data)
+	}
+
 	// Write out the headers and the certificates at the appropriate offsets.
-	result := make([]byte, headers[4].Offset+headers[4].Length)
-	for i, cert := range [][]byte{s.Ark.Raw, s.Ask.Raw, s.Vcek.Raw, s.Vlek.Raw, s.Asvk.Raw} {
+	result := make([]byte, headers[index].Offset+headers[index].Length)
+	for i, cert := range blobs {
 		if err := (&headers[i]).Write(result[i*abi.CertTableEntrySize:]); err != nil {
 			return nil, err
 		}

@@ -15,6 +15,7 @@
 package testing
 
 import (
+	"bytes"
 	"crypto/x509"
 	"testing"
 	"time"
@@ -83,5 +84,40 @@ func TestCertificatesParse(t *testing.T) {
 	}
 	if _, err := kds.VcekCertificateExtensions(signer.Vcek); err != nil {
 		t.Errorf("could not parse generated VCEK extensions: %v", err)
+	}
+}
+
+func TestCertificatesExtras(t *testing.T) {
+	b := &AmdSignerBuilder{
+		Extras: map[string][]byte{abi.ExtraPlatformInfoGUID: []byte("test")},
+	}
+	s, err := b.TestOnlyCertChain()
+	if err != nil {
+		t.Fatal(err)
+	}
+	certBytes, err := s.CertTableBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := abi.ParseSnpCertTableHeader(certBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hasXtra bool
+	if len(entries) != 6 {
+		t.Errorf("ParseSnpCertTableHeader(_) returned %d entries, want 6", len(entries))
+	}
+	for _, entry := range entries {
+		if uuid.Equal(entry.GUID, uuid.Parse(abi.ExtraPlatformInfoGUID)) {
+			hasXtra = true
+			got := certBytes[entry.Offset : entry.Offset+entry.Length]
+			want := []byte("test")
+			if !bytes.Equal(got, want) {
+				t.Errorf("%v data is %v, want %v", abi.ExtraPlatformInfoGUID, got, want)
+			}
+		}
+	}
+	if !hasXtra {
+		t.Errorf("fake certs missing extra cert")
 	}
 }
