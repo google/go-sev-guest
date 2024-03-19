@@ -612,10 +612,21 @@ func validateKeys(report *spb.Report, options *Options) error {
 }
 
 func validateKeyKind(report *spb.Attestation) (*x509.Certificate, error) {
+	if report == nil {
+		return nil, fmt.Errorf("attestation cannot be nil")
+	}
+	if report.GetReport() == nil {
+		return nil, fmt.Errorf("attestation report cannot be nil")
+	}
+	if report.GetCertificateChain() == nil {
+		return nil, fmt.Errorf("attestation certificate chain cannot be nil")
+	}
+
 	info, err := abi.ParseSignerInfo(report.GetReport().GetSignerInfo())
 	if err != nil {
 		return nil, err
 	}
+
 	switch info.SigningKey {
 	case abi.VcekReportSigner:
 		if len(report.GetCertificateChain().VcekCert) != 0 {
