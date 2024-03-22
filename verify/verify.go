@@ -30,7 +30,6 @@ import (
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/google/go-sev-guest/verify/trust"
 	"github.com/google/logger"
-	"github.com/pborman/uuid"
 	"github.com/pkg/errors"
 	"go.uber.org/multierr"
 )
@@ -54,7 +53,7 @@ var (
 )
 
 func askVerifiedBy(signee, signer *abi.AskCert, signeeName, signerName string) error {
-	if !uuid.Equal(signee.CertifyingID[:], signer.KeyID[:]) {
+	if signee.CertifyingID != signer.KeyID {
 		return fmt.Errorf("%s's certifying ID (%s) is not %s's key ID (%s) ",
 			signeeName, signerName, signee.CertifyingID.String(), signer.KeyID.String())
 	}

@@ -23,7 +23,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
-	"github.com/pborman/uuid"
+	"github.com/google/uuid"
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/testing/protocmp"
 	"google.golang.org/protobuf/types/known/wrapperspb"
@@ -237,23 +237,23 @@ func testRawCertTable(t testing.TB) *testCertTable {
 	vcekraw := []byte("vcek")
 	vlekraw := []byte("vlek")
 	extraraw := []byte("extra")
-	headers[0].GUID = uuid.Parse(ArkGUID)
+	headers[0].GUID = uuid.MustParse(ArkGUID)
 	headers[0].Offset = uint32(len(headers) * CertTableEntrySize)
 	headers[0].Length = uint32(len(arkraw))
 
-	headers[1].GUID = uuid.Parse(AskGUID)
+	headers[1].GUID = uuid.MustParse(AskGUID)
 	headers[1].Offset = headers[0].Offset + headers[0].Length
 	headers[1].Length = uint32(len(askraw))
 
-	headers[2].GUID = uuid.Parse(VcekGUID)
+	headers[2].GUID = uuid.MustParse(VcekGUID)
 	headers[2].Offset = headers[1].Offset + headers[1].Length
 	headers[2].Length = uint32(len(vcekraw))
 
-	headers[3].GUID = uuid.Parse(VlekGUID)
+	headers[3].GUID = uuid.MustParse(VlekGUID)
 	headers[3].Offset = headers[2].Offset + headers[2].Length
 	headers[3].Length = uint32(len(vlekraw))
 
-	headers[4].GUID = uuid.Parse(extraGUID)
+	headers[4].GUID = uuid.MustParse(extraGUID)
 	headers[4].Offset = headers[3].Offset + headers[3].Length
 	headers[4].Length = uint32(len(extraraw))
 
@@ -275,7 +275,7 @@ func testRawCertTableNoVcek(t testing.TB) *testCertTable {
 	headers := make([]CertTableHeaderEntry, 2) // extra, NULL
 	extraraw := []byte("extra")
 
-	headers[0].GUID = uuid.Parse(extraGUID)
+	headers[0].GUID = uuid.MustParse(extraGUID)
 	headers[0].Offset = uint32(len(headers) * CertTableEntrySize)
 	headers[0].Length = uint32(len(extraraw))
 	result := &testCertTable{
