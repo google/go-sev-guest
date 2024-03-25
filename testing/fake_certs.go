@@ -36,7 +36,7 @@ import (
 	"github.com/google/go-sev-guest/abi"
 	"github.com/google/go-sev-guest/kds"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
-	"github.com/pborman/uuid"
+	"github.com/google/uuid"
 )
 
 // KDS specification:
@@ -569,23 +569,23 @@ func (s *AmdSigner) CertTableBytes() ([]byte, error) {
 	const baseEntries = 6 // ARK, ASK, VCEK, VLEK, ASVK, NULL
 	entries := baseEntries + len(s.Extras)
 	headers := make([]abi.CertTableHeaderEntry, entries)
-	headers[0].GUID = uuid.Parse(abi.ArkGUID)
+	headers[0].GUID = uuid.MustParse(abi.ArkGUID)
 	headers[0].Offset = uint32(len(headers) * abi.CertTableEntrySize)
 	headers[0].Length = uint32(len(s.Ark.Raw))
 
-	headers[1].GUID = uuid.Parse(abi.AskGUID)
+	headers[1].GUID = uuid.MustParse(abi.AskGUID)
 	headers[1].Offset = headers[0].Offset + headers[0].Length
 	headers[1].Length = uint32(len(s.Ask.Raw))
 
-	headers[2].GUID = uuid.Parse(abi.VcekGUID)
+	headers[2].GUID = uuid.MustParse(abi.VcekGUID)
 	headers[2].Offset = headers[1].Offset + headers[1].Length
 	headers[2].Length = uint32(len(s.Vcek.Raw))
 
-	headers[3].GUID = uuid.Parse(abi.VlekGUID)
+	headers[3].GUID = uuid.MustParse(abi.VlekGUID)
 	headers[3].Offset = headers[2].Offset + headers[2].Length
 	headers[3].Length = uint32(len(s.Vlek.Raw))
 
-	headers[4].GUID = uuid.Parse(abi.AsvkGUID)
+	headers[4].GUID = uuid.MustParse(abi.AsvkGUID)
 	headers[4].Offset = headers[3].Offset + headers[3].Length
 	headers[4].Length = uint32(len(s.Asvk.Raw))
 
@@ -594,7 +594,7 @@ func (s *AmdSigner) CertTableBytes() ([]byte, error) {
 	for guid, data := range s.Extras {
 		prior := index
 		index++
-		headers[index].GUID = uuid.Parse(guid)
+		headers[index].GUID = uuid.MustParse(guid)
 		headers[index].Offset = headers[prior].Offset + headers[prior].Length
 		headers[index].Length = uint32(len(data))
 		blobs = append(blobs, data)

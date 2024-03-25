@@ -22,7 +22,7 @@ import (
 
 	"github.com/google/go-sev-guest/abi"
 	"github.com/google/go-sev-guest/kds"
-	"github.com/pborman/uuid"
+	"github.com/google/uuid"
 )
 
 func TestCertificatesParse(t *testing.T) {
@@ -47,19 +47,19 @@ func TestCertificatesParse(t *testing.T) {
 		t.Errorf("ParseSnpCertTableHeader(_) returned %d entries, want 5", len(entries))
 	}
 	for _, entry := range entries {
-		if uuid.Equal(entry.GUID, uuid.Parse(abi.VlekGUID)) {
+		if entry.GUID == uuid.MustParse(abi.VlekGUID) {
 			hasVlek = true
 		}
-		if uuid.Equal(entry.GUID, uuid.Parse(abi.VcekGUID)) {
+		if entry.GUID == uuid.MustParse(abi.VcekGUID) {
 			hasVcek = true
 		}
-		if uuid.Equal(entry.GUID, uuid.Parse(abi.AskGUID)) {
+		if entry.GUID == uuid.MustParse(abi.AskGUID) {
 			hasAsk = true
 		}
-		if uuid.Equal(entry.GUID, uuid.Parse(abi.AsvkGUID)) {
+		if entry.GUID == uuid.MustParse(abi.AsvkGUID) {
 			hasAsvk = true
 		}
-		if uuid.Equal(entry.GUID, uuid.Parse(abi.ArkGUID)) {
+		if entry.GUID == uuid.MustParse(abi.ArkGUID) {
 			hasArk = true
 		}
 		der := certBytes[entry.Offset : entry.Offset+entry.Length]
@@ -108,7 +108,7 @@ func TestCertificatesExtras(t *testing.T) {
 		t.Errorf("ParseSnpCertTableHeader(_) returned %d entries, want 6", len(entries))
 	}
 	for _, entry := range entries {
-		if uuid.Equal(entry.GUID, uuid.Parse(abi.ExtraPlatformInfoGUID)) {
+		if entry.GUID == uuid.MustParse(abi.ExtraPlatformInfoGUID) {
 			hasXtra = true
 			got := certBytes[entry.Offset : entry.Offset+entry.Length]
 			want := []byte("test")

@@ -24,7 +24,7 @@ import (
 
 	pb "github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/google/logger"
-	"github.com/pborman/uuid"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/cryptobyte"
 	"golang.org/x/crypto/cryptobyte/asn1"
 	"google.golang.org/protobuf/types/known/wrapperspb"
@@ -710,7 +710,7 @@ func (h *CertTableHeaderEntry) Unmarshal(data []byte) error {
 	if len(data) < CertTableEntrySize {
 		return fmt.Errorf("data too small: %v, want %v", len(data), CertTableEntrySize)
 	}
-	h.GUID = clone(data[0:GUIDSize])
+	copy(h.GUID[:], data[0:GUIDSize])
 	uint32Size := 4
 	h.Offset = binary.LittleEndian.Uint32(data[GUIDSize : GUIDSize+uint32Size])
 	h.Length = binary.LittleEndian.Uint32(data[GUIDSize+uint32Size : CertTableEntrySize])
@@ -774,8 +774,7 @@ func (c *CertTable) Unmarshal(certs []byte) error {
 	}
 	for i, entry := range certTableHeader {
 		var next CertTableEntry
-		next.GUID = make([]byte, GUIDSize)
-		copy(next.GUID, entry.GUID)
+		copy(next.GUID[:], entry.GUID[:])
 		if entry.Offset+entry.Length > uint32(len(certs)) {
 			return fmt.Errorf("cert table entry %d specifies a byte range outside the certificate data block (size %d): offset=%d, length%d", i, len(certs), entry.Offset, entry.Length)
 		}
@@ -789,12 +788,12 @@ func (c *CertTable) Unmarshal(certs []byte) error {
 // GetByGUIDString returns the raw bytes for a certificate that matches a key identified by the
 // given GUID string.
 func (c *CertTable) GetByGUIDString(guid string) ([]byte, error) {
-	g := uuid.Parse(guid)
-	if g == nil {
-		return nil, fmt.Errorf("GUID string format is XXXXXXXX-XXXX-XXXX-XXXXXXXXXXXXXXXX, got %s", guid)
+	g, err := uuid.Parse(guid)
+	if err != nil {
+		return nil, err
 	}
 	for _, entry := range c.Entries {
-		if uuid.Equal(entry.GUID, g) {
+		if entry.GUID == g {
 			return entry.RawCert, nil
 		}
 	}
@@ -806,23 +805,23 @@ func CertsFromProto(chain *pb.CertificateChain) *CertTable {
 	c := &CertTable{}
 	if len(chain.GetArkCert()) != 0 {
 		c.Entries = append(c.Entries,
-			CertTableEntry{GUID: uuid.Parse(ArkGUID), RawCert: chain.GetArkCert()})
+			CertTableEntry{GUID: uuid.MustParse(ArkGUID), RawCert: chain.GetArkCert()})
 	}
 	if len(chain.GetAskCert()) != 0 {
 		c.Entries = append(c.Entries,
-			CertTableEntry{GUID: uuid.Parse(AskGUID), RawCert: chain.GetAskCert()})
+			CertTableEntry{GUID: uuid.MustParse(AskGUID), RawCert: chain.GetAskCert()})
 	}
 	if len(chain.GetVcekCert()) != 0 {
 		c.Entries = append(c.Entries,
-			CertTableEntry{GUID: uuid.Parse(VcekGUID), RawCert: chain.GetVcekCert()})
+			CertTableEntry{GUID: uuid.MustParse(VcekGUID), RawCert: chain.GetVcekCert()})
 	}
 	if len(chain.GetVlekCert()) != 0 {
 		c.Entries = append(c.Entries,
-			CertTableEntry{GUID: uuid.Parse(VlekGUID), RawCert: chain.GetVlekCert()})
+			CertTableEntry{GUID: uuid.MustParse(VlekGUID), RawCert: chain.GetVlekCert()})
 	}
 	for guid, cert := range chain.GetExtras() {
 		c.Entries = append(c.Entries,
-			CertTableEntry{GUID: uuid.Parse(guid), RawCert: cert})
+			CertTableEntry{GUID: uuid.MustParse(guid), RawCert: cert})
 	}
 	return c
 }
@@ -854,20 +853,20 @@ func (c *CertTable) Marshal() []byte {
 // so missing certificates aren't an error. If certificates are missing, you can
 // choose to fetch them yourself by calling verify.GetAttestationFromReport.
 func (c *CertTable) Proto() *pb.CertificateChain {
-	vcekGUID := uuid.Parse(VcekGUID)
-	vlekGUID := uuid.Parse(VlekGUID)
-	askGUID := uuid.Parse(AskGUID)
-	arkGUID := uuid.Parse(ArkGUID)
+	vcekGUID := uuid.MustParse(VcekGUID)
+	vlekGUID := uuid.MustParse(VlekGUID)
+	askGUID := uuid.MustParse(AskGUID)
+	arkGUID := uuid.MustParse(ArkGUID)
 	result := &pb.CertificateChain{Extras: make(map[string][]byte)}
 	for _, entry := range c.Entries {
 		switch {
-		case uuid.Equal(entry.GUID, vcekGUID):
+		case entry.GUID == vcekGUID:
 			result.VcekCert = entry.RawCert
-		case uuid.Equal(entry.GUID, vlekGUID):
+		case entry.GUID == vlekGUID:
 			result.VlekCert = entry.RawCert
-		case uuid.Equal(entry.GUID, askGUID):
+		case entry.GUID == askGUID:
 			result.AskCert = entry.RawCert
-		case uuid.Equal(entry.GUID, arkGUID):
+		case entry.GUID == arkGUID:
 			result.ArkCert = entry.RawCert
 		default:
 			result.Extras[entry.GUID.String()] = entry.RawCert
@@ -1026,7 +1025,7 @@ func ExtendPlatformCertTable(data []byte, info *ExtraPlatformInfo) ([]byte, erro
 		return nil, fmt.Errorf("could not marshal ExtraPlatformInfo: %v", err)
 	}
 	certs.Entries = append(certs.Entries, CertTableEntry{
-		GUID:    uuid.Parse(ExtraPlatformInfoGUID),
+		GUID:    uuid.MustParse(ExtraPlatformInfoGUID),
 		RawCert: extra,
 	})
 	return certs.Marshal(), nil
