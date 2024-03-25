@@ -193,9 +193,12 @@ func PolicyToOptions(policy *cpb.Policy) (*Options, error) {
 	if policy.GetMinimumBuild() > 255 {
 		return nil, fmt.Errorf("minimum_build is %d. Expect 0-255", policy.GetMinimumBuild())
 	}
-	minVersion, err := parseVersion(policy.GetMinimumVersion())
-	if err != nil {
-		return nil, fmt.Errorf("invalid minimum_version, %q: %v", policy.GetMinimumVersion(), err)
+	minVersion := uint16(0) // Allow an empty minimum version to mean "0.0"
+	if policy.GetMinimumVersion() != "" {
+		minVersion, err = parseVersion(policy.GetMinimumVersion())
+		if err != nil {
+			return nil, fmt.Errorf("invalid minimum_version, %q: %v", policy.GetMinimumVersion(), err)
+		}
 	}
 	for _, authorKeyHash := range policy.GetTrustedAuthorKeyHashes() {
 		if err := lengthCheck("trusted_author_key_hashes", abi.AuthorKeyDigestSize, authorKeyHash); err != nil {
