@@ -20,6 +20,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"errors"
 	"flag"
 	"fmt"
 	"time"
@@ -30,7 +31,6 @@ import (
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/google/go-sev-guest/verify/trust"
 	"github.com/google/logger"
-	"github.com/pkg/errors"
 	"go.uber.org/multierr"
 )
 

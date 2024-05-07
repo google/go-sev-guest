@@ -16,6 +16,7 @@ package testing
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"syscall"
 	"testing"
@@ -23,7 +24,6 @@ import (
 	"github.com/google/go-sev-guest/abi"
 	labi "github.com/google/go-sev-guest/client/linuxabi"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
-	"github.com/pkg/errors"
 	"golang.org/x/sys/unix"
 )
 
