@@ -27,19 +27,19 @@ jobs:
   build:
     strategy:
       matrix:
-        go-version: [1.19.x, 1.20.x]
+        go-version: [1.20.x, 1.21.x]
         os: [macos-latest, ubuntu-latest]
 
     name: Build/Test (${{ matrix.os}}, Go ${{ matrix.go-version }})
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Setup Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.go-version }}
       - name: Install Protoc
-        uses: arduino/setup-protoc@v1
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           version: "3.12.4"
@@ -71,8 +71,8 @@ jobs:
       - uses: actions/setup-go@v2
         with:
           go-version: ${{ matrix.go-version }}
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v3.6.0
+      - name: Golangci-lint
+        uses: golangci/golangci-lint-action@23faadfdeb23a6f9e511beaba149bb123b5b145a
         with:
           version: latest
           working-directory: ./
