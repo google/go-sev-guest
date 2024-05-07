@@ -677,7 +677,7 @@ func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 	if err != nil {
 		return err
 	}
-	if options != nil && options.CheckRevocations {
+	if options.CheckRevocations {
 		if err := VcekNotRevoked(root, endorsementKeyCert, options); err != nil {
 			return err
 		}
