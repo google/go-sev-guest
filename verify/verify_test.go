@@ -67,6 +67,10 @@ func TestEmbeddedCertsAppendixB3Expectations(t *testing.T) {
 	// https://www.amd.com/system/files/TechDocs/55766_SEV-KM_API_Specification.pdf
 	// Appendix B.1
 	for _, root := range trust.DefaultRootCerts {
+		// Genoa does not use the deprecated key format.
+		if root.ArkSev == nil || root.AskSev == nil {
+			continue
+		}
 		if err := validateAskSev(root); err != nil {
 			t.Errorf("Embedded ASK failed validation: %v", err)
 		}
