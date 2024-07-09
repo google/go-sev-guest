@@ -39,10 +39,10 @@ jobs:
         with:
           go-version: ${{ matrix.go-version }}
       - name: Install Protoc
-        uses: arduino/setup-protoc@v1
+        uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
-          version: "3.12.4"
+          version: "27.2"
       - name: Install protoc-gen-go
         run: go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.31.0
       - name: Check Protobuf Generation

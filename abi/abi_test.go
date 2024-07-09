@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"math/rand"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -216,6 +217,10 @@ func TestSnpPlatformInfo(t *testing.T) {
 }
 
 func TestCpuid(t *testing.T) {
+	// GitHub actions may run on AARCH64
+	if runtime.GOARCH != "amd64" {
+		t.Skip()
+	}
 	a, b, c, d := cpuid(1)
 	if (a | b | c | d) == 0 {
 		t.Errorf("cpuid(1) = 0, 0, 0, 0")
