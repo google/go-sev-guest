@@ -365,8 +365,10 @@ func (r *AMDRootCerts) X509Options(now time.Time, key abi.ReportSigner) *x509.Ve
 func init() {
 	milanCerts := new(AMDRootCerts)
 	milanCerts.Unmarshal(askArkMilanVcekBytes)
+	milanCerts.ProductLine = "Milan"
 	genoaCerts := new(AMDRootCerts)
 	genoaCerts.FromKDSCertBytes(askArkGenoaVcekBytes)
+	genoaCerts.ProductLine = "Genoa"
 	DefaultRootCerts = map[string]*AMDRootCerts{
 		"Milan": milanCerts,
 		"Genoa": genoaCerts,
