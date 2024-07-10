@@ -46,6 +46,10 @@ var (
 	//go:embed ask_ark_milan.sevcert
 	askArkMilanVcekBytes []byte
 
+	// source: https://kdsintf.amd.com/vcek/v1/Genoa/cert_chain
+	//go:embed ask_ark_genoa.pem
+	askArkGenoaVcekBytes []byte
+
 	// A cache of product certificate KDS results per product.
 	prodCacheMu          sync.Mutex
 	productLineCertCache map[string]*ProductCerts
@@ -361,7 +365,12 @@ func (r *AMDRootCerts) X509Options(now time.Time, key abi.ReportSigner) *x509.Ve
 func init() {
 	milanCerts := new(AMDRootCerts)
 	milanCerts.Unmarshal(askArkMilanVcekBytes)
+	milanCerts.ProductLine = "Milan"
+	genoaCerts := new(AMDRootCerts)
+	genoaCerts.FromKDSCertBytes(askArkGenoaVcekBytes)
+	genoaCerts.ProductLine = "Genoa"
 	DefaultRootCerts = map[string]*AMDRootCerts{
 		"Milan": milanCerts,
+		"Genoa": genoaCerts,
 	}
 }
