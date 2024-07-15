@@ -15,13 +15,13 @@
 package client
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 
 	"github.com/google/go-sev-guest/abi"
 	labi "github.com/google/go-sev-guest/client/linuxabi"
 	pb "github.com/google/go-sev-guest/proto/sevsnp"
-	"github.com/pkg/errors"
 )
 
 var sevGuestPath = flag.String("sev_guest_device_path", "default",
