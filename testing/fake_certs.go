@@ -18,7 +18,6 @@ package testing
 import (
 	"crypto"
 	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -36,6 +35,7 @@ import (
 	"github.com/google/go-sev-guest/abi"
 	"github.com/google/go-sev-guest/kds"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
+	"github.com/google/go-sev-guest/testing/data"
 	"github.com/google/uuid"
 )
 
@@ -47,8 +47,6 @@ const (
 	askExpirationYears  = 25
 	asvkExpirationYears = 25
 	vcekExpirationYears = 7
-	arkRsaBits          = 4096
-	askRsaBits          = 4096
 )
 
 var (
@@ -295,65 +293,39 @@ func (o CertOverride) override(cert *x509.Certificate) *x509.Certificate {
 }
 
 // DefaultArk returns a new RSA key with the expected size for an ARK.
-func DefaultArk() (*rsa.PrivateKey, error) {
-	privateKey, err := rsa.GenerateKey(insecureRandomness, arkRsaBits)
-	if err != nil {
-		return nil, err
-	}
-	return privateKey, nil
+func DefaultArk() *rsa.PrivateKey {
+	return data.ARKPrivateKey
 }
 
 // DefaultAsk returns a new RSA key with the expected size for an ASK.
-func DefaultAsk() (*rsa.PrivateKey, error) {
-	privateKey, err := rsa.GenerateKey(insecureRandomness, askRsaBits)
-	if err != nil {
-		return nil, err
-	}
-	return privateKey, nil
+func DefaultAsk() *rsa.PrivateKey {
+	return data.ASKPrivateKey
 }
 
 // DefaultAsvk returns a new RSA key with the expected size for an ASVK.
-func DefaultAsvk() (*rsa.PrivateKey, error) {
-	return DefaultAsk()
+func DefaultAsvk() *rsa.PrivateKey {
+	return data.ASVKPrivateKey
 }
 
 // DefaultVcek returns a new ECDSA key on the expected curve for a VCEK.
-func DefaultVcek() (*ecdsa.PrivateKey, error) {
-	privateKey, err := ecdsa.GenerateKey(elliptic.P384(), insecureRandomness)
-	if err != nil {
-		return nil, err
-	}
-	return privateKey, nil
+func DefaultVcek() *ecdsa.PrivateKey {
+	return data.VCEKPrivateKey
 }
 
 // DefaultVlek returns a new ECDSA key on the expected curve for a VLEK.
-func DefaultVlek() (*ecdsa.PrivateKey, error) {
-	return DefaultVcek()
+func DefaultVlek() *ecdsa.PrivateKey {
+	return data.VLEKPrivateKey
 }
 
 // DefaultAmdKeys returns a key set for ARK, ASK, and VCEK with the expected key type and size.
-func DefaultAmdKeys() (*AmdKeys, error) {
-	ark, err := DefaultArk()
-	if err != nil {
-		return nil, err
+func DefaultAmdKeys() *AmdKeys {
+	return &AmdKeys{
+		Ark:  DefaultArk(),
+		Ask:  DefaultAsk(),
+		Vcek: DefaultVcek(),
+		Vlek: DefaultVlek(),
+		Asvk: DefaultAsvk(),
 	}
-	ask, err := DefaultAsk()
-	if err != nil {
-		return nil, err
-	}
-	asvk, err := DefaultAsvk()
-	if err != nil {
-		return nil, err
-	}
-	vcek, err := DefaultVcek()
-	if err != nil {
-		return nil, err
-	}
-	vlek, err := DefaultVlek()
-	if err != nil {
-		return nil, err
-	}
-	return &AmdKeys{Ark: ark, Ask: ask, Vcek: vcek, Vlek: vlek, Asvk: asvk}, nil
 }
 
 func (b *AmdSignerBuilder) certifyArk() error {
@@ -507,11 +479,7 @@ func (b *AmdSignerBuilder) certifyVlek() error {
 // TestOnlyCertChain creates a test-only certificate chain from the keys and configurables in b.
 func (b *AmdSignerBuilder) TestOnlyCertChain() (*AmdSigner, error) {
 	if b.Keys == nil {
-		keys, err := DefaultAmdKeys()
-		if err != nil {
-			return nil, err
-		}
-		b.Keys = keys
+		b.Keys = DefaultAmdKeys()
 	}
 	if err := b.certifyArk(); err != nil {
 		return nil, fmt.Errorf("ark creation error: %v", err)
@@ -546,10 +514,7 @@ func (b *AmdSignerBuilder) TestOnlyCertChain() (*AmdSigner, error) {
 
 // DefaultTestOnlyCertChain creates a test-only certificate chain for a fake attestation signer.
 func DefaultTestOnlyCertChain(productName string, creationTime time.Time) (*AmdSigner, error) {
-	keys, err := DefaultAmdKeys()
-	if err != nil {
-		return nil, fmt.Errorf("error generating fake keys: %v", err)
-	}
+	keys := DefaultAmdKeys()
 	b := &AmdSignerBuilder{
 		Keys:             keys,
 		ProductName:      productName,

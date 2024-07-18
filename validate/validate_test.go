@@ -127,10 +127,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 	}
 
 	// Expensive: generate test keys.
-	keys, err := test.DefaultAmdKeys()
-	if err != nil {
-		t.Fatal(err)
-	}
+	keys := test.DefaultAmdKeys()
 	now := time.Now()
 	productName := kds.ProductName(abi.DefaultSevProduct())
 	sign0, err := test.DefaultTestOnlyCertChain(productName, now)
