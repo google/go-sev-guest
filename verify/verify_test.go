@@ -16,6 +16,7 @@ package verify
 
 import (
 	"bytes"
+	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	_ "embed"
@@ -47,6 +48,7 @@ var (
 	signer       *test.AmdSigner
 	requireCache = flag.Bool("require_cert_cache", true,
 		"If true, hardware tests depend on host cache of endorsement key certificates")
+	insecureRandomness = rand.New(rand.NewSource(0xc0de))
 )
 
 func initSigner() {
@@ -337,7 +339,7 @@ func TestCRLRootValidity(t *testing.T) {
 	trust.ClearProductCertCache()
 	now := time.Date(2022, time.June, 14, 12, 0, 0, 0, time.UTC)
 
-	ark2, err := test.DefaultArk()
+	ark2, err := rsa.GenerateKey(insecureRandomness, 4096)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +368,6 @@ func TestCRLRootValidity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	insecureRandomness := rand.New(rand.NewSource(0xc0de))
 	afterCreation := now.Add(1 * time.Minute)
 	template := &x509.RevocationList{
 		SignatureAlgorithm: x509.SHA384WithRSAPSS,
