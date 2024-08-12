@@ -235,18 +235,28 @@ func (*LinuxConfigFsQuoteProvider) Product() *spb.SevProduct {
 
 // GetQuoteProvider returns a supported SEV-SNP QuoteProvider.
 func GetQuoteProvider() (QuoteProvider, error) {
-	preferred := &LinuxConfigFsQuoteProvider{}
-	if !preferred.IsSupported() {
-		return &LinuxIoctlQuoteProvider{}, nil
+	var provider QuoteProvider
+	provider = &LinuxConfigFsQuoteProvider{}
+	if provider.IsSupported() {
+		return provider, nil
 	}
-	return preferred, nil
+	provider = &LinuxIoctlQuoteProvider{}
+	if provider.IsSupported() {
+		return provider, nil
+	}
+	return nil, fmt.Errorf("no supported SEV-SNP QuoteProvider found")
 }
 
 // GetLeveledQuoteProvider returns a supported SEV-SNP LeveledQuoteProvider.
 func GetLeveledQuoteProvider() (LeveledQuoteProvider, error) {
-	preferred := &LinuxConfigFsQuoteProvider{}
-	if !preferred.IsSupported() {
-		return &LinuxIoctlQuoteProvider{}, nil
+	var provider LeveledQuoteProvider
+	provider = &LinuxConfigFsQuoteProvider{}
+	if provider.IsSupported() {
+		return provider, nil
 	}
-	return preferred, nil
+	provider = &LinuxIoctlQuoteProvider{}
+	if provider.IsSupported() {
+		return provider, nil
+	}
+	return nil, fmt.Errorf("no supported SEV-SNP LeveledQuoteProvider found")
 }
