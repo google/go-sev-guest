@@ -655,7 +655,7 @@ func certTableOptions(attestation *spb.Attestation, options map[string]*CertEntr
 			if opt.Kind == CertEntryRequire {
 				return err
 			}
-			logger.Warningf("Missing cert entry for %s", key)
+			logger.Warningf("Missing or invalid cert entry for %s", key)
 		}
 	}
 	return nil
