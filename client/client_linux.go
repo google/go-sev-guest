@@ -183,8 +183,16 @@ type LinuxConfigFsQuoteProvider struct{}
 
 // IsSupported checks if TSM client can be created to use ConfigFS system.
 func (p *LinuxConfigFsQuoteProvider) IsSupported() bool {
-	_, err := linuxtsm.MakeClient()
-	return err == nil
+	c, err := linuxtsm.MakeClient()
+	if err != nil {
+		return false
+	}
+	r, err := report.Create(c, &report.Request{})
+	if err != nil {
+		return false
+	}
+	provider, err := r.ReadOption("provider")
+	return err == nil && string(provider) == "sev_guest\n"
 }
 
 // GetRawQuoteAtLevel returns byte format attestation plus certificate table via ConfigFS.
