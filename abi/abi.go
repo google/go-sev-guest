@@ -875,13 +875,6 @@ func (c *CertTable) Proto() *pb.CertificateChain {
 	if len(result.VcekCert) == 0 && len(result.VlekCert) == 0 {
 		logger.Warning("Warning: Neither VCEK nor VLEK certificate found in data pages")
 	}
-
-	if len(result.AskCert) == 0 {
-		logger.Warningf("ASK certificate not found in data pages")
-	}
-	if len(result.ArkCert) == 0 {
-		logger.Warningf("ARK certificate not found in data pages")
-	}
 	return result
 }
 
