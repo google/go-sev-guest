@@ -24,19 +24,18 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/google/go-sev-guest/abi"
 	"github.com/google/go-sev-guest/kds"
 	checkpb "github.com/google/go-sev-guest/proto/check"
-	kpb "github.com/google/go-sev-guest/proto/fakekds"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
-	"github.com/google/go-sev-guest/testing"
+	test "github.com/google/go-sev-guest/testing"
 	"github.com/google/go-sev-guest/tools/lib/cmdline"
 	"github.com/google/go-sev-guest/tools/lib/report"
 	"github.com/google/go-sev-guest/validate"
 	"github.com/google/go-sev-guest/verify"
-	"github.com/google/go-sev-guest/verify/testdata"
 	"github.com/google/go-sev-guest/verify/trust"
 	"github.com/google/logger"
 	"go.uber.org/multierr"
@@ -340,26 +339,26 @@ func setString(dest *string, _, flag string, defaultValue string) {
 
 func populateProduct() error {
 	// The SevProduct can come from either product_name or the combination of product and stepping.
-	if *testing.ProductName != "" && (*testing.Product != "" || *stepping != "") {
+	if *test.ProductName != "" && (*test.Product != "" || *stepping != "") {
 		return fmt.Errorf("--product_name is mutually exclusive with both --product and --stepping")
 	}
 	// No arguments for product lead to a default value.
-	if *testing.ProductName == "" && *testing.Product == "" && *stepping == "" {
-		*testing.ProductName = testing.GetProductName()
+	if *test.ProductName == "" && *test.Product == "" && *stepping == "" {
+		*test.ProductName = test.GetProductName()
 	}
 
 	var err error
-	if *testing.ProductName != "" {
-		product, err = kds.ParseProductName(*testing.ProductName, abi.VcekReportSigner)
+	if *test.ProductName != "" {
+		product, err = kds.ParseProductName(*test.ProductName, abi.VcekReportSigner)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
 
-	product, err = kds.ParseProductLine(*testing.Product)
+	product, err = kds.ParseProductLine(*test.Product)
 	if err != nil {
-		return fmt.Errorf("--product=%q invalid: %v", *testing.Product, err)
+		return fmt.Errorf("--product=%q invalid: %v", *test.Product, err)
 	}
 	return setUInt32Value(&product.MachineStepping, "stepping", *stepping)
 }
@@ -491,16 +490,14 @@ func main() {
 		Getter:        &trust.SimpleHTTPSGetter{},
 	}
 	if *testKdsFile != "" {
+		tkds := test.GetKDS(&testing.T{})
+		kds, ok := tkds.(*test.FakeKDS)
+		if !ok {
+			die(errors.New("--test_kds=amd is mutually exclusive with --kdsdatabase"))
+		}
 		b, err := os.ReadFile(*testKdsFile)
 		if err != nil {
 			die(fmt.Errorf("could not read %q: %v", *testKdsFile, err))
-		}
-		kds := &testing.FakeKDS{
-			Certs: &kpb.Certificates{},
-			RootBundles: map[string]testing.RootBundle{"Milan": {
-				VcekBundle: string(testdata.MilanVcekBytes),
-				VlekBundle: string(testdata.MilanVlekBytes),
-			}},
 		}
 		sopts.Getter = kds
 		if err := proto.Unmarshal(b, kds.Certs); err != nil {

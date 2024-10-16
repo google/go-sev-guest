@@ -39,16 +39,25 @@ var (
 	// https://download.amd.com/developer/eula/sev/ask_ark_milan.cert
 	DefaultRootCerts map[string]*AMDRootCerts
 
-	// The ASK and ARK certificates are embedded since they do not have an expiration date. The KDS
-	// documents them having a lifetime of 25 years. The X.509 certificate that this cert's signature
-	// is over cannot be reconstructed from the SEV certificate format. The X.509 certificate with its
-	// expiration dates is at https://kdsintf.amd.com/vcek/v1/Milan/cert_chain
-	//go:embed ask_ark_milan.sevcert
-	askArkMilanVcekBytes []byte
+	// AskArkMilanVcekBytes is a CA bundle for Milan.
+	// source: https://kdsintf.amd.com/vcek/v1/Milan/cert_chain
+	//go:embed ask_ark_milan.pem
+	AskArkMilanVcekBytes []byte
 
+	// AskArkMilanVlekBytes is a CA bundle for VLEK certs on Milan.
+	// source: https://kdsintf.amd.com/vlek/v1/Milan/cert_chain
+	//go:embed ask_ark_milan_vlek.pem
+	AskArkMilanVlekBytes []byte
+
+	// AskArkGenoaVcekBytes is a CA bundle for Genoa.
 	// source: https://kdsintf.amd.com/vcek/v1/Genoa/cert_chain
 	//go:embed ask_ark_genoa.pem
-	askArkGenoaVcekBytes []byte
+	AskArkGenoaVcekBytes []byte
+
+	// AskArkGenoaVlekBytes is a CA bundle for VLEK certs on Genoa.
+	// source: https://kdsintf.amd.com/vlek/v1/Genoa/cert_chain
+	//go:embed ask_ark_genoa_vlek.pem
+	AskArkGenoaVlekBytes []byte
 
 	// A cache of product certificate KDS results per product.
 	prodCacheMu          sync.Mutex
@@ -364,10 +373,10 @@ func (r *AMDRootCerts) X509Options(now time.Time, key abi.ReportSigner) *x509.Ve
 // Parse ASK, ARK certificates from the embedded AMD certificate file.
 func init() {
 	milanCerts := new(AMDRootCerts)
-	milanCerts.Unmarshal(askArkMilanVcekBytes)
+	milanCerts.FromKDSCertBytes(AskArkMilanVcekBytes)
 	milanCerts.ProductLine = "Milan"
 	genoaCerts := new(AMDRootCerts)
-	genoaCerts.FromKDSCertBytes(askArkGenoaVcekBytes)
+	genoaCerts.FromKDSCertBytes(AskArkGenoaVcekBytes)
 	genoaCerts.ProductLine = "Genoa"
 	DefaultRootCerts = map[string]*AMDRootCerts{
 		"Milan": milanCerts,
