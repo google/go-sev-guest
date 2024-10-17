@@ -113,7 +113,7 @@ func TestVerifyVcekCert(t *testing.T) {
 	// This certificate is committed regardless of its expiration date, but we'll adjust the
 	// CurrentTime to compare against so that the validity with respect to time is always true.
 	root := new(trust.AMDRootCerts)
-	if err := root.FromKDSCertBytes(testdata.MilanVcekBytes); err != nil {
+	if err := root.FromKDSCertBytes(trust.AskArkMilanVcekBytes); err != nil {
 		t.Fatalf("could not read Milan certificate file: %v", err)
 	}
 	vcek, err := x509.ParseCertificate(testdata.VcekBytes)
@@ -673,7 +673,7 @@ func TestRealAttestationVerification(t *testing.T) {
 	copy(nonce[:], []byte{1, 2, 3, 4, 5})
 	getter := test.SimpleGetter(
 		map[string][]byte{
-			"https://kdsintf.amd.com/vcek/v1/Milan/cert_chain": testdata.MilanVcekBytes,
+			"https://kdsintf.amd.com/vcek/v1/Milan/cert_chain": trust.AskArkMilanVcekBytes,
 			// Use the VCEK's hwID and known TCB values to specify the URL its VCEK cert would be fetched from.
 			"https://kdsintf.amd.com/vcek/v1/Milan/3ac3fe21e13fb0990eb28a802e3fb6a29483a6b0753590c951bdd3b8e53786184ca39e359669a2b76a1936776b564ea464cdce40c05f63c9b610c5068b006b5d?blSPL=2&teeSPL=0&snpSPL=5&ucodeSPL=68": testdata.VcekBytes,
 		},

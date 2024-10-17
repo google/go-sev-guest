@@ -27,10 +27,14 @@ var VcekBytes []byte
 
 // MilanVcekBytes is the Milan product vcek cert_chain as issued by the AMD KDS.
 //
+// Deprecated: Use trust.AskArkMilanVcekBytes
+//
 //go:embed milan.testcer
 var MilanVcekBytes []byte
 
 // MilanVlekBytes is the Milan product vlek cert_chain as issued by the AMD KDS.
+//
+// Deprecated: Use trust.AskArkMilanVlekBytes
 //
 //go:embed milanvlek.testcer
 var MilanVlekBytes []byte

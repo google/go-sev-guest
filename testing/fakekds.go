@@ -25,7 +25,6 @@ import (
 
 	"github.com/google/go-sev-guest/kds"
 	kpb "github.com/google/go-sev-guest/proto/fakekds"
-	"github.com/google/go-sev-guest/verify/testdata"
 	"github.com/google/go-sev-guest/verify/trust"
 	"go.uber.org/multierr"
 	"google.golang.org/protobuf/proto"
@@ -50,7 +49,7 @@ var testKds = testKdsType{value: "cache"}
 
 func init() {
 	flag.Var(&testKds, "test_kds", "One of amd, cache, none. If amd, tests will "+
-		"attempt to retrieve certificates from AMD KDS. If cache, only piper-submitted certificates "+
+		"attempt to retrieve certificates from AMD KDS. If cache, only embedded certificates "+
 		"will be available given a hostname and TCB version. If none, then no VCEK certificates will "+
 		"be retrieved.")
 }
@@ -83,10 +82,15 @@ type FakeKDS struct {
 func FakeKDSFromFile(path string) (*FakeKDS, error) {
 	result := &FakeKDS{
 		Certs: &kpb.Certificates{},
-		RootBundles: map[string]RootBundle{"Milan": {
-			VcekBundle: string(testdata.MilanVcekBytes),
-			VlekBundle: string(testdata.MilanVlekBytes),
-		}},
+		RootBundles: map[string]RootBundle{
+			"Milan": {
+				VcekBundle: string(trust.AskArkMilanVcekBytes),
+				VlekBundle: string(trust.AskArkMilanVlekBytes),
+			},
+			"Genoa": {
+				VcekBundle: string(trust.AskArkGenoaVcekBytes),
+				VlekBundle: string(trust.AskArkGenoaVlekBytes),
+			}},
 	}
 
 	contents, err := os.ReadFile(path)
@@ -197,9 +201,13 @@ func GetKDS(t testing.TB) trust.HTTPSGetter {
 	fakeKds := &FakeKDS{
 		Certs: &kpb.Certificates{},
 		RootBundles: map[string]RootBundle{"Milan": {
-			VcekBundle: string(testdata.MilanVcekBytes),
-			VlekBundle: string(testdata.MilanVlekBytes),
-		}},
+			VcekBundle: string(trust.AskArkMilanVcekBytes),
+			VlekBundle: string(trust.AskArkMilanVlekBytes),
+		},
+			"Genoa": {
+				VcekBundle: string(trust.AskArkGenoaVcekBytes),
+				VlekBundle: string(trust.AskArkGenoaVlekBytes),
+			}},
 	}
 	// Provide nothing if --test_kds=none.
 	if testKds.value == "none" {
