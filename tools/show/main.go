@@ -25,7 +25,7 @@ import (
 
 var (
 	infile = flag.String("in", "-", "Path to attestation file, or - for stdin.")
-	inform = flag.String("inform", "in", "Format of the attestation file. "+
+	inform = flag.String("inform", "bin", "Format of the attestation file. "+
 		"One of bin, proto, textproto")
 	outfile = flag.String("out", "-", "Path to output file, or - for stdout.")
 	outform = flag.String("outform", "textproto", "Format of the output file. "+
