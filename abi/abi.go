@@ -126,9 +126,13 @@ const (
 	milanExtendedModel  = 0
 	genoaExtendedModel  = 1
 
-	// ExpectedReportVersion is set by the SNP API specification
+	// ReportVersion2 is set by the SNP API specification
+	// https://web.archive.org/web/20231222054111if_/http://www.amd.com/content/dam/amd/en/documents/epyc-technical-docs/specifications/56860.pdf
+	ReportVersion2 = 2
+
+	// ReportVersion3 is set by the SNP API specification
 	// https://www.amd.com/system/files/TechDocs/56860.pdf
-	ExpectedReportVersion = 2
+	ReportVersion3 = 3
 )
 
 // CertTableHeaderEntry defines an entry of the beginning of an extended attestation report which
@@ -479,7 +483,16 @@ func ReportToProto(data []uint8) (*pb.Report, error) {
 	r.ReportId = clone(data[0x140:0x160])
 	r.ReportIdMa = clone(data[0x160:0x180])
 	r.ReportedTcb = binary.LittleEndian.Uint64(data[0x180:0x188])
-	if err := mbz(data, 0x188, 0x1A0); err != nil {
+
+	mbzLo := 0x188
+	if r.Version == ReportVersion3 {
+		mbzLo = 0x18B
+		r.CpuidFamId = []byte{data[0x188]}
+		r.CpuidModId = []byte{data[0x189]}
+		r.CpuidStep = []byte{data[0x18A]}
+	}
+
+	if err := mbz(data, mbzLo, 0x1A0); err != nil {
 		return nil, err
 	}
 	r.ChipId = clone(data[0x1A0:0x1E0])
@@ -575,8 +588,8 @@ func ValidateReportFormat(r []byte) error {
 	}
 
 	version := binary.LittleEndian.Uint32(r[0x00:0x04])
-	if version != ExpectedReportVersion {
-		return fmt.Errorf("report version is: %d. Expected %d", version, ExpectedReportVersion)
+	if version != ReportVersion2 && version != ReportVersion3 {
+		return fmt.Errorf("report version is: %d. Expected %d or %d", version, ReportVersion2, ReportVersion3)
 	}
 
 	policy := binary.LittleEndian.Uint64(r[0x08:0x10])
@@ -619,6 +632,14 @@ func ReportToAbiBytes(r *pb.Report) ([]byte, error) {
 	copy(data[0x140:0x160], r.ReportId[:])
 	copy(data[0x160:0x180], r.ReportIdMa[:])
 	binary.LittleEndian.PutUint64(data[0x180:0x188], r.ReportedTcb)
+
+	// Add CPUID information if this is a version 3 report.
+	if r.Version == ReportVersion3 {
+		data[0x188] = r.CpuidFamId[0]
+		data[0x189] = r.CpuidModId[0]
+		data[0x18A] = r.CpuidStep[0]
+	}
+
 	copy(data[0x1A0:0x1E0], r.ChipId[:])
 	binary.LittleEndian.PutUint64(data[0x1E0:0x1E8], r.CommittedTcb)
 	if r.CurrentBuild >= (1 << 8) {

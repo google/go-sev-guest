@@ -25,7 +25,7 @@ option go_package = "github.com/google/go-sev-guest/proto/sevsnp";
 // Report represents an SEV-SNP ATTESTATION_REPORT, specified in SEV SNP API
 //  documentation https://www.amd.com/system/files/TechDocs/56860.pdf
 message Report {
-  uint32 version = 1;  // Should be 1 for revision 1.51
+  uint32 version = 1;  // Should be 2 for revision 1.55, and 3 for revision 1.56
   uint32 guest_svn = 2;
   uint64 policy = 3;
   bytes family_id = 4;  // Should be 16 bytes long
@@ -55,6 +55,10 @@ message Report {
   uint32 committed_major = 26;
   uint64 launch_tcb = 27;
   bytes signature = 28;  // Should be 512 bytes long
+
+  bytes cpuid_fam_id = 29;  // 1 byte combined Extended Family ID and Family ID
+  bytes cpuid_mod_id = 30;  // 1 byte combined Extended Model and Model fields
+  bytes cpuid_step = 31;    // 1 byte Stepping
 }
 
 message CertificateChain {
