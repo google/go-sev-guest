@@ -56,9 +56,7 @@ message Report {
   uint64 launch_tcb = 27;
   bytes signature = 28;  // Should be 512 bytes long
 
-  bytes cpuid_fam_id = 29;  // 1 byte combined Extended Family ID and Family ID
-  bytes cpuid_mod_id = 30;  // 1 byte combined Extended Model and Model fields
-  bytes cpuid_step = 31;    // 1 byte Stepping
+  uint32 cpuid1eax_fms = 29;  // The cpuid(1).eax & 0x0fff0fff representation of family/model/stepping
 }
 
 message CertificateChain {
