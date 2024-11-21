@@ -830,7 +830,7 @@ func GetAttestationFromReport(report *spb.Report, options *Options) (*spb.Attest
 	case abi.VlekReportSigner:
 		exts, _ = kds.VlekCertificateExtensions(parse(result.CertificateChain.VlekCert))
 	}
-	if exts != nil {
+	if exts != nil && report.GetCpuid1EaxFms() == 0 {
 		product, _ := kds.ParseProductName(exts.ProductName, info.SigningKey)
 		setProduct(result, product)
 	}
