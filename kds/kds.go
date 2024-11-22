@@ -99,9 +99,19 @@ var (
 		"Genoa-B0": {Name: pb.SevProduct_SEV_PRODUCT_GENOA, MachineStepping: uint0},
 		"Genoa-B1": {Name: pb.SevProduct_SEV_PRODUCT_GENOA, MachineStepping: uint1},
 		"Genoa-B2": {Name: pb.SevProduct_SEV_PRODUCT_GENOA, MachineStepping: uint2},
+		"Turin-B0": {Name: pb.SevProduct_SEV_PRODUCT_TURIN, MachineStepping: uint0},
+		"Turin-B1": {Name: pb.SevProduct_SEV_PRODUCT_TURIN, MachineStepping: uint1},
 	}
 	milanSteppingVersions = []string{"B0", "B1"}
 	genoaSteppingVersions = []string{"B0", "B1", "B2"}
+	turinSteppingVersions = []string{"B0", "B1"}
+
+	// ProductLineCpuid associates the CPUID_1_EAX value (Stepping 0) to its AMD product name.
+	ProductLineCpuid = map[uint32]string{
+		0x00a00f10: "Milan",
+		0x00a10f10: "Genoa",
+		0x00b00f20: "Turin",
+	}
 )
 
 // TCBVersion is a 64-bit bitfield of different security patch levels of AMD firmware and microcode.
@@ -731,6 +741,8 @@ func ProductLine(product *pb.SevProduct) string {
 		return "Milan"
 	case pb.SevProduct_SEV_PRODUCT_GENOA:
 		return "Genoa"
+	case pb.SevProduct_SEV_PRODUCT_TURIN:
+		return "Turin"
 	default:
 		return "Unknown"
 	}
@@ -785,10 +797,20 @@ func ProductName(product *pb.SevProduct) string {
 		if int(stepping) >= len(genoaSteppingVersions) {
 			return "unmappedGenoaStepping"
 		}
-		return fmt.Sprintf("Milan-%s", genoaSteppingVersions[stepping])
+		return fmt.Sprintf("Genoa-%s", genoaSteppingVersions[stepping])
+	case pb.SevProduct_SEV_PRODUCT_TURIN:
+		if int(stepping) >= len(turinSteppingVersions) {
+			return "unmappedTurinStepping"
+		}
+		return fmt.Sprintf("Turin-%s", turinSteppingVersions[stepping])
 	default:
 		return "Unknown"
 	}
+}
+
+// ProductLineFromFms returns the product name used in the KDS endpoint to fetch VCEK certificates.
+func ProductLineFromFms(fms uint32) string {
+	return ProductLine(abi.SevProductFromCpuid1Eax(fms))
 }
 
 // ParseProduct returns the SevProductName for a product name without the stepping suffix.
@@ -809,6 +831,8 @@ func ParseProductLine(productLine string) (*pb.SevProduct, error) {
 		return &pb.SevProduct{Name: pb.SevProduct_SEV_PRODUCT_MILAN}, nil
 	case "Genoa":
 		return &pb.SevProduct{Name: pb.SevProduct_SEV_PRODUCT_GENOA}, nil
+	case "Turin":
+		return &pb.SevProduct{Name: pb.SevProduct_SEV_PRODUCT_TURIN}, nil
 	default:
 		return nil, fmt.Errorf("unknown AMD SEV product: %q", productLine)
 	}

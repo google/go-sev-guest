@@ -110,8 +110,9 @@ type AmdSigner struct {
 	Keys   *AmdKeys
 	// This identity does not match AMD's notion of an HWID. It is purely to combine expectations of
 	// report data -> KDS URL construction for the fake KDS implementation.
-	HWID [abi.ChipIDSize]byte
-	TCB  kds.TCBVersion
+	HWID    [abi.ChipIDSize]byte
+	TCB     kds.TCBVersion
+	Product *spb.SevProduct
 }
 
 // AmdKeys encapsulates the key chain of ARK through ASK down to VCEK.

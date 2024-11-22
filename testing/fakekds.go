@@ -23,6 +23,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/go-sev-guest/abi"
 	"github.com/google/go-sev-guest/kds"
 	kpb "github.com/google/go-sev-guest/proto/fakekds"
 	"github.com/google/go-sev-guest/verify/trust"
@@ -75,14 +76,14 @@ type RootBundle struct {
 type FakeKDS struct {
 	Certs *kpb.Certificates
 	// Two CERTIFICATE PEMs for ASK, then ARK or ASVK then ARK, per product
-	RootBundles map[string]RootBundle
+	RootBundles map[string]*RootBundle
 }
 
 // FakeKDSFromFile returns a FakeKDS from a path to a serialized fakekds.Certificates message.
 func FakeKDSFromFile(path string) (*FakeKDS, error) {
 	result := &FakeKDS{
 		Certs: &kpb.Certificates{},
-		RootBundles: map[string]RootBundle{
+		RootBundles: map[string]*RootBundle{
 			"Milan": {
 				VcekBundle: string(trust.AskArkMilanVcekBytes),
 				VlekBundle: string(trust.AskArkMilanVlekBytes),
@@ -110,14 +111,17 @@ func FakeKDSFromFile(path string) (*FakeKDS, error) {
 // AMD KDS REST API expectations.
 func FakeKDSFromSigner(signer *AmdSigner) (*FakeKDS, error) {
 	certs := &kpb.Certificates{}
+	rootBundles := map[string]*RootBundle{}
 	certs.ChipCerts = []*kpb.Certificates_ChipTCBCerts{
 		{
 			ChipId: signer.HWID[:],
 			TcbCerts: map[uint64][]byte{
 				uint64(signer.TCB): signer.Vcek.Raw,
 			},
+			Fms: abi.MaskedCpuid1EaxFromSevProduct(signer.Product),
 		},
 	}
+	productLine := kds.ProductLine(signer.Product)
 
 	b := &strings.Builder{}
 	if err := multierr.Combine(
@@ -126,8 +130,7 @@ func FakeKDSFromSigner(signer *AmdSigner) (*FakeKDS, error) {
 	); err != nil {
 		return nil, fmt.Errorf("could not encode VCEK root certificates: %v", err)
 	}
-	vcekBundle := b.String()
-	var vlekBundle string
+	rootBundles[productLine] = &RootBundle{VcekBundle: b.String()}
 	if signer.Asvk != nil {
 		b := &strings.Builder{}
 		if err := multierr.Combine(
@@ -136,15 +139,10 @@ func FakeKDSFromSigner(signer *AmdSigner) (*FakeKDS, error) {
 		); err != nil {
 			return nil, fmt.Errorf("could not encode VLEK root certificates: %v", err)
 		}
-		vlekBundle = b.String()
+		rootBundles[productLine].VlekBundle = b.String()
 	}
-	return &FakeKDS{
-		Certs: certs,
-		RootBundles: map[string]RootBundle{"Milan": {
-			VcekBundle: vcekBundle,
-			VlekBundle: vlekBundle,
-		}},
-	}, nil
+
+	return &FakeKDS{Certs: certs, RootBundles: rootBundles}, nil
 }
 
 // FindChipTcbCerts returns the TcbCerts associated with the given chipID in the database if they
@@ -200,7 +198,7 @@ func GetKDS(t testing.TB) trust.HTTPSGetter {
 	}
 	fakeKds := &FakeKDS{
 		Certs: &kpb.Certificates{},
-		RootBundles: map[string]RootBundle{"Milan": {
+		RootBundles: map[string]*RootBundle{"Milan": {
 			VcekBundle: string(trust.AskArkMilanVcekBytes),
 			VlekBundle: string(trust.AskArkMilanVlekBytes),
 		},

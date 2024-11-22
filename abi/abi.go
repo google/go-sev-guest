@@ -984,6 +984,9 @@ func SevProductFromCpuid1Eax(eax uint32) *pb.SevProduct {
 // MaskedCpuid1EaxFromSevProduct returns the Cpuid1Eax value expected from the given product
 // when masked with CpuidProductMask.
 func MaskedCpuid1EaxFromSevProduct(product *pb.SevProduct) uint32 {
+	if product == nil {
+		return 0
+	}
 	var family, model, stepping byte
 	if product.MachineStepping != nil {
 		stepping = byte(product.MachineStepping.Value & 0xf)

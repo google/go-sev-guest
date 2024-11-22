@@ -31,6 +31,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-sev-guest/abi"
 	sg "github.com/google/go-sev-guest/client"
 	"github.com/google/go-sev-guest/kds"
@@ -83,19 +84,25 @@ func TestEmbeddedCertsAppendixB3Expectations(t *testing.T) {
 }
 
 func TestFakeCertsKDSExpectations(t *testing.T) {
-	signMu.Do(initSigner)
-	trust.ClearProductCertCache()
-	root := trust.AMDRootCertsProduct(test.GetProductLine())
-	root.ProductCerts = &trust.ProductCerts{
-		Ark: signer.Ark,
-		Ask: signer.Ask,
-	}
-	// No ArkSev or AskSev intentionally for test certs.
-	if err := validateArkX509(root); err != nil {
-		t.Errorf("fake ARK validation error: %v", err)
-	}
-	if err := validateAskX509(root); err != nil {
-		t.Errorf("fake ASK validation error: %v", err)
+	for _, productLine := range kds.ProductLineCpuid {
+		trust.ClearProductCertCache()
+		signer, err := test.DefaultTestOnlyCertChain(productLine+"-B0", time.Now())
+		if err != nil {
+			t.Fatalf("no quote provider for productLine %s: %v", productLine, err)
+		}
+
+		root := trust.AMDRootCertsProduct(productLine)
+		root.ProductCerts = &trust.ProductCerts{
+			Ark: signer.Ark,
+			Ask: signer.Ask,
+		}
+		// No ArkSev or AskSev intentionally for test certs.
+		if err := validateArkX509(root); err != nil {
+			t.Errorf("fake ARK validation error: %v", err)
+		}
+		if err := validateAskX509(root); err != nil {
+			t.Errorf("fake ASK validation error: %v", err)
+		}
 	}
 }
 
@@ -151,13 +158,26 @@ func TestVerifyVcekCert(t *testing.T) {
 func TestSnpReportSignature(t *testing.T) {
 	tests := test.TestCases()
 	now := time.Date(2022, time.May, 3, 9, 0, 0, 0, time.UTC)
-	qp, err := test.TcQuoteProvider(tests, &test.DeviceOptions{Now: now, Product: abi.DefaultSevProduct()})
-	if err != nil {
-		t.Fatal(err)
+	qps := map[uint32]*test.QuoteProvider{}
+	for fms, productLine := range kds.ProductLineCpuid {
+		p, _ := kds.ParseProductLine(productLine)
+		if p == nil {
+			t.Fatal("productLine parsing failed")
+		}
+		qp, err := test.TcQuoteProvider(tests, &test.DeviceOptions{Now: now, Product: p})
+		if err != nil {
+			t.Fatal(err)
+		}
+		qps[fms] = qp
 	}
 	for _, tc := range tests {
 		if testclient.SkipUnmockableTestCase(&tc) {
 			continue
+		}
+		fms := fmsFromReport(t, tc.Output[:])
+		qp := qps[fms&^0xf]
+		if qp == nil {
+			t.Fatalf("No quote provider for fms 0x%x", fms)
 		}
 		// Does the Raw report match expectations?
 		rawcombo, err := qp.GetRawQuote(tc.Input)
@@ -168,8 +188,8 @@ func TestSnpReportSignature(t *testing.T) {
 			raw := rawcombo[:abi.ReportSize]
 			got := abi.SignedComponent(raw)
 			want := abi.SignedComponent(tc.Output[:])
-			if !bytes.Equal(got, want) {
-				t.Errorf("%s: GetRawReport(%v) = %v, want %v", tc.Name, tc.Input, got, want)
+			if diff := cmp.Diff(want, got); diff != "" {
+				t.Errorf("%s: GetRawReport(%v) = %v, want %v\nDiff (-want, +got): %s", tc.Name, tc.Input, got, want, diff)
 			}
 			key := qp.Device.Signer.Vcek
 			if tc.EK == test.KeyChoiceVlek {
@@ -326,7 +346,7 @@ func TestKdsMetadataLogic(t *testing.T) {
 			options = &Options{Product: abi.DefaultSevProduct()}
 		}
 		vcekPem := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: newSigner.Vcek.Raw})
-		vcek, _, err := decodeCerts(&spb.CertificateChain{VcekCert: vcekPem, AskCert: newSigner.Ask.Raw, ArkCert: newSigner.Ark.Raw}, abi.VcekReportSigner, options)
+		vcek, _, err := decodeCerts(&spb.CertificateChain{VcekCert: vcekPem, AskCert: newSigner.Ask.Raw, ArkCert: newSigner.Ark.Raw}, abi.VcekReportSigner, "", options)
 		if !test.Match(err, tc.wantErr) {
 			t.Errorf("%s: decodeCerts(...) = %+v, %v did not error as expected. Want %q", tc.name, vcek, err, tc.wantErr)
 		}
@@ -411,13 +431,105 @@ func TestCRLRootValidity(t *testing.T) {
 	}
 }
 
+type reportGetter func(sg.QuoteProvider, [64]byte) (*spb.Attestation, error)
+type reportGetterProfile struct {
+	name           string
+	getter         reportGetter
+	skipVlek       bool
+	skipNoCache    bool
+	badRootErr     string
+	vlekOnly       bool
+	vlekErr        string
+	vlekBadRootErr string
+}
+type providerCache struct {
+	tcs     []test.TestCase
+	opts    *test.DeviceOptions
+	entries map[uint32]*providerData
+}
+type providerData struct {
+	qp       sg.QuoteProvider
+	badRoots map[string][]*trust.AMDRootCerts
+	opts     *Options
+}
+
+func (p *providerCache) getStore() map[uint32]*providerData {
+	if p.entries == nil {
+		p.entries = map[uint32]*providerData{}
+	}
+	return p.entries
+}
+
+func (p *providerCache) forceProvider(t testing.TB, fms uint32) *providerData {
+	store := p.getStore()
+	if data, ok := store[fms]; ok {
+		return data
+	}
+	dopts := *p.opts
+	dopts.Product = abi.SevProductFromCpuid1Eax(fms)
+	qp, goodRoots, badRoots, kds := testclient.GetSevQuoteProvider(p.tcs, &dopts, t)
+
+	// Trust the test device's root certs.
+	options := &Options{
+		TrustedRoots:        goodRoots,
+		Getter:              kds,
+		Product:             dopts.Product,
+		DisableCertFetching: *requireCache && !sg.UseDefaultSevGuest(),
+	}
+	data := &providerData{
+		qp:       qp,
+		badRoots: badRoots,
+		opts:     options,
+	}
+	store[fms] = data
+	return data
+}
+
+func fullQuoteTest(t *testing.T, pd *providerData, getReport *reportGetterProfile, tc *test.TestCase) {
+	// On real hardware, skip tests that represent being on a different platform.
+	if pd.qp == nil {
+		t.Skip()
+		return
+	}
+	ereport, err := getReport.getter(pd.qp, tc.Input)
+	if !test.Match(err, tc.WantErr) {
+		t.Fatalf("(d, %v) = %v, %v. Want err: %v", tc.Input, ereport, err, tc.WantErr)
+	}
+	if tc.WantErr != "" {
+		return
+	}
+	var wantAttestationErr string
+	if tc.EK == test.KeyChoiceVlek && getReport.vlekErr != "" {
+		wantAttestationErr = getReport.vlekErr
+	}
+	if err := SnpAttestation(ereport, pd.opts); !test.Match(err, wantAttestationErr) {
+		t.Errorf("SnpAttestation(%v) = %v. Want err: %q", ereport, err, wantAttestationErr)
+	}
+
+	wantBad := getReport.badRootErr
+	if tc.EK == test.KeyChoiceVlek && getReport.vlekBadRootErr != "" {
+		wantBad = getReport.vlekBadRootErr
+	}
+	badOptions := &Options{TrustedRoots: pd.badRoots, Getter: pd.opts.Getter, Product: pd.opts.Product}
+	if err := SnpAttestation(ereport, badOptions); !test.Match(err, wantBad) {
+		t.Errorf("SnpAttestation(_) bad root test errored unexpectedly: %v, want %s",
+			err, wantBad)
+	}
+}
+
+func fmsFromReport(t testing.TB, report []byte) uint32 {
+	fms := abi.FmsToCpuid1Eax(report[0x188], report[0x189], report[0x18A])
+	if fms == 0 {
+		fms = abi.MaskedCpuid1EaxFromSevProduct(test.GetProduct(t))
+	}
+	return fms
+}
+
 // TestOpenGetExtendedReportVerifyClose tests the SnpAttestation function for the deprecated ioctl
 // API.
 func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 	trust.ClearProductCertCache()
 	tests := test.TestCases()
-	qp, goodRoots, badRoots, kds := testclient.GetSevQuoteProvider(tests, &test.DeviceOptions{Now: time.Now()}, t)
-	type reportGetter func(sg.QuoteProvider, [64]byte) (*spb.Attestation, error)
 	reportOnly := func(qp sg.QuoteProvider, input [64]byte) (*spb.Attestation, error) {
 		attestation, err := sg.GetQuoteProto(qp, input)
 		if err != nil {
@@ -425,16 +537,7 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 		}
 		return &spb.Attestation{Report: attestation.Report}, nil
 	}
-	reportGetters := []struct {
-		name           string
-		getter         reportGetter
-		skipVlek       bool
-		skipNoCache    bool
-		badRootErr     string
-		vlekOnly       bool
-		vlekErr        string
-		vlekBadRootErr string
-	}{
+	reportGetters := []*reportGetterProfile{
 		{
 			name:           "GetExtendedReport",
 			getter:         sg.GetQuoteProto,
@@ -461,8 +564,11 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 					attestation.CertificateChain = &spb.CertificateChain{}
 				}
 				chain := attestation.CertificateChain
-				info, _ := abi.ParseSignerInfo(attestation.GetReport().GetSignerInfo())
-				if sg.UseDefaultSevGuest() && info.SigningKey == abi.VlekReportSigner {
+				// Forge VLEK signer info since all test cases assume VCEK.
+				attestation.Report.SignerInfo = abi.ComposeSignerInfo(abi.SignerInfo{
+					SigningKey: abi.VlekReportSigner,
+				})
+				if sg.UseDefaultSevGuest() {
 					if td, ok := qp.(*test.QuoteProvider); ok {
 						chain.VlekCert = td.Device.Signer.Vlek.Raw
 					}
@@ -476,14 +582,7 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 			skipNoCache:    true,
 		},
 	}
-	// Trust the test device's root certs.
-	options := &Options{
-		TrustedRoots:        goodRoots,
-		Getter:              kds,
-		Product:             test.GetProduct(t),
-		DisableCertFetching: *requireCache && !sg.UseDefaultSevGuest(),
-	}
-	badOptions := &Options{TrustedRoots: badRoots, Getter: kds, Product: test.GetProduct(t)}
+	providerCache := &providerCache{tcs: test.TestCases(), opts: &test.DeviceOptions{Now: time.Now()}}
 	for _, tc := range tests {
 		if testclient.SkipUnmockableTestCase(&tc) {
 			t.Run(tc.Name, func(t *testing.T) { t.Skip() })
@@ -491,6 +590,7 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 		}
 		for _, getReport := range reportGetters {
 			t.Run(tc.Name+"_"+getReport.name, func(t *testing.T) {
+				trust.ClearProductCertCache()
 				if getReport.skipVlek && tc.EK == test.KeyChoiceVlek {
 					t.Skip()
 					return
@@ -503,28 +603,10 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 					t.Skip()
 					return
 				}
-				ereport, err := getReport.getter(qp, tc.Input)
-				if !test.Match(err, tc.WantErr) {
-					t.Fatalf("(d, %v) = %v, %v. Want err: %v", tc.Input, ereport, err, tc.WantErr)
-				}
-				if tc.WantErr == "" {
-					var wantAttestationErr string
-					if tc.EK == test.KeyChoiceVlek && getReport.vlekErr != "" {
-						wantAttestationErr = getReport.vlekErr
-					}
-					if err := SnpAttestation(ereport, options); !test.Match(err, wantAttestationErr) {
-						t.Errorf("SnpAttestation(%v) = %v. Want err: %q", ereport, err, wantAttestationErr)
-					}
-
-					wantBad := getReport.badRootErr
-					if tc.EK == test.KeyChoiceVlek && getReport.vlekBadRootErr != "" {
-						wantBad = getReport.vlekBadRootErr
-					}
-					if err := SnpAttestation(ereport, badOptions); !test.Match(err, wantBad) {
-						t.Errorf("SnpAttestation(_) bad root test errored unexpectedly: %v, want %s",
-							err, wantBad)
-					}
-				}
+				// If the test case is for a v3 report and the products don't align with
+				// the expected product, skip.
+				fms := fmsFromReport(t, tc.Output[:])
+				fullQuoteTest(t, providerCache.forceProvider(t, fms), getReport, &tc)
 			})
 		}
 	}
@@ -534,15 +616,7 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 func TestGetQuoteProviderVerify(t *testing.T) {
 	trust.ClearProductCertCache()
 	tests := test.TestCases()
-	qp, goodRoots, badRoots, kds := testclient.GetSevQuoteProvider(tests, &test.DeviceOptions{Now: time.Now()}, t)
-	// Trust the test device's root certs.
-	options := &Options{
-		TrustedRoots:        goodRoots,
-		Getter:              kds,
-		Product:             test.GetProduct(t),
-		DisableCertFetching: *requireCache && !sg.UseDefaultSevGuest(),
-	}
-	badOptions := &Options{TrustedRoots: badRoots, Getter: kds, Product: test.GetProduct(t)}
+	providerCache := &providerCache{tcs: tests, opts: &test.DeviceOptions{Now: time.Now()}}
 	for _, tc := range tests {
 		// configfs-tsm doesn't support the key choice parameter for getting an attestation report, and
 		// it doesn't return firmware error codes.
@@ -551,7 +625,12 @@ func TestGetQuoteProviderVerify(t *testing.T) {
 			continue
 		}
 		t.Run(tc.Name+"_", func(t *testing.T) {
-			reportcerts, err := qp.GetRawQuote(tc.Input)
+			pd := providerCache.forceProvider(t, fmsFromReport(t, tc.Output[:]))
+			if pd.qp == nil {
+				t.Skip()
+				return
+			}
+			reportcerts, err := pd.qp.GetRawQuote(tc.Input)
 			ereport, _ := abi.ReportCertsToProto(reportcerts)
 			if tc.FwErr != abi.Success {
 				if err == nil {
@@ -562,10 +641,10 @@ func TestGetQuoteProviderVerify(t *testing.T) {
 			}
 			if tc.WantErr == "" {
 				var wantAttestationErr string
-				if err := SnpAttestation(ereport, options); !test.Match(err, wantAttestationErr) {
+				if err := SnpAttestation(ereport, pd.opts); !test.Match(err, wantAttestationErr) {
 					t.Errorf("SnpAttestation(%v) = %v. Want err: %q", ereport, err, wantAttestationErr)
 				}
-
+				badOptions := &Options{TrustedRoots: pd.badRoots, Getter: pd.opts.Getter, Product: pd.opts.Product}
 				wantBad := "error verifying VCEK certificate"
 				if err := SnpAttestation(ereport, badOptions); !test.Match(err, wantBad) {
 					t.Errorf("SnpAttestation(_) bad root test errored unexpectedly: %v, want %s",
@@ -726,5 +805,67 @@ func TestKDSCertBackdated(t *testing.T) {
 	if !cert.NotBefore.Before(now.Add(-23 * time.Hour)) {
 		t.Fatalf("KDS has not backdated its certificates. NotBefore: %s, now: %s",
 			cert.NotBefore.Format(time.RFC3339), now.Format(time.RFC3339))
+	}
+}
+
+func TestV3KDSProduct(t *testing.T) {
+	var tcs []test.TestCase
+	for _, tc := range test.TestCases() {
+		if tc.Output[0] == 3 {
+			t.Logf("picked %s", tc.Name)
+			tcs = append(tcs, tc)
+		}
+	}
+	if len(tcs) == 0 {
+		t.Fatalf("no test cases")
+	}
+	getter := test.SimpleGetter(map[string][]byte{
+		"https://kdsintf.amd.com/vcek/v1/Milan/00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000?blSPL=0&teeSPL=0&snpSPL=0&ucodeSPL=0": []byte("milancert"),
+		"https://kdsintf.amd.com/vcek/v1/Milan/cert_chain": trust.AskArkMilanVcekBytes,
+		"https://kdsintf.amd.com/vcek/v1/Genoa/00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000?blSPL=0&teeSPL=0&snpSPL=0&ucodeSPL=0": []byte("genoacert"),
+		"https://kdsintf.amd.com/vcek/v1/Genoa/cert_chain": trust.AskArkGenoaVcekBytes,
+	})
+	options := &Options{
+		TrustedRoots: map[string][]*trust.AMDRootCerts{},
+		Now:          time.Date(1, time.January, 5, 0, 0, 0, 0, time.UTC),
+		Product:      abi.DefaultSevProduct(),
+		Getter:       getter,
+	}
+	for _, productLine := range []string{"Milan", "Genoa"} {
+		r := trust.AMDRootCertsProduct(productLine)
+		r.ProductCerts = &trust.ProductCerts{
+			Ark: signer.Ark,
+			Ask: signer.Ask,
+		}
+		options.TrustedRoots[productLine] = []*trust.AMDRootCerts{r}
+	}
+	var gotGenoa, gotMilan bool
+	for _, tc := range tcs {
+		t.Run(tc.Name, func(t *testing.T) {
+			report, _ := abi.ReportToProto(tc.Output[:])
+			a := &spb.Attestation{Report: report}
+			if err := fillInAttestation(a, options); err != nil {
+				t.Fatalf("fillInAttestation(%v, %v) = %v, want nil", a, options, err)
+			}
+			var want []byte
+			switch report.Cpuid1EaxFms {
+			case 0x00a00f10:
+				want = []byte("milancert")
+				gotMilan = true
+			case 0x00a10f10:
+				want = []byte("genoacert")
+				gotGenoa = true
+			}
+			got := a.CertificateChain.VcekCert
+			if !bytes.Equal(got, want) {
+				t.Fatalf("certificate is %v, want %v", got, want)
+			}
+		})
+	}
+	if !gotMilan {
+		t.Errorf("missed Milan case")
+	}
+	if !gotGenoa {
+		t.Errorf("missed Genoa case")
 	}
 }

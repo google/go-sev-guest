@@ -26,6 +26,7 @@ message Certificates {
     bytes chip_id = 1;  // Should be 64 bytes
     map<uint64, bytes> tcb_certs = 2;
     string hostname = 3;
+    uint32 fms = 4;
   }
   repeated ChipTCBCerts chip_certs = 1;
 }

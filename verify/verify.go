@@ -468,7 +468,7 @@ func checkProductName(got, want *spb.SevProduct, key abi.ReportSigner) error {
 // decodeCerts checks that the V[CL]EK certificate matches expected fields
 // from the KDS specification and also that its certificate chain matches
 // hardcoded trusted root certificates from AMD.
-func decodeCerts(chain *spb.CertificateChain, key abi.ReportSigner, options *Options) (*x509.Certificate, *trust.AMDRootCerts, error) {
+func decodeCerts(chain *spb.CertificateChain, key abi.ReportSigner, knownProductLine string, options *Options) (*x509.Certificate, *trust.AMDRootCerts, error) {
 	var ek []byte
 	switch key {
 	case abi.VcekReportSigner:
@@ -489,15 +489,19 @@ func decodeCerts(chain *spb.CertificateChain, key abi.ReportSigner, options *Opt
 	}
 	roots := options.TrustedRoots
 
-	product, err := kds.ParseProductName(exts.ProductName, key)
-	if err != nil {
-		return nil, nil, err
-	}
+	productLine := knownProductLine
+	// Relevant for v2 reports only.
+	if productLine == "" {
+		product, err := kds.ParseProductName(exts.ProductName, key)
+		if err != nil {
+			return nil, nil, err
+		}
 
-	productLine := kds.ProductLine(product)
-	// Ensure the extension product info matches expectations.
-	if err := checkProductName(product, options.Product, key); err != nil {
-		return nil, nil, err
+		productLine = kds.ProductLine(product)
+		// Ensure the extension product info matches expectations.
+		if err := checkProductName(product, options.Product, key); err != nil {
+			return nil, nil, err
+		}
 	}
 	if len(roots) == 0 {
 		root := trust.AMDRootCertsProduct(productLine)
@@ -574,7 +578,7 @@ type Options struct {
 	TrustedRoots map[string][]*trust.AMDRootCerts
 	// Product is a forced value for the attestation product name when verifying or retrieving
 	// VCEK certificates. An attestation should carry the product of the reporting
-	// machine.
+	// machine. Only used for v2 attestation reports.
 	Product *spb.SevProduct
 }
 
@@ -673,7 +677,12 @@ func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 		return err
 	}
 	chain := attestation.GetCertificateChain()
-	endorsementKeyCert, root, err := decodeCerts(chain, info.SigningKey, options)
+
+	var knownProductLine string
+	if fms := attestation.GetReport().GetCpuid1EaxFms(); fms != 0 {
+		knownProductLine = kds.ProductLineFromFms(fms)
+	}
+	endorsementKeyCert, root, err := decodeCerts(chain, info.SigningKey, knownProductLine, options)
 	if err != nil {
 		return err
 	}
@@ -719,10 +728,15 @@ func setProduct(attestation *spb.Attestation, product *spb.SevProduct) {
 	attestation.Product = product
 }
 
-// fillInAttestation uses AMD's KDS to populate any empty certificate field in the attestation's
-// certificate chain.
-func fillInAttestation(attestation *spb.Attestation, options *Options) error {
-	var productOverridden bool
+func cpuidWorkaround(attestation *spb.Attestation, options *Options) (string, func([]byte) error, func() error, error) {
+	productUpdate := func([]byte) error { return nil }
+	updateExpectation := func() error { return nil }
+
+	fms := attestation.GetReport().GetCpuid1EaxFms()
+	if fms != 0 {
+		return kds.ProductLineFromFms(fms), productUpdate, updateExpectation, nil
+	}
+	// ATTESTATION_REPORT v2 makes product determination difficult.
 	product := getProduct(attestation)
 	if product == nil {
 		if options.Product != nil {
@@ -731,12 +745,42 @@ func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 			logger.Warning("Attestation missing product information. KDS certificate may be invalid. Using default Milan-B1")
 			attestation.Product = abi.DefaultSevProduct()
 		}
-		productOverridden = true
+		productUpdate = func(vcek []byte) error {
+			cert, err := x509.ParseCertificate(vcek)
+			if err != nil {
+				return err
+			}
+			exts, err := kds.VcekCertificateExtensions(cert)
+			if err != nil {
+				return err
+			}
+			product, err = kds.ParseProductName(exts.ProductName, abi.VcekReportSigner)
+			if err != nil {
+				return err
+			}
+			return nil
+		}
 	}
+	updateExpectation = func() error {
+		// Pass along the expected product information for VcekDER. fillInAttestation will ensure
+		// that this is a noop if options.Product began as non-nil.
+		return updateProductExpectation(&options.Product, product)
+	}
+
+	return kds.ProductLine(product), productUpdate, updateExpectation, nil
+}
+
+// fillInAttestation uses AMD's KDS to populate any empty certificate field in the attestation's
+// certificate chain.
+func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 	if options.DisableCertFetching {
 		return nil
 	}
-	productLine := kds.ProductLine(product)
+	productLine, productUpdate, updateExpectation, err := cpuidWorkaround(attestation, options)
+	if err != nil {
+		return err
+	}
+
 	getter := options.Getter
 	if getter == nil {
 		getter = trust.DefaultHTTPSGetter()
@@ -777,19 +821,8 @@ func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 			chain.VcekCert = vcek
 			// An attempt was made with defaults or the option's product, so now use
 			// the VCEK cert to determine the real product info.
-			if productOverridden {
-				cert, err := x509.ParseCertificate(vcek)
-				if err != nil {
-					return err
-				}
-				exts, err := kds.VcekCertificateExtensions(cert)
-				if err != nil {
-					return err
-				}
-				product, err = kds.ParseProductName(exts.ProductName, abi.VcekReportSigner)
-				if err != nil {
-					return err
-				}
+			if err := productUpdate(vcek); err != nil {
+				return err
 			}
 		}
 	case abi.VlekReportSigner:
@@ -800,9 +833,7 @@ func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 		}
 	}
 
-	// Pass along the expected product information for VcekDER. fillInAttestation will ensure
-	// that this is a noop if options.Product began as non-nil.
-	return updateProductExpectation(&options.Product, product)
+	return updateExpectation()
 }
 
 // GetAttestationFromReport uses AMD's Key Distribution Service (KDS) to download the certificate

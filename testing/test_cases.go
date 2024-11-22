@@ -25,6 +25,7 @@ import (
 	"github.com/google/go-sev-guest/kds"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/google/logger"
+	"google.golang.org/protobuf/encoding/prototext"
 )
 
 // userZeros defines a ReportData example that is all zeros
@@ -62,6 +63,25 @@ var userZeros12 = [64]byte{
 	0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 1, 2}
+
+var userZeros13 = [64]byte{
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 1, 3}
+var userZeros14 = [64]byte{
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 1, 4}
 
 // zeroReport is a textproto representing an unsigned report response to UserZeros.
 // The policy just sets the debug bit and bit 17 to 1, and the signature algo 1 is the encoding for
@@ -124,14 +144,25 @@ chip_id: '\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x
 type TestReportOptions struct {
 	ReportData []byte
 	SignerInfo abi.SignerInfo
+	FMS        uint32
+	// If 0, then treated as 2.
+	Version uint32
 }
 
-// TestRawReport creates simple raw attestation report with the given REPORT_DATA.
+// TestRawReport creates a simple V2 raw attestation report with the given REPORT_DATA.
 // We can't sign the report with AMD keys, and verification isn't the client's responsibility, so
 // we keep the signature zeros.
 // Similarly, we leave the randomly-generated fields zero.
 func TestRawReport(reportData [64]byte) [labi.SnpReportRespReportSize]byte {
 	return CreateRawReport(&TestReportOptions{ReportData: reportData[:]})
+}
+
+// TestRawReportV3 creates simple V3 raw attestation report with the given REPORT_DATA and CPUID_1_EAX.
+// We can't sign the report with AMD keys, and verification isn't the client's responsibility, so
+// we keep the signature zeros.
+// Similarly, we leave the randomly-generated fields zero.
+func TestRawReportV3(reportData [64]byte, fms uint32) [labi.SnpReportRespReportSize]byte {
+	return CreateRawReport(&TestReportOptions{ReportData: reportData[:], FMS: fms, Version: 3})
 }
 
 // CreateRawReport creates simple raw attestation report with the given configurable data in options.
@@ -140,12 +171,23 @@ func TestRawReport(reportData [64]byte) [labi.SnpReportRespReportSize]byte {
 // Similarly, we leave the randomly-generated fields zero.
 func CreateRawReport(opts *TestReportOptions) [labi.SnpReportRespReportSize]byte {
 	var r [labi.SnpReportRespReportSize]byte
-	// Set Version to 2
-	binary.LittleEndian.PutUint32(r[0x00:0x04], 2)
+	// Set Version to 2 if option is 0
+	Version := uint32(2)
+	if opts.Version != 0 {
+		Version = opts.Version
+	}
+	binary.LittleEndian.PutUint32(r[0x00:0x04], Version)
 	binary.LittleEndian.PutUint64(r[0x08:0x10], abi.SnpPolicyToBytes(abi.SnpPolicy{Debug: true}))
 	// Signature algorithm ECC P-384 with SHA-384 is encoded as 1.
 	binary.LittleEndian.PutUint32(r[0x34:0x38], 1)
 	binary.LittleEndian.PutUint32(r[0x48:0x4C], abi.ComposeSignerInfo(opts.SignerInfo))
+	// Family, model, stepping
+	if opts.Version > 2 {
+		family, model, stepping := abi.FmsFromCpuid1Eax(opts.FMS)
+		r[0x188] = family
+		r[0x189] = model
+		r[0x18A] = stepping
+	}
 	// Place user data in its report location.
 	copy(r[0x50:0x90], opts.ReportData)
 	return r
@@ -206,6 +248,12 @@ type TestCase struct {
 // TestCases returns common test cases for get_report.
 func TestCases() []TestCase {
 	zeroRaw := TestRawReport(userZeros)
+	milanReportV3Raw := TestRawReportV3(userZeros13, 0x00a00f10)
+	genoaReportV3Raw := TestRawReportV3(userZeros14, 0x00a10f10)
+	milanReportV3proto, _ := abi.ReportToProto(milanReportV3Raw[:])
+	genoaReportV3proto, _ := abi.ReportToProto(genoaReportV3Raw[:])
+	milanReportV3, _ := prototext.MarshalOptions{Multiline: true}.Marshal(milanReportV3proto)
+	genoaReportV3, _ := prototext.MarshalOptions{Multiline: true}.Marshal(genoaReportV3proto)
 	oneRaw := TestRawReport(userZeros1)
 	vlekRaw := CreateRawReport(&TestReportOptions{
 		ReportData: userZeros12[:],
@@ -236,6 +284,18 @@ func TestCases() []TestCase {
 			Input:   userZeros11,
 			FwErr:   abi.ResourceLimit,
 			WantErr: "input/output error", // All firmware errors get translated to EIO in configfs
+		},
+		{
+			Name:        "zeros milan v3",
+			Input:       userZeros13,
+			Output:      milanReportV3Raw,
+			OutputProto: string(milanReportV3),
+		},
+		{
+			Name:        "zeros genoa v3",
+			Input:       userZeros14,
+			Output:      genoaReportV3Raw,
+			OutputProto: string(genoaReportV3),
 		},
 	}
 }
