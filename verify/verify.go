@@ -728,6 +728,17 @@ func setProduct(attestation *spb.Attestation, product *spb.SevProduct) {
 	attestation.Product = product
 }
 
+// In version 2 attestation reports, there is no cpuid_1_eax information about the
+// family/model/stepping of the chip, so it's difficult to derive the endpoint from which to
+// fetch a VCEK certificate.
+// In version 3 attestation reports, the information is present, so we can directly return
+// the product line from those fields of the report.
+//
+// The result values are a product line string, a method of updating product information when there
+// is no explicit product expectation from options, and a method of updating the product expectation
+// when relevant. This can correct any inaccuracy about a stepping value.
+// For v3 reports, these update functions are trivial, as there are no inaccuracies to correct when
+// the information is directly in the attestation report.
 func cpuidWorkaround(attestation *spb.Attestation, options *Options) (string, func([]byte) error, func() error, error) {
 	productUpdate := func([]byte) error { return nil }
 	updateExpectation := func() error { return nil }
