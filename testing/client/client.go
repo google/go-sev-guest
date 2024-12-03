@@ -22,6 +22,7 @@ import (
 	"github.com/google/go-sev-guest/client"
 	test "github.com/google/go-sev-guest/testing"
 	"github.com/google/go-sev-guest/verify/trust"
+	"google.golang.org/protobuf/proto"
 )
 
 // SkipUnmockableTestCase returns whether we have to skip a mocked failure test case on real hardware.
@@ -130,6 +131,17 @@ func GetSevQuoteProvider(tcs []test.TestCase, opts *test.DeviceOptions, tb testi
 					},
 				},
 			},
+			"Genoa": {
+				{
+					Product:     "Genoa", // TODO(Issue#114): Remove
+					ProductLine: "Genoa",
+					ProductCerts: &trust.ProductCerts{
+						Ask:  sevQp.Device.Signer.Ask,
+						Ark:  sevQp.Device.Signer.Ark,
+						Asvk: sevQp.Device.Signer.Asvk,
+					},
+				},
+			},
 		}
 		badSnpRoot := map[string][]*trust.AMDRootCerts{
 			"Milan": {
@@ -144,12 +156,29 @@ func GetSevQuoteProvider(tcs []test.TestCase, opts *test.DeviceOptions, tb testi
 					},
 				},
 			},
+			"Genoa": {
+				{
+					Product:     "Genoa", // TODO(Issue#114): Remove
+					ProductLine: "Genoa",
+					ProductCerts: &trust.ProductCerts{
+						// No ASK, oops.
+						Ask:  sevQp.Device.Signer.Ark,
+						Ark:  sevQp.Device.Signer.Ark,
+						Asvk: sevQp.Device.Signer.Ark,
+					},
+				},
+			},
 		}
 		fakekds, err := test.FakeKDSFromSigner(sevQp.Device.Signer)
 		if err != nil {
 			tb.Fatalf("failed to create fake KDS from signer: %v", err)
 		}
 		return sevQp, goodSnpRoot, badSnpRoot, fakekds
+	}
+
+	// If requested to use a different product than on the machine, fail.
+	if opts.Product != nil && !proto.Equal(abi.SevProduct(), opts.Product) {
+		return nil, nil, nil, nil
 	}
 
 	client, err := client.GetQuoteProvider()

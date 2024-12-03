@@ -117,14 +117,17 @@ const (
 	ExtraPlatformInfoV0Size = 8
 
 	// CpuidProductMask keeps only the SevProduct-relevant bits from the CPUID(1).EAX result.
-	CpuidProductMask    = 0x0fff0f0f
+	CpuidProductMask    = 0x0fff0fff
 	extendedFamilyShift = 20
 	extendedModelShift  = 16
 	familyShift         = 8
-	sevExtendedFamily   = 0xA
-	sevFamily           = 0xF
-	milanExtendedModel  = 0
-	genoaExtendedModel  = 1
+	modelShift          = 4
+	// Combined extended values
+	zen3zen4Family = 0x19
+	zen5Family     = 0x1A
+	milanModel     = 0 | 1
+	genoaModel     = (1 << 4) | 1
+	turinModel     = 2
 
 	// ReportVersion2 is set by the SNP API specification
 	// https://web.archive.org/web/20231222054111if_/http://www.amd.com/content/dam/amd/en/documents/epyc-technical-docs/specifications/56860.pdf
@@ -487,9 +490,7 @@ func ReportToProto(data []uint8) (*pb.Report, error) {
 	mbzLo := 0x188
 	if r.Version == ReportVersion3 {
 		mbzLo = 0x18B
-		r.CpuidFamId = []byte{data[0x188]}
-		r.CpuidModId = []byte{data[0x189]}
-		r.CpuidStep = []byte{data[0x18A]}
+		r.Cpuid1EaxFms = FmsToCpuid1Eax(data[0x188], data[0x189], data[0x18A])
 	}
 
 	if err := mbz(data, mbzLo, 0x1A0); err != nil {
@@ -635,9 +636,10 @@ func ReportToAbiBytes(r *pb.Report) ([]byte, error) {
 
 	// Add CPUID information if this is a version 3 report.
 	if r.Version == ReportVersion3 {
-		data[0x188] = r.CpuidFamId[0]
-		data[0x189] = r.CpuidModId[0]
-		data[0x18A] = r.CpuidStep[0]
+		family, model, stepping := FmsFromCpuid1Eax(r.Cpuid1EaxFms)
+		data[0x188] = family
+		data[0x189] = model
+		data[0x18A] = stepping
 	}
 
 	copy(data[0x1A0:0x1E0], r.ChipId[:])
@@ -903,59 +905,106 @@ func (c *CertTable) Proto() *pb.CertificateChain {
 // See assembly implementations in cpuid_*.s
 var cpuid func(op uint32) (eax, ebx, ecx, edx uint32)
 
-// SevProductFromCpuid1Eax returns the SevProduct that is represented by cpuid(1).eax.
-func SevProductFromCpuid1Eax(eax uint32) *pb.SevProduct {
+// FmsToCpuid1Eax returns the masked CPUID_1_EAX value that represents the given
+// family, model, stepping (FMS) values.
+func FmsToCpuid1Eax(family, model, stepping byte) uint32 {
+	var extendedFamily byte
+
+	familyID := family
+	if family >= 0xf {
+		extendedFamily = family - 0xf
+		familyID = 0xf
+	}
+	extendedModel := model >> 4
+	modelID := model & 0xf
+	return (uint32(extendedFamily) << extendedFamilyShift) |
+		(uint32(extendedModel) << extendedModelShift) |
+		(uint32(familyID) << familyShift) |
+		(uint32(modelID) << modelShift) |
+		(uint32(stepping & 0xf))
+}
+
+// FmsFromCpuid1Eax returns the family, model, stepping (FMS) values extracted from a
+// CPUID_1_EAX value.
+func FmsFromCpuid1Eax(eax uint32) (byte, byte, byte) {
 	// 31:28 reserved
 	// 27:20 Extended Family ID
-	extendedFamily := (eax >> extendedFamilyShift) & 0xff
+	extendedFamily := byte((eax >> extendedFamilyShift) & 0xff)
 	// 19:16 Extended Model ID
-	extendedModel := (eax >> extendedModelShift) & 0xf
+	extendedModel := byte((eax >> extendedModelShift) & 0xf)
 	// 15:14 reserved
 	// 11:8 Family ID
-	family := (eax >> familyShift) & 0xf
+	familyID := byte((eax >> familyShift) & 0xf)
+	// 7:4 Model
+	modelID := byte((eax >> modelShift) & 0xf)
 	// 3:0 Stepping
-	stepping := eax & 0xf
+	family := extendedFamily + familyID
+	model := (extendedModel << 4) | modelID
+	stepping := byte(eax & 0xf)
+	return family, model, stepping
+}
+
+// SevProductFromCpuid1Eax returns the SevProduct that is represented by cpuid(1).eax.
+func SevProductFromCpuid1Eax(eax uint32) *pb.SevProduct {
+	family, model, stepping := FmsFromCpuid1Eax(eax)
 	// Ah, Fh, {0h,1h} values from the KDS specification,
 	// section "Determining the Product Name".
 	var productName pb.SevProduct_SevProductName
+	unknown := func() {
+		productName = pb.SevProduct_SEV_PRODUCT_UNKNOWN
+		stepping = 0 // Reveal nothing.
+	}
 	// Product information specified by processor programming reference publications.
-	if extendedFamily == sevExtendedFamily && family == sevFamily {
-		switch extendedModel {
-		case milanExtendedModel:
+	switch family {
+	case zen3zen4Family:
+		switch model {
+		case milanModel:
 			productName = pb.SevProduct_SEV_PRODUCT_MILAN
-		case genoaExtendedModel:
+		case genoaModel:
 			productName = pb.SevProduct_SEV_PRODUCT_GENOA
 		default:
-			productName = pb.SevProduct_SEV_PRODUCT_UNKNOWN
-			stepping = 0 // Reveal nothing.
+			unknown()
 		}
+	case zen5Family:
+		switch model {
+		case turinModel:
+			productName = pb.SevProduct_SEV_PRODUCT_TURIN
+		default:
+			unknown()
+		}
+	default:
+		unknown()
 	}
 	return &pb.SevProduct{
 		Name:            productName,
-		MachineStepping: &wrapperspb.UInt32Value{Value: stepping},
+		MachineStepping: &wrapperspb.UInt32Value{Value: uint32(stepping)},
 	}
 }
 
 // MaskedCpuid1EaxFromSevProduct returns the Cpuid1Eax value expected from the given product
 // when masked with CpuidProductMask.
 func MaskedCpuid1EaxFromSevProduct(product *pb.SevProduct) uint32 {
-	var stepping uint32
-	if product.MachineStepping != nil {
-		stepping = product.MachineStepping.Value & 0xf
+	if product == nil {
+		return 0
 	}
-	extendedFamily := uint32(sevExtendedFamily) << extendedFamilyShift
-	family := uint32(sevFamily) << familyShift
-
-	var extendedModel uint32
+	var family, model, stepping byte
+	if product.MachineStepping != nil {
+		stepping = byte(product.MachineStepping.Value & 0xf)
+	}
 	switch product.Name {
 	case pb.SevProduct_SEV_PRODUCT_MILAN:
-		extendedModel = milanExtendedModel
+		family = zen3zen4Family
+		model = milanModel
 	case pb.SevProduct_SEV_PRODUCT_GENOA:
-		extendedModel = genoaExtendedModel
+		family = zen3zen4Family
+		model = genoaModel
+	case pb.SevProduct_SEV_PRODUCT_TURIN:
+		family = zen5Family
+		model = turinModel
 	default:
 		return 0
 	}
-	return extendedFamily | family | stepping | (extendedModel << extendedModelShift)
+	return FmsToCpuid1Eax(family, model, stepping)
 }
 
 // SevProduct returns the SEV product enum for the CPU that runs this

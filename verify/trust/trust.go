@@ -59,6 +59,16 @@ var (
 	//go:embed ask_ark_genoa_vlek.pem
 	AskArkGenoaVlekBytes []byte
 
+	// AskArkTurinVcekBytes is a CA bundle for VCEK certs on Turin.
+	// source: https://kdsintf.amd.com/vcek/v1/Turin/cert_chain
+	//go:embed ask_ark_turin_vcek.pem
+	AskArkTurinVcekBytes []byte
+
+	// AskArkTurinVlekBytes is a CA bundle for VLEK certs on Turin.
+	// source: https://kdsintf.amd.com/vcek/v1/Turin/cert_chain
+	//go:embed ask_ark_turin_vlek.pem
+	AskArkTurinVlekBytes []byte
+
 	// A cache of product certificate KDS results per product.
 	prodCacheMu          sync.Mutex
 	productLineCertCache map[string]*ProductCerts
@@ -378,8 +388,12 @@ func init() {
 	genoaCerts := new(AMDRootCerts)
 	genoaCerts.FromKDSCertBytes(AskArkGenoaVcekBytes)
 	genoaCerts.ProductLine = "Genoa"
+	turinCerts := new(AMDRootCerts)
+	turinCerts.ProductLine = "Turin"
+	turinCerts.FromKDSCertBytes(AskArkTurinVcekBytes)
 	DefaultRootCerts = map[string]*AMDRootCerts{
 		"Milan": milanCerts,
 		"Genoa": genoaCerts,
+		"Turin": turinCerts,
 	}
 }
