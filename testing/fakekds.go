@@ -91,6 +91,10 @@ func FakeKDSFromFile(path string) (*FakeKDS, error) {
 			"Genoa": {
 				VcekBundle: string(trust.AskArkGenoaVcekBytes),
 				VlekBundle: string(trust.AskArkGenoaVlekBytes),
+			},
+			"Turin": {
+				VcekBundle: string(trust.AskArkTurinVcekBytes),
+				VlekBundle: string(trust.AskArkTurinVlekBytes),
 			}},
 	}
 
@@ -205,6 +209,10 @@ func GetKDS(t testing.TB) trust.HTTPSGetter {
 			"Genoa": {
 				VcekBundle: string(trust.AskArkGenoaVcekBytes),
 				VlekBundle: string(trust.AskArkGenoaVlekBytes),
+			},
+			"Turin": {
+				VcekBundle: string(trust.AskArkTurinVcekBytes),
+				VlekBundle: string(trust.AskArkTurinVlekBytes),
 			}},
 	}
 	// Provide nothing if --test_kds=none.
