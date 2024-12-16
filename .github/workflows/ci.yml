@@ -66,7 +66,7 @@ jobs:
         go-version: [1.21.x]
         os: [ubuntu-latest]
 
-    name: Lint ${{ matrix.dir }} (${{ matrix.os }}, Go ${{ matrix.go-version }})
+    name: Lint (${{ matrix.os }}, Go ${{ matrix.go-version }})
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
