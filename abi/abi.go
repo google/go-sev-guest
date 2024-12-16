@@ -73,7 +73,7 @@ const (
 	policyDebugBit        = 19
 	policySingleSocketBit = 20
 
-	maxPlatformInfoBit = 4
+	maxPlatformInfoBit = 5
 
 	signatureOffset = 0x2A0
 	ecdsaRSsize     = 72 // From the ECDSA-P384-SHA384 format in SEV SNP API specification.
@@ -193,6 +193,9 @@ type SnpPlatformInfo struct {
 	RAPLDisabled bool
 	// CiphertextHidingDRAMEnabled indicates cypher text hiding is enabled for DRAM.
 	CiphertextHidingDRAMEnabled bool
+	// AliasCheckComplete indicates that alias detection has completed since the last system reset and there are no aliasing addresses.
+	// Mitigation for https://badram.eu/, see https://www.amd.com/en/resources/product-security/bulletin/amd-sb-3015.html#mitigation.
+	AliasCheckComplete bool
 }
 
 // SnpPolicy represents the bitmask guest policy that governs the VM's behavior from launch.
@@ -256,6 +259,7 @@ func ParseSnpPlatformInfo(platformInfo uint64) (SnpPlatformInfo, error) {
 		ECCEnabled:                  (platformInfo & (1 << 2)) != 0,
 		RAPLDisabled:                (platformInfo & (1 << 3)) != 0,
 		CiphertextHidingDRAMEnabled: (platformInfo & (1 << 4)) != 0,
+		AliasCheckComplete:          (platformInfo & (1 << 5)) != 0,
 	}
 	reserved := platformInfo & ^uint64((1<<(maxPlatformInfoBit+1))-1)
 	if reserved != 0 {
