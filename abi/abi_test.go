@@ -236,8 +236,16 @@ func TestSnpPlatformInfo(t *testing.T) {
 			want:  SnpPlatformInfo{TSMEEnabled: true, SMTEnabled: true},
 		},
 		{
-			input:   4,
-			wantErr: "unrecognized platform info bit(s): 0x4",
+			input: 21,
+			want: SnpPlatformInfo{
+				SMTEnabled:                  true,
+				ECCEnabled:                  true,
+				CiphertextHidingDRAMEnabled: true,
+			},
+		},
+		{
+			input:   32,
+			wantErr: "unrecognized platform info bit(s): 0x20",
 		},
 	}
 	for _, tc := range tests {
