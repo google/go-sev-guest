@@ -73,7 +73,7 @@ const (
 	policyDebugBit        = 19
 	policySingleSocketBit = 20
 
-	maxPlatformInfoBit = 1
+	maxPlatformInfoBit = 5
 
 	signatureOffset = 0x2A0
 	ecdsaRSsize     = 72 // From the ECDSA-P384-SHA384 format in SEV SNP API specification.
@@ -186,6 +186,16 @@ type SnpPlatformInfo struct {
 	// TSMEEnabled represents if the platform that produced the attestation report has transparent
 	// secure memory encryption (TSME) enabled.
 	TSMEEnabled bool
+	// ECCEnabled indicates that the platform is using error correcting codes for memory.
+	// Present when EccMemReporting feature bit is set.
+	ECCEnabled bool
+	// RAPLDisabled indicates that the RAPL is disabled.
+	RAPLDisabled bool
+	// CiphertextHidingDRAMEnabled indicates cypher text hiding is enabled for DRAM.
+	CiphertextHidingDRAMEnabled bool
+	// AliasCheckComplete indicates that alias detection has completed since the last system reset and there are no aliasing addresses.
+	// Mitigation for https://badram.eu/, see https://www.amd.com/en/resources/product-security/bulletin/amd-sb-3015.html#mitigation.
+	AliasCheckComplete bool
 }
 
 // SnpPolicy represents the bitmask guest policy that governs the VM's behavior from launch.
@@ -244,8 +254,12 @@ func SnpPolicyToBytes(policy SnpPolicy) uint64 {
 // unrecognized bits.
 func ParseSnpPlatformInfo(platformInfo uint64) (SnpPlatformInfo, error) {
 	result := SnpPlatformInfo{
-		SMTEnabled:  (platformInfo & (1 << 0)) != 0,
-		TSMEEnabled: (platformInfo & (1 << 1)) != 0,
+		SMTEnabled:                  (platformInfo & (1 << 0)) != 0,
+		TSMEEnabled:                 (platformInfo & (1 << 1)) != 0,
+		ECCEnabled:                  (platformInfo & (1 << 2)) != 0,
+		RAPLDisabled:                (platformInfo & (1 << 3)) != 0,
+		CiphertextHidingDRAMEnabled: (platformInfo & (1 << 4)) != 0,
+		AliasCheckComplete:          (platformInfo & (1 << 5)) != 0,
 	}
 	reserved := platformInfo & ^uint64((1<<(maxPlatformInfoBit+1))-1)
 	if reserved != 0 {
