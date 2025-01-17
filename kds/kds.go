@@ -96,6 +96,7 @@ var (
 	steppingDecoder = map[string]*pb.SevProduct{
 		"Milan-B0": {Name: pb.SevProduct_SEV_PRODUCT_MILAN, MachineStepping: uint0},
 		"Milan-B1": {Name: pb.SevProduct_SEV_PRODUCT_MILAN, MachineStepping: uint1},
+		"Genoa":    {Name: pb.SevProduct_SEV_PRODUCT_GENOA, MachineStepping: uint0},
 		"Genoa-B0": {Name: pb.SevProduct_SEV_PRODUCT_GENOA, MachineStepping: uint0},
 		"Genoa-B1": {Name: pb.SevProduct_SEV_PRODUCT_GENOA, MachineStepping: uint1},
 		"Genoa-B2": {Name: pb.SevProduct_SEV_PRODUCT_GENOA, MachineStepping: uint2},
