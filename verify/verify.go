@@ -301,6 +301,9 @@ func GetCrlAndCheckRoot(r *trust.AMDRootCerts, opts *Options) (*x509.RevocationL
 		getter = trust.DefaultHTTPSGetter()
 	}
 	if r.CRL != nil && opts.Now.Before(r.CRL.NextUpdate) {
+		if err := verifyCRL(r); err != nil {
+			return nil, err
+		}
 		return r.CRL, nil
 	}
 	var errs error
