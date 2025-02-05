@@ -118,7 +118,7 @@ func validateAmdLocation(name pkix.Name, role string) error {
 	if err := checkSingletonList(name.Organization, "organization", "organizations", "Advanced Micro Devices"); err != nil {
 		return err
 	}
-	return checkSingletonList(name.OrganizationalUnit, "organizational unit", "organizational uints", "Engineering")
+	return checkSingletonList(name.OrganizationalUnit, "organizational unit", "organizational units", "Engineering")
 }
 
 func validateRootX509(productLine string, x *x509.Certificate, version int, role, cn string) error {
@@ -301,6 +301,9 @@ func GetCrlAndCheckRoot(r *trust.AMDRootCerts, opts *Options) (*x509.RevocationL
 		getter = trust.DefaultHTTPSGetter()
 	}
 	if r.CRL != nil && opts.Now.Before(r.CRL.NextUpdate) {
+		if err := verifyCRL(r); err != nil {
+			return nil, err
+		}
 		return r.CRL, nil
 	}
 	var errs error
