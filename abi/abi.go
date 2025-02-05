@@ -220,7 +220,7 @@ func ParseSnpPolicy(guestPolicy uint64) (SnpPolicy, error) {
 	if guestPolicy&uint64(1<<policyReserved1bit) == 0 {
 		return result, fmt.Errorf("policy[%d] is reserved, must be 1, got 0", policyReserved1bit)
 	}
-	if err := mbz64(guestPolicy, "policy", 63, 21); err != nil {
+	if err := mbz64(guestPolicy, "policy", 63, 25); err != nil {
 		return result, err
 	}
 	result.ABIMinor = uint8(guestPolicy & 0xff)
