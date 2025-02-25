@@ -16,6 +16,7 @@
 package verify
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"crypto/x509"
@@ -294,6 +295,10 @@ type CRLUnavailableErr struct {
 // GetCrlAndCheckRoot downloads the given cert's CRL from one of the distribution points and
 // verifies that the CRL is valid and doesn't revoke an intermediate key.
 func GetCrlAndCheckRoot(r *trust.AMDRootCerts, opts *Options) (*x509.RevocationList, error) {
+	return GetCrlAndCheckRootContext(context.Background(), r, opts)
+}
+
+func GetCrlAndCheckRootContext(ctx context.Context, r *trust.AMDRootCerts, opts *Options) (*x509.RevocationList, error) {
 	r.Mu.Lock()
 	defer r.Mu.Unlock()
 	getter := opts.Getter
@@ -308,7 +313,7 @@ func GetCrlAndCheckRoot(r *trust.AMDRootCerts, opts *Options) (*x509.RevocationL
 	}
 	var errs error
 	for _, url := range r.ProductCerts.Ask.CRLDistributionPoints {
-		bytes, err := getter.Get(url)
+		bytes, err := trust.GetWith(ctx, getter, url)
 		if err != nil {
 			errs = multierr.Append(errs, err)
 			continue
@@ -662,6 +667,10 @@ func updateProductExpectation(product **spb.SevProduct, reportProduct *spb.SevPr
 // SnpAttestation verifies the protobuf representation of an attestation report's signature based
 // on the report's SignatureAlgo, provided the certificate chain is valid.
 func SnpAttestation(attestation *spb.Attestation, options *Options) error {
+	return SnpAttestationContext(context.Background(), attestation, options)
+}
+
+func SnpAttestationContext(ctx context.Context, attestation *spb.Attestation, options *Options) error {
 	if options == nil {
 		return fmt.Errorf("options cannot be nil")
 	}
@@ -670,7 +679,7 @@ func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 	}
 	// Make sure we have the whole certificate chain, or at least the product
 	// info.
-	if err := fillInAttestation(attestation, options); err != nil {
+	if err := fillInAttestation(ctx, attestation, options); err != nil {
 		return err
 	}
 
@@ -786,7 +795,7 @@ func cpuidWorkaround(attestation *spb.Attestation, options *Options) (string, fu
 
 // fillInAttestation uses AMD's KDS to populate any empty certificate field in the attestation's
 // certificate chain.
-func fillInAttestation(attestation *spb.Attestation, options *Options) error {
+func fillInAttestation(ctx context.Context, attestation *spb.Attestation, options *Options) error {
 	if options.DisableCertFetching {
 		return nil
 	}
@@ -826,7 +835,7 @@ func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 	case abi.VcekReportSigner:
 		if len(chain.GetVcekCert()) == 0 {
 			vcekURL := kds.VCEKCertURL(productLine, report.GetChipId(), kds.TCBVersion(report.GetReportedTcb()))
-			vcek, err := getter.Get(vcekURL)
+			vcek, err := trust.GetWith(ctx, getter, vcekURL)
 			if err != nil {
 				return &trust.AttestationRecreationErr{
 					Msg: fmt.Sprintf("could not download VCEK certificate: %v", err),
@@ -854,11 +863,15 @@ func fillInAttestation(attestation *spb.Attestation, options *Options) error {
 // chain for the VCEK that supposedly signed the given report, and returns the Attestation
 // representation of their combination. If getter is nil, uses Golang's http.Get.
 func GetAttestationFromReport(report *spb.Report, options *Options) (*spb.Attestation, error) {
+	return GetAttestationFromReportContext(context.Background(), report, options)
+}
+
+func GetAttestationFromReportContext(ctx context.Context, report *spb.Report, options *Options) (*spb.Attestation, error) {
 	result := &spb.Attestation{
 		Report:           report,
 		CertificateChain: &spb.CertificateChain{Extras: map[string][]byte{}},
 	}
-	if err := fillInAttestation(result, options); err != nil {
+	if err := fillInAttestation(ctx, result, options); err != nil {
 		return nil, err
 	}
 	// Attempt to fill in the product field of the attestation. Don't error at this

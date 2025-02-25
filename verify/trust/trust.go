@@ -130,6 +130,20 @@ type HTTPSGetter interface {
 	Get(url string) ([]byte, error)
 }
 
+// ContextHTTPSGetter is an HTTPSGetter that accepts a context.Context.
+type ContextHTTPSGetter interface {
+	GetContext(ctx context.Context, url string) ([]byte, error)
+}
+
+// GetWith gets a resource from a url using a getter.
+// If the getter implements ContextHTTPSGetter, the context will be forwarded to the getter.
+func GetWith(ctx context.Context, getter HTTPSGetter, url string) ([]byte, error) {
+	if contextGetter, ok := getter.(ContextHTTPSGetter); ok {
+		return contextGetter.GetContext(ctx, url)
+	}
+	return getter.Get(url)
+}
+
 // AttestationRecreationErr represents a problem with fetching or interpreting associated
 // certificates for a given attestation report. This is typically due to network unreliability.
 type AttestationRecreationErr struct {
@@ -145,7 +159,15 @@ type SimpleHTTPSGetter struct{}
 
 // Get uses http.Get to return the HTTPS response body as a byte array.
 func (n *SimpleHTTPSGetter) Get(url string) ([]byte, error) {
-	resp, err := http.Get(url)
+	return n.GetContext(context.Background(), url)
+}
+
+func (n *SimpleHTTPSGetter) GetContext(ctx context.Context, url string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	} else if resp.StatusCode >= 300 {
@@ -160,6 +182,11 @@ func (n *SimpleHTTPSGetter) Get(url string) ([]byte, error) {
 	return body, nil
 }
 
+var (
+	_ = HTTPSGetter(&SimpleHTTPSGetter{})
+	_ = ContextHTTPSGetter(&SimpleHTTPSGetter{})
+)
+
 // RetryHTTPSGetter is a meta-HTTPS getter that will retry on failure a given number of times.
 type RetryHTTPSGetter struct {
 	// Timeout is how long to retry before failure.
@@ -172,11 +199,15 @@ type RetryHTTPSGetter struct {
 
 // Get fetches the body of the URL, retrying a given amount of times on failure.
 func (n *RetryHTTPSGetter) Get(url string) ([]byte, error) {
+	return n.GetContext(context.Background(), url)
+}
+
+func (n *RetryHTTPSGetter) GetContext(ctx context.Context, url string) ([]byte, error) {
 	delay := initialDelay
-	ctx, cancel := context.WithTimeout(context.Background(), n.Timeout)
+	ctx, cancel := context.WithTimeout(ctx, n.Timeout)
 	var returnedError error
 	for {
-		body, err := n.Getter.Get(url)
+		body, err := GetWith(ctx, n.Getter, url)
 		if err == nil {
 			cancel()
 			return body, nil
@@ -194,6 +225,11 @@ func (n *RetryHTTPSGetter) Get(url string) ([]byte, error) {
 		}
 	}
 }
+
+var (
+	_ = HTTPSGetter(&RetryHTTPSGetter{})
+	_ = ContextHTTPSGetter(&RetryHTTPSGetter{})
+)
 
 // DefaultHTTPSGetter returns the library's default getter implementation. It will
 // retry slowly due to the AMD KDS's rate limiting.
@@ -311,6 +347,10 @@ func ClearProductCertCache() {
 // GetProductChain returns the ASK and ARK certificates of the given product line, either from getter
 // or from a cache of the results from the last successful call.
 func GetProductChain(productLine string, s abi.ReportSigner, getter HTTPSGetter) (*ProductCerts, error) {
+	return GetProductChainContext(context.Background(), productLine, s, getter)
+}
+
+func GetProductChainContext(ctx context.Context, productLine string, s abi.ReportSigner, getter HTTPSGetter) (*ProductCerts, error) {
 	if productLineCertCache == nil {
 		prodCacheMu.Lock()
 		productLineCertCache = make(map[string]*ProductCerts)
@@ -318,7 +358,7 @@ func GetProductChain(productLine string, s abi.ReportSigner, getter HTTPSGetter)
 	}
 	result, ok := productLineCertCache[productLine]
 	if !ok {
-		askark, err := getter.Get(kds.ProductCertChainURL(s, productLine))
+		askark, err := GetWith(ctx, getter, kds.ProductCertChainURL(s, productLine))
 		if err != nil {
 			return nil, &AttestationRecreationErr{
 				Msg: fmt.Sprintf("could not download ASK and ARK certificates: %v", err),
