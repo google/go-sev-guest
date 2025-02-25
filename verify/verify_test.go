@@ -16,6 +16,7 @@ package verify
 
 import (
 	"bytes"
+	"context"
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -414,20 +415,31 @@ func TestCRLRootValidity(t *testing.T) {
 			fmt.Sprintf("https://kdsintf.amd.com/vcek/v1/%s/crl", test.GetProductLine()): crl,
 		},
 	)
-	wantErr := "CRL is not signed by ARK"
-	if err := VcekNotRevoked(root, signer2.Vcek, &Options{Getter: g2}); !test.Match(err, wantErr) {
-		t.Errorf("Bad Root: VcekNotRevoked(%v) did not error as expected. Got %v, want %v", signer.Vcek, err, wantErr)
-	}
 
-	// Finally try checking a VCEK that's signed by a revoked ASK.
-	root2 := trust.AMDRootCertsProduct(test.GetProductLine())
-	root2.ProductCerts = &trust.ProductCerts{
-		Ark: signer2.Ark,
-		Ask: signer2.Ask,
-	}
-	wantErr2 := "ASK was revoked at 2022-06-14 12:01:00 +0000 UTC"
-	if err := VcekNotRevoked(root2, signer2.Vcek, &Options{Getter: g2}); !test.Match(err, wantErr2) {
-		t.Errorf("Bad ASK: VcekNotRevoked(%v) did not error as expected. Got %v, want %v", signer.Vcek, err, wantErr2)
+	for name, vcekNotRevoked := range map[string]func(*trust.AMDRootCerts, *x509.Certificate, *Options) error{
+		"VcekNotRevoked": VcekNotRevoked,
+		"VcekNotRevokedContext": func(r *trust.AMDRootCerts, c *x509.Certificate, o *Options) error {
+			return VcekNotRevokedContext(context.Background(), r, c, o)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			wantErr := "CRL is not signed by ARK"
+			if err := vcekNotRevoked(root, signer2.Vcek, &Options{Getter: g2}); !test.Match(err, wantErr) {
+				t.Errorf("Bad Root: VcekNotRevoked(%v) did not error as expected. Got %v, want %v", signer.Vcek, err, wantErr)
+			}
+
+			// Finally try checking a VCEK that's signed by a revoked ASK.
+			root2 := trust.AMDRootCertsProduct(test.GetProductLine())
+			root2.ProductCerts = &trust.ProductCerts{
+				Ark: signer2.Ark,
+				Ask: signer2.Ask,
+			}
+			wantErr2 := "ASK was revoked at 2022-06-14 12:01:00 +0000 UTC"
+			if err := vcekNotRevoked(root2, signer2.Vcek, &Options{Getter: g2}); !test.Match(err, wantErr2) {
+				t.Errorf("Bad ASK: VcekNotRevoked(%v) did not error as expected. Got %v, want %v", signer.Vcek, err, wantErr2)
+			}
+
+		})
 	}
 }
 
@@ -502,19 +514,28 @@ func fullQuoteTest(t *testing.T, pd *providerData, getReport *reportGetterProfil
 	if tc.EK == test.KeyChoiceVlek && getReport.vlekErr != "" {
 		wantAttestationErr = getReport.vlekErr
 	}
-	if err := SnpAttestation(ereport, pd.opts); !test.Match(err, wantAttestationErr) {
-		t.Errorf("SnpAttestation(%v) = %v. Want err: %q", ereport, err, wantAttestationErr)
-	}
+	for name, snpAttestation := range snpAttestationFuncs {
+		if err := snpAttestation(ereport, pd.opts); !test.Match(err, wantAttestationErr) {
+			t.Errorf("%s(%v) = %v. Want err: %q", name, ereport, err, wantAttestationErr)
+		}
 
-	wantBad := getReport.badRootErr
-	if tc.EK == test.KeyChoiceVlek && getReport.vlekBadRootErr != "" {
-		wantBad = getReport.vlekBadRootErr
+		wantBad := getReport.badRootErr
+		if tc.EK == test.KeyChoiceVlek && getReport.vlekBadRootErr != "" {
+			wantBad = getReport.vlekBadRootErr
+		}
+		badOptions := &Options{TrustedRoots: pd.badRoots, Getter: pd.opts.Getter, Product: pd.opts.Product}
+		if err := snpAttestation(ereport, badOptions); !test.Match(err, wantBad) {
+			t.Errorf("%s(_) bad root test errored unexpectedly: %v, want %s",
+				name, err, wantBad)
+		}
 	}
-	badOptions := &Options{TrustedRoots: pd.badRoots, Getter: pd.opts.Getter, Product: pd.opts.Product}
-	if err := SnpAttestation(ereport, badOptions); !test.Match(err, wantBad) {
-		t.Errorf("SnpAttestation(_) bad root test errored unexpectedly: %v, want %s",
-			err, wantBad)
-	}
+}
+
+var snpAttestationFuncs = map[string]func(attestation *spb.Attestation, options *Options) error{
+	"SnpAttestation": SnpAttestation,
+	"SnpAttestationContext": func(attestation *spb.Attestation, options *Options) error {
+		return SnpAttestationContext(context.Background(), attestation, options)
+	},
 }
 
 func fmsFromReport(t testing.TB, report []byte) uint32 {
@@ -640,15 +661,19 @@ func TestGetQuoteProviderVerify(t *testing.T) {
 				t.Fatalf("(d, %v) = %v, %v. Want err: %v", tc.Input, ereport, err, tc.WantErr)
 			}
 			if tc.WantErr == "" {
-				var wantAttestationErr string
-				if err := SnpAttestation(ereport, pd.opts); !test.Match(err, wantAttestationErr) {
-					t.Errorf("SnpAttestation(%v) = %v. Want err: %q", ereport, err, wantAttestationErr)
-				}
-				badOptions := &Options{TrustedRoots: pd.badRoots, Getter: pd.opts.Getter, Product: pd.opts.Product}
-				wantBad := "error verifying VCEK certificate"
-				if err := SnpAttestation(ereport, badOptions); !test.Match(err, wantBad) {
-					t.Errorf("SnpAttestation(_) bad root test errored unexpectedly: %v, want %s",
-						err, wantBad)
+				for name, snpAttestation := range snpAttestationFuncs {
+					t.Run(name, func(t *testing.T) {
+						var wantAttestationErr string
+						if err := snpAttestation(ereport, pd.opts); !test.Match(err, wantAttestationErr) {
+							t.Errorf("%s(%v) = %v. Want err: %q", name, ereport, err, wantAttestationErr)
+						}
+						badOptions := &Options{TrustedRoots: pd.badRoots, Getter: pd.opts.Getter, Product: pd.opts.Product}
+						wantBad := "error verifying VCEK certificate"
+						if err := snpAttestation(ereport, badOptions); !test.Match(err, wantBad) {
+							t.Errorf("%s(_) bad root test errored unexpectedly: %v, want %s",
+								name, err, wantBad)
+						}
+					})
 				}
 			}
 		})
@@ -739,8 +764,13 @@ func TestGetQuoteProviderVerifyProductNameSteppingMismatch(t *testing.T) {
 	for _, op := range ops {
 		t.Run(op.name, func(t *testing.T) {
 			*workaroundStepping = op.workaround115
-			if err := SnpAttestation(ereport, op.options); !test.Match(err, op.wantErr) {
-				t.Errorf("SnpAttestation(%v, %v) = %v. Want err: %q", ereport, op.options, err, op.wantErr)
+			for name, snpAttestation := range snpAttestationFuncs {
+				t.Run(name, func(t *testing.T) {
+					if err := snpAttestation(ereport, op.options); !test.Match(err, op.wantErr) {
+						t.Errorf("%s(%v, %v) = %v. Want err: %q", name, ereport, op.options, err, op.wantErr)
+					}
+
+				})
 			}
 		})
 	}
@@ -779,9 +809,20 @@ func TestRealAttestationVerification(t *testing.T) {
 		},
 	}
 	for _, tc := range tcs {
-		opts := &Options{Getter: getter, Product: tc.product}
-		if err := RawSnpReport(testdata.AttestationBytes, opts); !test.Match(err, tc.wantErr) {
-			t.Errorf("RawSnpReport(_, %+v) = %v errored unexpectedly. Want %q", opts, err, tc.wantErr)
+		for name, rawSnpReport := range map[string]func([]byte, *Options) error{
+			"RawSnpReport": RawSnpReport,
+			"RawSnpReportContext": func(rawReport []byte, options *Options) error {
+				return RawSnpReportContext(context.Background(), rawReport, options)
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Run(name, func(t *testing.T) {
+					opts := &Options{Getter: getter, Product: tc.product}
+					if err := rawSnpReport(testdata.AttestationBytes, opts); !test.Match(err, tc.wantErr) {
+						t.Errorf("%s(_, %+v) = %v errored unexpectedly. Want %q", name, opts, err, tc.wantErr)
+					}
+				})
+			})
 		}
 	}
 }
@@ -844,7 +885,7 @@ func TestV3KDSProduct(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			report, _ := abi.ReportToProto(tc.Output[:])
 			a := &spb.Attestation{Report: report}
-			if err := fillInAttestation(a, options); err != nil {
+			if err := fillInAttestation(context.Background(), a, options); err != nil {
 				t.Fatalf("fillInAttestation(%v, %v) = %v, want nil", a, options, err)
 			}
 			var want []byte
