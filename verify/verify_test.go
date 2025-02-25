@@ -209,7 +209,10 @@ func TestKdsMetadataLogic(t *testing.T) {
 	trust.ClearProductCertCache()
 	asn1Zero, _ := asn1.Marshal(0)
 	productName, _ := asn1.MarshalWithParams("Cookie-B0", "ia5")
-	var hwid [64]byte
+	// The example incorrect product name, "Cookie-B0", is an unknown product.
+	// It should have a HW ID 8-bytes long; only Milan and Genoa can have
+	// 64-byte HW IDs.
+	var hwid [8]byte
 	asn1Hwid, _ := asn1.Marshal(hwid[:])
 	tests := []struct {
 		name    string
@@ -309,6 +312,10 @@ func TestKdsMetadataLogic(t *testing.T) {
 						},
 						{
 							Id:    kds.OidUcodeSpl,
+							Value: asn1Zero,
+						},
+						{
+							Id:    kds.OidFmcSpl,
 							Value: asn1Zero,
 						},
 						{
