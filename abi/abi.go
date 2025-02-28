@@ -132,10 +132,14 @@ const (
 	// ReportVersion2 is set by the SNP API specification
 	// https://web.archive.org/web/20231222054111if_/http://www.amd.com/content/dam/amd/en/documents/epyc-technical-docs/specifications/56860.pdf
 	ReportVersion2 = 2
+	// MinSupportedReportVersion is the lowest attestation report version that this library supports.
+	MinSupportedReportVersion = 2
 
 	// ReportVersion3 is set by the SNP API specification
 	// https://www.amd.com/system/files/TechDocs/56860.pdf
 	ReportVersion3 = 3
+	// MaxSupportedReportVersion is the highest attestation report version that this library supports.
+	MaxSupportedReportVersion = 4
 )
 
 // CertTableHeaderEntry defines an entry of the beginning of an extended attestation report which
@@ -502,7 +506,7 @@ func ReportToProto(data []uint8) (*pb.Report, error) {
 	r.ReportedTcb = binary.LittleEndian.Uint64(data[0x180:0x188])
 
 	mbzLo := 0x188
-	if r.Version == ReportVersion3 {
+	if r.Version >= ReportVersion3 {
 		mbzLo = 0x18B
 		r.Cpuid1EaxFms = FmsToCpuid1Eax(data[0x188], data[0x189], data[0x18A])
 	}
@@ -603,8 +607,8 @@ func ValidateReportFormat(r []byte) error {
 	}
 
 	version := binary.LittleEndian.Uint32(r[0x00:0x04])
-	if version != ReportVersion2 && version != ReportVersion3 {
-		return fmt.Errorf("report version is: %d. Expected %d or %d", version, ReportVersion2, ReportVersion3)
+	if version < MinSupportedReportVersion || version > MaxSupportedReportVersion {
+		return fmt.Errorf("report version is: %d. Expected between %d and %d", version, MinSupportedReportVersion, MaxSupportedReportVersion)
 	}
 
 	policy := binary.LittleEndian.Uint64(r[0x08:0x10])
@@ -649,7 +653,7 @@ func ReportToAbiBytes(r *pb.Report) ([]byte, error) {
 	binary.LittleEndian.PutUint64(data[0x180:0x188], r.ReportedTcb)
 
 	// Add CPUID information if this is a version 3 report.
-	if r.Version == ReportVersion3 {
+	if r.Version >= ReportVersion3 {
 		family, model, stepping := FmsFromCpuid1Eax(r.Cpuid1EaxFms)
 		data[0x188] = family
 		data[0x189] = model
