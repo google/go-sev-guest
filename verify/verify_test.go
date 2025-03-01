@@ -16,6 +16,7 @@ package verify
 
 import (
 	"bytes"
+	"context"
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -844,7 +845,7 @@ func TestV3KDSProduct(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			report, _ := abi.ReportToProto(tc.Output[:])
 			a := &spb.Attestation{Report: report}
-			if err := fillInAttestation(a, options); err != nil {
+			if err := fillInAttestation(context.Background(), a, options); err != nil {
 				t.Fatalf("fillInAttestation(%v, %v) = %v, want nil", a, options, err)
 			}
 			var want []byte
