@@ -532,11 +532,23 @@ func validatePlatformInfo(platformInfo uint64, required *abi.SnpPlatformInfo) er
 	if err != nil {
 		return fmt.Errorf("could not parse SNP platform info %x: %v", platformInfo, err)
 	}
+	if reportInfo.SMTEnabled && !required.SMTEnabled {
+		return errors.New("unauthorized platform feature SMT enabled")
+	}
 	if reportInfo.TSMEEnabled && !required.TSMEEnabled {
 		return errors.New("unauthorized platform feature TSME enabled")
 	}
-	if reportInfo.SMTEnabled && !required.SMTEnabled {
-		return errors.New("unauthorized platform feature SMT enabled")
+	if reportInfo.ECCEnabled && !required.ECCEnabled {
+		return errors.New("unauthorized platform feature ECC enabled")
+	}
+	if reportInfo.RAPLDisabled && !required.RAPLDisabled {
+		return errors.New("platform feature RAPL isn't enabled")
+	}
+	if reportInfo.CiphertextHidingDRAMEnabled && !required.CiphertextHidingDRAMEnabled {
+		return errors.New("chiphertext hiding in DRAM not enforced")
+	}
+	if reportInfo.AliasCheckComplete && !required.AliasCheckComplete {
+		return errors.New("memory alias check hasn't been completed")
 	}
 	return nil
 }
