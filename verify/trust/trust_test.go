@@ -16,6 +16,7 @@ package trust_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -127,10 +128,94 @@ func TestRetryHTTPSGetterAllFail(t *testing.T) {
 
 	body, err := r.Get("https://fetch.me")
 	if !bytes.Equal(body, []byte("")) {
-		t.Errorf("expected '%s' but got '%s'", "content", body)
+		t.Errorf("expected empty body but got %q", body)
 	}
 	if err == nil {
 		t.Errorf("expected error, but got none")
 	}
 	testGetter.Done(t)
 }
+
+func TestRetryHTTPSGetterContext(t *testing.T) {
+	testGetter := &test.Getter{
+		Responses: map[string][]test.GetResponse{
+			"https://fetch.me": {
+				{
+					Occurrences: 1,
+					Body:        []byte("content"),
+					Error:       nil,
+				},
+			},
+		},
+	}
+	r := &trust.RetryHTTPSGetter{
+		MaxRetryDelay: 1 * time.Millisecond,
+		Getter:        testGetter,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	body, err := r.GetContext(ctx, "https://fetch.me")
+	if !bytes.Equal(body, []byte("")) {
+		t.Errorf("expected empty body but got %q", body)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected error %q, but got %q", context.Canceled, err)
+	}
+}
+
+type recordingGetter struct {
+	getCalls int
+}
+
+func (r *recordingGetter) Get(_ string) ([]byte, error) {
+	r.getCalls++
+	return []byte{}, nil
+}
+
+type recordingContextGetter struct {
+	recordingGetter
+	getContextCalls int
+}
+
+func (r *recordingContextGetter) GetContext(_ context.Context, _ string) ([]byte, error) {
+	r.getContextCalls++
+	return []byte{}, nil
+}
+
+func TestGetWith(t *testing.T) {
+	url := ""
+	t.Run("HTTPSGetter uses Get", func(t *testing.T) {
+		contextGetter := recordingContextGetter{}
+		if _, err := trust.GetWith(context.Background(), &contextGetter.recordingGetter, url); err != nil {
+			t.Fatalf("trust.GetWith returned an unexpected error: %v", err)
+		}
+		if contextGetter.getContextCalls != 0 {
+			t.Errorf("wrong number of calls to GetContext: got %d, want 0", contextGetter.getContextCalls)
+		}
+		if contextGetter.recordingGetter.getCalls != 1 {
+			t.Errorf("wrong number of calls to Get: got %d, want 1", contextGetter.getCalls)
+		}
+	})
+	t.Run("ContextHTTPSGetter uses GetContext", func(t *testing.T) {
+		contextGetter := recordingContextGetter{}
+		if _, err := trust.GetWith(context.Background(), &contextGetter, url); err != nil {
+			t.Fatalf("trust.GetWith returned an unexpected error: %v", err)
+		}
+		if contextGetter.getContextCalls != 1 {
+			t.Errorf("wrong number of calls to GetContext: got %d, want 1", contextGetter.getContextCalls)
+		}
+		if contextGetter.recordingGetter.getCalls != 0 {
+			t.Errorf("wrong number of calls to Get: got %d, want 0", contextGetter.getCalls)
+		}
+	})
+
+}
+
+// Ensure that the HTTPSGetters implement the expected interfaces.
+var (
+	_ = trust.HTTPSGetter(&trust.SimpleHTTPSGetter{})
+	_ = trust.HTTPSGetter(&trust.RetryHTTPSGetter{})
+	_ = trust.ContextHTTPSGetter(&trust.SimpleHTTPSGetter{})
+	_ = trust.ContextHTTPSGetter(&trust.RetryHTTPSGetter{})
+)

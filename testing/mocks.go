@@ -15,6 +15,7 @@
 package testing
 
 import (
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -244,6 +245,17 @@ func (g *Getter) Get(url string) ([]byte, error) {
 		g.Responses[url] = resp[1:]
 	}
 	return body, err
+}
+
+// GetContext checks whether the context expired, returns the context error if that's the case and
+// calls Get otherwise.
+func (g *Getter) GetContext(ctx context.Context, url string) ([]byte, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+		return g.Get(url)
+	}
 }
 
 // Done checks that all configured responses have been consumed, and errors
