@@ -292,6 +292,19 @@ func validatePolicy(reportPolicy uint64, required abi.SnpPolicy) error {
 	if required.SingleSocket && !policy.SingleSocket {
 		return errors.New("required single socket restriction not present")
 	}
+	if required.CXLAllowed && !policy.CXLAllowed {
+		return errors.New("found unauthorized CXL capability")
+	}
+	if required.MemAES256XTS && !policy.MemAES256XTS {
+		return errors.New("found unauthorized memory encryption mode")
+	}
+	if required.RAPLDis && !policy.RAPLDis {
+		return errors.New("found unauthorized RAPL capability")
+	}
+	if required.CipherTextHidingDRAM && !policy.CipherTextHidingDRAM {
+		return errors.New("chiphertext hiding in DRAM isn't enforced")
+	}
+
 	return nil
 }
 
@@ -519,11 +532,23 @@ func validatePlatformInfo(platformInfo uint64, required *abi.SnpPlatformInfo) er
 	if err != nil {
 		return fmt.Errorf("could not parse SNP platform info %x: %v", platformInfo, err)
 	}
+	if reportInfo.SMTEnabled && !required.SMTEnabled {
+		return errors.New("unauthorized platform feature SMT enabled")
+	}
 	if reportInfo.TSMEEnabled && !required.TSMEEnabled {
 		return errors.New("unauthorized platform feature TSME enabled")
 	}
-	if reportInfo.SMTEnabled && !required.SMTEnabled {
-		return errors.New("unauthorized platform feature SMT enabled")
+	if reportInfo.ECCEnabled && !required.ECCEnabled {
+		return errors.New("unauthorized platform feature ECC enabled")
+	}
+	if reportInfo.RAPLDisabled && !required.RAPLDisabled {
+		return errors.New("platform feature RAPL isn't enabled")
+	}
+	if reportInfo.CiphertextHidingDRAMEnabled && !required.CiphertextHidingDRAMEnabled {
+		return errors.New("chiphertext hiding in DRAM not enforced")
+	}
+	if reportInfo.AliasCheckComplete && !required.AliasCheckComplete {
+		return errors.New("memory alias check hasn't been completed")
 	}
 	return nil
 }

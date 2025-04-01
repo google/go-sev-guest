@@ -156,10 +156,10 @@ func TestReportMbz(t *testing.T) {
 			wantErr:     "policy[17] is reserved, must be 1, got 0",
 		},
 		{
-			name:        "Guest policy bit 21",
-			changeIndex: policyOffset + 2, // Bits 16-23
-			changeValue: 0x22,             // Set bits 17, 21
-			wantErr:     "malformed guest policy: mbz range policy[0x15:0x3f] not all zero: 220000",
+			name:        "Guest policy bit 25",
+			changeIndex: policyOffset + 3, // Bits 24-31
+			changeValue: 0x80,             // Set bit 25
+			wantErr:     "malformed guest policy: mbz range policy[0x19:0x3f] not all zero",
 		},
 	}
 	reportProto := &spb.Report{}
@@ -204,12 +204,16 @@ func TestSnpPolicySection(t *testing.T) {
 	rand.Read(entropy)
 	for tc := 0; tc < entropySize/3; tc++ {
 		policy := SnpPolicy{
-			ABIMinor:     entropy[tc*3],
-			ABIMajor:     entropy[tc*3+1],
-			SMT:          (entropy[tc*3+2] & 1) != 0,
-			MigrateMA:    (entropy[tc*3+2] & 2) != 0,
-			Debug:        (entropy[tc*3+2] & 4) != 0,
-			SingleSocket: (entropy[tc*3+2] & 8) != 0,
+			ABIMinor:             entropy[tc*3],
+			ABIMajor:             entropy[tc*3+1],
+			SMT:                  (entropy[tc*3+2] & 1) != 0,
+			MigrateMA:            (entropy[tc*3+2] & 2) != 0,
+			Debug:                (entropy[tc*3+2] & 4) != 0,
+			SingleSocket:         (entropy[tc*3+2] & 8) != 0,
+			CXLAllowed:           (entropy[tc*3+2] & 16) != 0,
+			MemAES256XTS:         (entropy[tc*3+2] & 32) != 0,
+			RAPLDis:              (entropy[tc*3+2] & 64) != 0,
+			CipherTextHidingDRAM: (entropy[tc*3+2] & 128) != 0,
 		}
 
 		got, err := ParseSnpPolicy(SnpPolicyToBytes(policy))
