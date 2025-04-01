@@ -66,12 +66,16 @@ const (
 	// SignatureSize is the field size of SIGNATURE in an SEV-SNP attestation report.
 	SignatureSize = 512
 
-	policyOffset          = 0x08
-	policySMTBit          = 16
-	policyReserved1bit    = 17
-	policyMigrateMABit    = 18
-	policyDebugBit        = 19
-	policySingleSocketBit = 20
+	policyOffset                  = 0x08
+	policySMTBit                  = 16
+	policyReserved1bit            = 17
+	policyMigrateMABit            = 18
+	policyDebugBit                = 19
+	policySingleSocketBit         = 20
+	policyCLXAllowBit             = 21
+	policyMemAES256XTSBit         = 22
+	policyRAPLDisBit              = 23
+	policyCipherTextHidingDRAMBit = 24
 
 	maxPlatformInfoBit = 5
 
@@ -216,6 +220,15 @@ type SnpPolicy struct {
 	Debug bool
 	// SingleSocket is true if the guest may only be active on a single socket.
 	SingleSocket bool
+	// CXLAllowed is true if CLX can be populated with devices or memory.
+	CXLAllowed bool
+	// MemAES256XTS is true if AES-256-XTS is required for memory encryption.
+	// If false, either AES-128-XEX or AES-256-XTS is allowed.
+	MemAES256XTS bool
+	// RAPLDis is true if Running Average Power Limit (RAPL) must be disabled.
+	RAPLDis bool
+	// CipherTextHidingDRAM is true if ciphertext hiding for the DRAM must be enabled.
+	CipherTextHidingDRAM bool
 }
 
 // ParseSnpPolicy interprets the SEV SNP API's guest policy bitmask into an SnpPolicy struct type.
@@ -224,7 +237,7 @@ func ParseSnpPolicy(guestPolicy uint64) (SnpPolicy, error) {
 	if guestPolicy&uint64(1<<policyReserved1bit) == 0 {
 		return result, fmt.Errorf("policy[%d] is reserved, must be 1, got 0", policyReserved1bit)
 	}
-	if err := mbz64(guestPolicy, "policy", 63, 21); err != nil {
+	if err := mbz64(guestPolicy, "policy", 63, 25); err != nil {
 		return result, err
 	}
 	result.ABIMinor = uint8(guestPolicy & 0xff)
@@ -233,6 +246,10 @@ func ParseSnpPolicy(guestPolicy uint64) (SnpPolicy, error) {
 	result.MigrateMA = (guestPolicy & (1 << policyMigrateMABit)) != 0
 	result.Debug = (guestPolicy & (1 << policyDebugBit)) != 0
 	result.SingleSocket = (guestPolicy & (1 << policySingleSocketBit)) != 0
+	result.CXLAllowed = (guestPolicy & (1 << policyCLXAllowBit)) != 0
+	result.MemAES256XTS = (guestPolicy & (1 << policyMemAES256XTSBit)) != 0
+	result.RAPLDis = (guestPolicy & (1 << policyRAPLDisBit)) != 0
+	result.CipherTextHidingDRAM = (guestPolicy & (1 << policyCipherTextHidingDRAMBit)) != 0
 	return result, nil
 }
 
@@ -250,6 +267,18 @@ func SnpPolicyToBytes(policy SnpPolicy) uint64 {
 	}
 	if policy.SingleSocket {
 		result |= uint64(1 << policySingleSocketBit)
+	}
+	if policy.CXLAllowed {
+		result |= uint64(1 << policyCLXAllowBit)
+	}
+	if policy.MemAES256XTS {
+		result |= uint64(1 << policyMemAES256XTSBit)
+	}
+	if policy.RAPLDis {
+		result |= uint64(1 << policyRAPLDisBit)
+	}
+	if policy.CipherTextHidingDRAM {
+		result |= uint64(1 << policyCipherTextHidingDRAMBit)
 	}
 	return result
 }

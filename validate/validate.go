@@ -292,6 +292,19 @@ func validatePolicy(reportPolicy uint64, required abi.SnpPolicy) error {
 	if required.SingleSocket && !policy.SingleSocket {
 		return errors.New("required single socket restriction not present")
 	}
+	if required.CXLAllowed && !policy.CXLAllowed {
+		return errors.New("found unauthorized CXL capability")
+	}
+	if required.MemAES256XTS && !policy.MemAES256XTS {
+		return errors.New("found unauthorized memory encryption mode")
+	}
+	if required.RAPLDis && !policy.RAPLDis {
+		return errors.New("found unauthorized RAPL capability")
+	}
+	if required.CipherTextHidingDRAM && !policy.CipherTextHidingDRAM {
+		return errors.New("chiphertext hiding in DRAM isn't enforced")
+	}
+
 	return nil
 }
 
