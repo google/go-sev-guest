@@ -385,10 +385,14 @@ func validateCRLlink(x *x509.Certificate, productLine, role string) error {
 }
 
 // validateVcekExtensions checks if the certificate extensions match
-// wellformedness expectations.
-func validateExtensions(exts *kds.Extensions, key abi.ReportSigner) error {
-	_, err := kds.ParseProductName(exts.ProductName, key)
-	return err
+// wellformedness expectations. If the product line is known, then we disregard any product claim
+// in the certificate due to a manufacturing error that is resolved by report version 3.
+func validateExtensions(exts *kds.Extensions, key abi.ReportSigner, knownProductLine string) error {
+	if knownProductLine == "" {
+		_, err := kds.ParseProductName(exts.ProductName, key)
+		return err
+	}
+	return nil
 }
 
 // validateKDSCertificateProductNonspecific returns an error if the given certificate doesn't have
@@ -397,7 +401,7 @@ func validateExtensions(exts *kds.Extensions, key abi.ReportSigner) error {
 // https://www.amd.com/system/files/TechDocs/57230.pdf
 // This does not check the certificate revocation list since that requires internet access.
 // If valid, then returns the V[CL]EK-specific certificate extensions in the VcekExtensions type.
-func validateKDSCertificateProductNonspecific(cert *x509.Certificate, key abi.ReportSigner) (*kds.Extensions, error) {
+func validateKDSCertificateProductNonspecific(cert *x509.Certificate, key abi.ReportSigner, knownProductLine string) (*kds.Extensions, error) {
 	if cert.Version != 3 {
 		return nil, fmt.Errorf("%v certificate version is %v, expected 3", key, cert.Version)
 	}
@@ -427,7 +431,7 @@ func validateKDSCertificateProductNonspecific(cert *x509.Certificate, key abi.Re
 	if err != nil {
 		return nil, err
 	}
-	if err := validateExtensions(exts, key); err != nil {
+	if err := validateExtensions(exts, key, knownProductLine); err != nil {
 		return nil, err
 	}
 	return exts, nil
@@ -498,7 +502,7 @@ func decodeCerts(chain *spb.CertificateChain, key abi.ReportSigner, knownProduct
 	if err != nil {
 		return nil, nil, fmt.Errorf("could not interpret %v DER bytes %v: %v", key, ek, err)
 	}
-	exts, err := validateKDSCertificateProductNonspecific(endorsementKeyCert, key)
+	exts, err := validateKDSCertificateProductNonspecific(endorsementKeyCert, key, knownProductLine)
 	if err != nil {
 		return nil, nil, err
 	}
