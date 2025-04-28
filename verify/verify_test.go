@@ -112,7 +112,8 @@ func TestParseVcekCert(t *testing.T) {
 	if err != nil {
 		t.Errorf("could not parse valid VCEK certificate: %v", err)
 	}
-	if _, err := validateKDSCertificateProductNonspecific(cert, abi.VcekReportSigner); err != nil {
+	knownProductLine := ""
+	if _, err := validateKDSCertificateProductNonspecific(cert, abi.VcekReportSigner, knownProductLine); err != nil {
 		t.Errorf("could not validate valid VCEK certificate: %v", err)
 	}
 }
