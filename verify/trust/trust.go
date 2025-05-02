@@ -159,7 +159,7 @@ type SimpleHTTPSGetter struct{}
 
 // Get uses http.Get to return the HTTPS response body as a byte array.
 func (n *SimpleHTTPSGetter) Get(url string) ([]byte, error) {
-	return n.GetContext(context.Background(), url)
+	return n.GetContext(context.TODO(), url)
 }
 
 // GetContext behaves like get, but forwards the context to the http package.
@@ -197,7 +197,7 @@ type RetryHTTPSGetter struct {
 
 // Get fetches the body of the URL, retrying a given amount of times on failure.
 func (n *RetryHTTPSGetter) Get(url string) ([]byte, error) {
-	return n.GetContext(context.Background(), url)
+	return n.GetContext(context.TODO(), url)
 }
 
 // GetContext behaves like get, but forwards the context to the Getter and stops retrying when the
@@ -345,7 +345,7 @@ func ClearProductCertCache() {
 // GetProductChain returns the ASK and ARK certificates of the given product line, either from getter
 // or from a cache of the results from the last successful call.
 func GetProductChain(productLine string, s abi.ReportSigner, getter HTTPSGetter) (*ProductCerts, error) {
-	return GetProductChainContext(context.Background(), productLine, s, getter)
+	return GetProductChainContext(context.TODO(), productLine, s, getter)
 }
 
 // GetProductChainContext behaves like GetProductChain but forwards the context to the HTTPSGetter.
