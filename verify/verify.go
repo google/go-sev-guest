@@ -295,7 +295,7 @@ type CRLUnavailableErr struct {
 // GetCrlAndCheckRoot downloads the given cert's CRL from one of the distribution points and
 // verifies that the CRL is valid and doesn't revoke an intermediate key.
 func GetCrlAndCheckRoot(r *trust.AMDRootCerts, opts *Options) (*x509.RevocationList, error) {
-	return GetCrlAndCheckRootContext(context.Background(), r, opts)
+	return GetCrlAndCheckRootContext(context.TODO(), r, opts)
 }
 
 // GetCrlAndCheckRootContext behaves like GetCrlAndCheckRoot but forwards the context to the
@@ -362,7 +362,7 @@ func verifyCRL(r *trust.AMDRootCerts) error {
 // VcekNotRevoked will consult the online CRL listed in the VCEK certificate for whether this cert
 // has been revoked. Returns nil if not revoked, error on any problem.
 func VcekNotRevoked(r *trust.AMDRootCerts, cert *x509.Certificate, options *Options) error {
-	return VcekNotRevokedContext(context.Background(), r, cert, options)
+	return VcekNotRevokedContext(context.TODO(), r, cert, options)
 }
 
 // VcekNotRevokedContext behaves like VcekNotRevoked but forwards the context to the HTTPSGetter.
@@ -678,7 +678,7 @@ func updateProductExpectation(product **spb.SevProduct, reportProduct *spb.SevPr
 // SnpAttestation verifies the protobuf representation of an attestation report's signature based
 // on the report's SignatureAlgo, provided the certificate chain is valid.
 func SnpAttestation(attestation *spb.Attestation, options *Options) error {
-	return SnpAttestationContext(context.Background(), attestation, options)
+	return SnpAttestationContext(context.TODO(), attestation, options)
 }
 
 // SnpAttestationContext behaves like SnpAttestation but forwards the context to the HTTPSGetter.
@@ -875,7 +875,7 @@ func fillInAttestation(ctx context.Context, attestation *spb.Attestation, option
 // chain for the VCEK that supposedly signed the given report, and returns the Attestation
 // representation of their combination. If getter is nil, uses Golang's http.Get.
 func GetAttestationFromReport(report *spb.Report, options *Options) (*spb.Attestation, error) {
-	return GetAttestationFromReportContext(context.Background(), report, options)
+	return GetAttestationFromReportContext(context.TODO(), report, options)
 }
 
 // GetAttestationFromReportContext behaves like GetAttestationFromReport but forwards the context
@@ -913,7 +913,7 @@ func GetAttestationFromReportContext(ctx context.Context, report *spb.Report, op
 // on the report's SignatureAlgo and uses the AMD Key Distribution Service to download the
 // report's corresponding VCEK certificate.
 func SnpReport(report *spb.Report, options *Options) error {
-	return SnpReportContext(context.Background(), report, options)
+	return SnpReportContext(context.TODO(), report, options)
 }
 
 // SnpReportContext behaves like SnpReport but forwards the context to the HTTPSGetter.
@@ -932,7 +932,7 @@ func SnpReportContext(ctx context.Context, report *spb.Report, options *Options)
 // based on the report's SignatureAlgo and uses the AMD Key Distribution Service to download
 // the report's corresponding VCEK certificate.
 func RawSnpReport(rawReport []byte, options *Options) error {
-	return RawSnpReportContext(context.Background(), rawReport, options)
+	return RawSnpReportContext(context.TODO(), rawReport, options)
 }
 
 // RawSnpReportContext behaves like RawSnpReport but forwards the context to the HTTPSGetter.
