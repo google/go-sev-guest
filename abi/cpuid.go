@@ -1,5 +1,4 @@
 //go:build !amd64 || gccgo
-// +build !amd64 gccgo
 
 package abi
 
