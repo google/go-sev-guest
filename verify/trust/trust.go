@@ -70,7 +70,7 @@ var (
 	AskArkTurinVlekBytes []byte
 
 	// A cache of product certificate KDS results per product.
-	prodCacheMu          sync.Mutex
+	prodCacheMu          sync.RWMutex
 	productLineCertCache map[string]*ProductCerts
 )
 
@@ -350,12 +350,20 @@ func GetProductChain(productLine string, s abi.ReportSigner, getter HTTPSGetter)
 
 // GetProductChainContext behaves like GetProductChain but forwards the context to the HTTPSGetter.
 func GetProductChainContext(ctx context.Context, productLine string, s abi.ReportSigner, getter HTTPSGetter) (*ProductCerts, error) {
+	prodCacheMu.RLock()
 	if productLineCertCache == nil {
+		prodCacheMu.RUnlock()
+
 		prodCacheMu.Lock()
 		productLineCertCache = make(map[string]*ProductCerts)
 		prodCacheMu.Unlock()
+	} else {
+		prodCacheMu.RUnlock()
 	}
+
+	prodCacheMu.RLock()
 	result, ok := productLineCertCache[productLine]
+	prodCacheMu.RUnlock()
 	if !ok {
 		askark, err := GetWith(ctx, getter, kds.ProductCertChainURL(s, productLine))
 		if err != nil {
@@ -382,6 +390,7 @@ func GetProductChainContext(ctx context.Context, productLine string, s abi.Repor
 		productLineCertCache[productLine] = result
 		prodCacheMu.Unlock()
 	}
+	fmt.Println("done")
 	return result, nil
 }
 
