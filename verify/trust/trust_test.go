@@ -172,7 +172,6 @@ func TestGetProductChainForRaceDetector(t *testing.T) {
 				{
 					Occurrences: 2,
 					Body:        trust.AskArkMilanVcekBytes,
-					Error:       nil,
 				},
 			},
 		},

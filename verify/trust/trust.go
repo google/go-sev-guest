@@ -350,16 +350,7 @@ func GetProductChain(productLine string, s abi.ReportSigner, getter HTTPSGetter)
 
 // GetProductChainContext behaves like GetProductChain but forwards the context to the HTTPSGetter.
 func GetProductChainContext(ctx context.Context, productLine string, s abi.ReportSigner, getter HTTPSGetter) (*ProductCerts, error) {
-	prodCacheMu.RLock()
-	if productLineCertCache == nil {
-		prodCacheMu.RUnlock()
-
-		prodCacheMu.Lock()
-		productLineCertCache = make(map[string]*ProductCerts)
-		prodCacheMu.Unlock()
-	} else {
-		prodCacheMu.RUnlock()
-	}
+	ensureCache()
 
 	prodCacheMu.RLock()
 	result, ok := productLineCertCache[productLine]
@@ -390,7 +381,6 @@ func GetProductChainContext(ctx context.Context, productLine string, s abi.Repor
 		productLineCertCache[productLine] = result
 		prodCacheMu.Unlock()
 	}
-	fmt.Println("done")
 	return result, nil
 }
 
@@ -443,5 +433,18 @@ func init() {
 		"Milan": milanCerts,
 		"Genoa": genoaCerts,
 		"Turin": turinCerts,
+	}
+}
+
+func ensureCache() {
+	prodCacheMu.RLock()
+	if productLineCertCache == nil {
+		prodCacheMu.RUnlock()
+
+		prodCacheMu.Lock()
+		productLineCertCache = make(map[string]*ProductCerts)
+		prodCacheMu.Unlock()
+	} else {
+		prodCacheMu.RUnlock()
 	}
 }
