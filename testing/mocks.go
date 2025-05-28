@@ -19,6 +19,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sync"
 	"syscall"
 	"testing"
 
@@ -210,6 +211,7 @@ type GetResponse struct {
 // returns the configured responses for the provided URL. Responses are returned
 // as a queue, i.e., always serving from index 0.
 type Getter struct {
+	mu        sync.Mutex
 	Responses map[string][]GetResponse
 }
 
@@ -234,6 +236,8 @@ func SimpleGetter(responses map[string][]byte) *Getter {
 // Get the next response body and error. The response is also removed,
 // if it has been requested the configured number of times.
 func (g *Getter) Get(url string) ([]byte, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	resp, ok := g.Responses[url]
 	if !ok || len(resp) == 0 {
 		return nil, fmt.Errorf("404: %s", url)
@@ -261,6 +265,9 @@ func (g *Getter) GetContext(ctx context.Context, url string) ([]byte, error) {
 // Done checks that all configured responses have been consumed, and errors
 // otherwise.
 func (g *Getter) Done(t testing.TB) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
 	for key := range g.Responses {
 		if len(g.Responses[key]) != 0 {
 			t.Errorf("Prepared response for '%s' not retrieved.", key)

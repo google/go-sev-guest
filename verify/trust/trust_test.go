@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-sev-guest/abi"
 	test "github.com/google/go-sev-guest/testing"
 	"github.com/google/go-sev-guest/verify/trust"
 )
@@ -161,6 +162,39 @@ func TestRetryHTTPSGetterContext(t *testing.T) {
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("expected error %q, but got %q", context.Canceled, err)
+	}
+}
+
+func TestGetProductChainForRaceDetector(t *testing.T) {
+	testGetter := &test.Getter{
+		Responses: map[string][]test.GetResponse{
+			"https://kdsintf.amd.com/vcek/v1/test/cert_chain": {
+				{
+					Occurrences: 2,
+					Body:        trust.AskArkMilanVcekBytes,
+				},
+			},
+		},
+	}
+
+	// run GetProductChain concurrently to see if the race detector is triggered.
+	errCh := make(chan error)
+	go func() {
+		_, err := trust.GetProductChain("test", abi.VcekReportSigner, testGetter)
+		errCh <- err
+	}()
+
+	go func() {
+		_, err := trust.GetProductChain("test", abi.VcekReportSigner, testGetter)
+		errCh <- err
+	}()
+
+	var err error
+	for i := 0; i < 2; i++ {
+		err = errors.Join(err, <-errCh)
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
