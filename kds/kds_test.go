@@ -36,14 +36,60 @@ func TestProductCertChainURL(t *testing.T) {
 	}
 }
 
-func TestVCEKCertURL(t *testing.T) {
+func hwid64() []byte {
 	hwid := make([]byte, abi.ChipIDSize)
 	hwid[0] = 0xfe
 	hwid[abi.ChipIDSize-1] = 0xc0
+	return hwid
+}
+
+func hwid8() []byte {
+	hwid := make([]byte, TurinHWIDSize)
+	hwid[0] = 0xfe
+	hwid[TurinHWIDSize-1] = 0xc0
+	return hwid
+}
+
+func TestVCEKCertURL(t *testing.T) {
+	hwid := hwid64()
 	got := VCEKCertURL("Milan", hwid, TCBVersion(0))
 	want := "https://kdsintf.amd.com/vcek/v1/Milan/fe0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0?blSPL=0&teeSPL=0&snpSPL=0&ucodeSPL=0"
 	if got != want {
 		t.Errorf("VCEKCertURL(\"Milan\", %v, 0) = %q, want %q", hwid, got, want)
+	}
+}
+
+func TestVCEKCertQueryTurin(t *testing.T) {
+	tcs := []struct {
+		name        string
+		hwid        []byte
+		productLine string
+		tcb         TCBVersionI
+		want        string
+	}{
+		{
+			name:        "milan",
+			hwid:        hwid64(),
+			productLine: "Milan",
+			tcb:         TCBVersion(0),
+			want:        "https://kdsintf.amd.com/vcek/v1/Milan/fe0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0?blSPL=0&teeSPL=0&snpSPL=0&ucodeSPL=0",
+		},
+		{
+			name:        "turin",
+			hwid:        hwid8(),
+			productLine: "Turin",
+			tcb:         TCBVersionTurin(1 | (2 << 56)),
+			want:        "https://kdsintf.amd.com/vcek/v1/Turin/fe000000000000c0?fmcSPL=1&blSPL=0&teeSPL=0&snpSPL=0&ucodeSPL=2",
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			got := VCEKCertQuery(tc.productLine, tc.hwid, tc.tcb)
+
+			if got != tc.want {
+				t.Errorf("VCEKCertQuery(%q, %v, 0x%x) = %q, want %q", tc.productLine, tc.hwid, tc.tcb.Raw(), got, tc.want)
+			}
+		})
 	}
 }
 

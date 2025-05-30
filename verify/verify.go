@@ -902,6 +902,7 @@ func GetAttestationFromReportContext(ctx context.Context, report *spb.Report, op
 	case abi.VlekReportSigner:
 		exts, _ = kds.VlekCertificateExtensions(parse(result.CertificateChain.VlekCert))
 	}
+	// Relevant for v2 reports only.
 	if exts != nil && report.GetCpuid1EaxFms() == 0 {
 		product, _ := kds.ParseProductName(exts.ProductName, info.SigningKey)
 		setProduct(result, product)
