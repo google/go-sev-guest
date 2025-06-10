@@ -127,11 +127,18 @@ const (
 	familyShift         = 8
 	modelShift          = 4
 	// Combined extended values
-	zen3zen4Family = 0x19
-	zen5Family     = 0x1A
-	milanModel     = 0 | 1
-	genoaModel     = (1 << 4) | 1
-	turinModel     = 2
+	zen3zen4Family     = 0x19
+	zen5Family         = 0x1A
+	milanModelCombined = 0 | 1
+	genoaModelCombined = (1 << 4) | 1
+	turinModelCombined = 2
+	// Non-combined extended values
+	// See page 8, table 4 of https://web.archive.org/web/20250522130154/https://www.amd.com/content/dam/amd/en/documents/epyc-technical-docs/specifications/57230.pdf
+	milanModel  = 0
+	genoaModel  = 1
+	sienaModel  = 0xA
+	turinModelA = 0
+	turinModelB = 1
 
 	// ReportVersion2 is set by the SNP API specification
 	// https://web.archive.org/web/20231222054111if_/http://www.amd.com/content/dam/amd/en/documents/epyc-technical-docs/specifications/56860.pdf
@@ -994,6 +1001,7 @@ func FmsFromCpuid1Eax(eax uint32) (byte, byte, byte) {
 // SevProductFromCpuid1Eax returns the SevProduct that is represented by cpuid(1).eax.
 func SevProductFromCpuid1Eax(eax uint32) *pb.SevProduct {
 	family, model, stepping := FmsFromCpuid1Eax(eax)
+	extendedModel := model >> 4
 	// Ah, Fh, {0h,1h} values from the KDS specification,
 	// section "Determining the Product Name".
 	var productName pb.SevProduct_SevProductName
@@ -1004,17 +1012,17 @@ func SevProductFromCpuid1Eax(eax uint32) *pb.SevProduct {
 	// Product information specified by processor programming reference publications.
 	switch family {
 	case zen3zen4Family:
-		switch model {
+		switch extendedModel {
 		case milanModel:
 			productName = pb.SevProduct_SEV_PRODUCT_MILAN
-		case genoaModel:
+		case genoaModel, sienaModel:
 			productName = pb.SevProduct_SEV_PRODUCT_GENOA
 		default:
 			unknown()
 		}
 	case zen5Family:
-		switch model {
-		case turinModel:
+		switch extendedModel {
+		case turinModelA, turinModelB:
 			productName = pb.SevProduct_SEV_PRODUCT_TURIN
 		default:
 			unknown()
@@ -1041,13 +1049,13 @@ func MaskedCpuid1EaxFromSevProduct(product *pb.SevProduct) uint32 {
 	switch product.Name {
 	case pb.SevProduct_SEV_PRODUCT_MILAN:
 		family = zen3zen4Family
-		model = milanModel
+		model = milanModelCombined
 	case pb.SevProduct_SEV_PRODUCT_GENOA:
 		family = zen3zen4Family
-		model = genoaModel
+		model = genoaModelCombined
 	case pb.SevProduct_SEV_PRODUCT_TURIN:
 		family = zen5Family
-		model = turinModel
+		model = turinModelCombined
 	default:
 		return 0
 	}
