@@ -121,31 +121,33 @@ func asBin(report *spb.Attestation) ([]byte, error) {
 	return append(r, certs...), nil
 }
 
-func tcbBreakdown(tcbVersion uint8, tcb uint64) string {
-	parts := kds.DecomposeTCBVersion(kds.TCBVersion{Version: tcbVersion, TCB: tcb})
-	switch tcbVersion {
-	case kds.TCBStructVersion1:
-		return fmt.Sprintf("0x%x:{ucode: %d, snp: %d, tee: %d, bl: %d, fmc: %d}",
-			tcb, parts.UcodeSpl, parts.SnpSpl, parts.TeeSpl, parts.BlSpl, parts.FmcSpl)
-	case kds.TCBStructVersion0:
-		fallthrough
-	default:
-		return fmt.Sprintf("0x%x:{ucode: %d, snp: %d, tee: %d, bl: %d}",
-			tcb, parts.UcodeSpl, parts.SnpSpl, parts.TeeSpl, parts.BlSpl)
+func tcbBreakdown(productLine string, tcb uint64) (string, error) {
+	tcbVersionStruct, err := kds.NewTCBVersionStruct(productLine, tcb)
+	if err != nil {
+		return "", err
 	}
+
+	parts, err := kds.DecomposeTCBVersionStruct(tcbVersionStruct)
+	if err != nil {
+		return "", err
+	}
+
+	return parts.String(), nil
 }
 
 func tcbText(report *spb.Attestation) ([]byte, error) {
 	fms := report.GetReport().GetCpuid1EaxFms()
-	tcbVersion, err := kds.ProductLineToTCBVersion(kds.ProductLineFromFms(fms))
+
+	currentTcb, currentTcbErr := tcbBreakdown(kds.ProductLineFromFms(fms), report.Report.GetCurrentTcb())
+	committedTcb, committedTcbErr := tcbBreakdown(kds.ProductLineFromFms(fms), report.Report.GetCommittedTcb())
+	launchTcb, launchTcbErr := tcbBreakdown(kds.ProductLineFromFms(fms), report.Report.GetLaunchTcb())
+	err := multierr.Combine(currentTcbErr, committedTcbErr, launchTcbErr)
 	if err != nil {
 		return nil, err
 	}
 
 	return []byte(fmt.Sprintf("current_tcb=%s\ncommitted_tcb=%s\nlaunch_tcb=%s\n",
-		tcbBreakdown(tcbVersion, report.Report.GetCurrentTcb()),
-		tcbBreakdown(tcbVersion, report.Report.GetCommittedTcb()),
-		tcbBreakdown(tcbVersion, report.Report.GetLaunchTcb()))), nil
+		currentTcb, committedTcb, launchTcb)), nil
 }
 
 // Transform returns the attestation in the outform marshalled format.

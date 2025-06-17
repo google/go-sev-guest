@@ -60,7 +60,6 @@ func TestValidateSnpAttestation(t *testing.T) {
 	reportIDMA := []byte{0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}
 	chipID := [64]byte{0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06}
 	goodtcb := kds.TCBParts{
-		Version:  0,
 		BlSpl:    0x1f,
 		TeeSpl:   0x7f,
 		SnpSpl:   0x70,
@@ -80,10 +79,10 @@ func TestValidateSnpAttestation(t *testing.T) {
 		committedMinor uint8
 	}
 	makeReport := func(reportData [64]byte, opts testOptions) [labi.SnpReportRespReportSize]byte {
-		currentTcb, currerr := kds.ComposeTCBParts(opts.currentTcb)
-		reportedTcb, reportederr := kds.ComposeTCBParts(opts.reportedTcb)
-		committedTcb, committederr := kds.ComposeTCBParts(opts.committedTcb)
-		launchTcb, launcherr := kds.ComposeTCBParts(opts.launchTcb)
+		currentTcb, currerr := opts.currentTcb.ToTCBVersionStruct()
+		reportedTcb, reportederr := opts.reportedTcb.ToTCBVersionStruct()
+		committedTcb, committederr := opts.committedTcb.ToTCBVersionStruct()
+		launchTcb, launcherr := opts.launchTcb.ToTCBVersionStruct()
 		if err := multierr.Combine(currerr,
 			reportederr,
 			committederr,
@@ -330,7 +329,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 				PlatformInfo: &abi.SnpPlatformInfo{SMTEnabled: true},
 				MinimumTCB:   kds.TCBParts{UcodeSpl: 0xff, SnpSpl: 0x05, BlSpl: 0x02},
 			},
-			wantErr: "the report's REPORTED_TCB {Version:0 BlSpl:31 TeeSpl:127 Spl4:0 Spl5:0 Spl6:0 Spl7:0 SnpSpl:112 UcodeSpl:146 FmcSpl:0} is lower than the policy minimum TCB {Version:0 BlSpl:2 TeeSpl:0 Spl4:0 Spl5:0 Spl6:0 Spl7:0 SnpSpl:5 UcodeSpl:255 FmcSpl:0} in at least one component",
+			wantErr: "the report's REPORTED_TCB {BlSpl:31 TeeSpl:127 Spl4:0 Spl5:0 Spl6:0 Spl7:0 SnpSpl:112 UcodeSpl:146} is lower than the policy minimum TCB {BlSpl:2 TeeSpl:0 Spl4:0 Spl5:0 Spl6:0 Spl7:0 SnpSpl:5 UcodeSpl:255} in at least one component",
 		},
 		{
 			name:        "Minimum build checked",
@@ -418,7 +417,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 			name:        "rejected provisional by tcb",
 			attestation: attestationcb1455,
 			opts:        &Options{ReportData: noncecb1455[:], GuestPolicy: abi.SnpPolicy{Debug: true}},
-			wantErr:     "the report's COMMITTED_TCB {0 9270000000007f00} does not match the report's CURRENT_TCB {0 9270000000007f1f}",
+			wantErr:     "the report's COMMITTED_TCB Milan or Genoa TCB: 0x9270000000007f00 does not match the report's CURRENT_TCB Milan or Genoa TCB: 0x9270000000007f1f",
 		},
 		{
 			name:        "accepted provisional by version",

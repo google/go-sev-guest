@@ -844,15 +844,19 @@ func fillInAttestation(ctx context.Context, attestation *spb.Attestation, option
 		}
 	}
 
-	tcbVersion, err := kds.ProductLineToTCBVersion(productLine)
-	if err != nil {
-		return err
-	}
-
 	switch info.SigningKey {
 	case abi.VcekReportSigner:
 		if len(chain.GetVcekCert()) == 0 {
-			vcekURL := kds.VCEKCertURL(productLine, report.GetChipId(), kds.TCBVersion{Version: tcbVersion, TCB: report.GetReportedTcb()})
+			reportedTCBVersionStruct, err := kds.NewTCBVersionStruct(productLine, report.GetReportedTcb())
+			if err != nil {
+				return err
+			}
+			vcekURL, err := kds.VCEKCertQuery(productLine, report.GetChipId(), *reportedTCBVersionStruct)
+			if err != nil {
+				return &trust.AttestationRecreationErr{
+					Msg: fmt.Sprintf("could not query VCEK certificate URL: %v", err),
+				}
+			}
 			vcek, err := trust.GetWith(ctx, getter, vcekURL)
 			if err != nil {
 				return &trust.AttestationRecreationErr{
