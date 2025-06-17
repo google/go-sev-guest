@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2022-2025 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -169,6 +169,8 @@ func parseVersion(v string) (uint16, error) {
 
 // PolicyToOptions returns an Options object that is represented by a Policy message.
 func PolicyToOptions(policy *cpb.Policy) (*Options, error) {
+	var tcbVersion uint8
+
 	guestPolicy, err := abi.ParseSnpPolicy(policy.GetPolicy())
 	if err != nil {
 		return nil, err
@@ -228,6 +230,16 @@ func PolicyToOptions(policy *cpb.Policy) (*Options, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	switch policy.Product.Name {
+	case spb.SevProduct_SEV_PRODUCT_TURIN:
+		tcbVersion = kds.TCBStructVersion1
+	case spb.SevProduct_SEV_PRODUCT_MILAN, spb.SevProduct_SEV_PRODUCT_GENOA:
+		tcbVersion = kds.TCBStructVersion0
+	default:
+		return nil, fmt.Errorf("unknown product %q", policy.Product.Name)
+	}
+
 	opts := &Options{
 		MinimumGuestSvn:           policy.GetMinimumGuestSvn(),
 		GuestPolicy:               guestPolicy,
@@ -240,8 +252,8 @@ func PolicyToOptions(policy *cpb.Policy) (*Options, error) {
 		HostData:                  policy.GetHostData(),
 		ReportData:                policy.GetReportData(),
 		PlatformInfo:              platformInfo,
-		MinimumTCB:                kds.DecomposeTCBVersion(kds.TCBVersion(policy.GetMinimumTcb())),
-		MinimumLaunchTCB:          kds.DecomposeTCBVersion(kds.TCBVersion(policy.GetMinimumLaunchTcb())),
+		MinimumTCB:                kds.DecomposeTCBVersion(kds.TCBVersion{Version: tcbVersion, TCB: policy.GetMinimumTcb()}),
+		MinimumLaunchTCB:          kds.DecomposeTCBVersion(kds.TCBVersion{Version: tcbVersion, TCB: policy.GetMinimumLaunchTcb()}),
 		MinimumBuild:              uint8(policy.GetMinimumBuild()),
 		MinimumVersion:            minVersion,
 		RequireAuthorKey:          policy.GetRequireAuthorKey(),
@@ -361,21 +373,27 @@ type reportTcbDescriptions struct {
 }
 
 func getReportTcbs(report *spb.Report, certTcb kds.TCBVersion) *reportTcbDescriptions {
+	fms := report.GetCpuid1EaxFms()
+	tcbVersion, err := kds.ProductLineToTCBVersion(kds.ProductLineFromFms(fms))
+	if err != nil {
+		fmt.Printf("error: defaulting to TCB version 0. failed to findTCB version %v", err)
+		tcbVersion = kds.TCBStructVersion0
+	}
 	return &reportTcbDescriptions{
 		reported: partDescription{
-			parts: kds.DecomposeTCBVersion(kds.TCBVersion(report.GetReportedTcb())),
+			parts: kds.DecomposeTCBVersion(kds.TCBVersion{Version: tcbVersion, TCB: report.GetReportedTcb()}),
 			desc:  "report's REPORTED_TCB",
 		},
 		current: partDescription{
-			parts: kds.DecomposeTCBVersion(kds.TCBVersion(report.GetCurrentTcb())),
+			parts: kds.DecomposeTCBVersion(kds.TCBVersion{Version: tcbVersion, TCB: report.GetCurrentTcb()}),
 			desc:  "report's CURRENT_TCB",
 		},
 		committed: partDescription{
-			parts: kds.DecomposeTCBVersion(kds.TCBVersion(report.GetCommittedTcb())),
+			parts: kds.DecomposeTCBVersion(kds.TCBVersion{Version: tcbVersion, TCB: report.GetCommittedTcb()}),
 			desc:  "report's COMMITTED_TCB",
 		},
 		launch: partDescription{
-			parts: kds.DecomposeTCBVersion(kds.TCBVersion(report.GetLaunchTcb())),
+			parts: kds.DecomposeTCBVersion(kds.TCBVersion{Version: tcbVersion, TCB: report.GetLaunchTcb()}),
 			desc:  "report's LAUNCH_TCB",
 		},
 		cert: partDescription{
@@ -413,7 +431,7 @@ func tcbNeError(left, right partDescription) error {
 	if ltcb == rtcb {
 		return nil
 	}
-	return fmt.Errorf("the %s 0x%x does not match the %s 0x%x", left.desc, ltcb, right.desc, rtcb)
+	return fmt.Errorf("the %s %x does not match the %s %x", left.desc, ltcb, right.desc, rtcb)
 }
 
 // tcbGtError returns an error if wantLower is greater than (in part) wantHigher. It enforces
