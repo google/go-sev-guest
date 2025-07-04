@@ -143,7 +143,7 @@ const (
 	// https://www.amd.com/system/files/TechDocs/56860.pdf
 	ReportVersion3 = 3
 	// MaxSupportedReportVersion is the highest attestation report version that this library supports.
-	MaxSupportedReportVersion = 4
+	MaxSupportedReportVersion = 5
 )
 
 // CertTableHeaderEntry defines an entry of the beginning of an extended attestation report which
