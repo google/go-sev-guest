@@ -77,7 +77,7 @@ const (
 	policyRAPLDisBit              = 23
 	policyCipherTextHidingDRAMBit = 24
 
-	maxPlatformInfoBit = 5
+	maxPlatformInfoBit = 6
 
 	signatureOffset = 0x2A0
 	ecdsaRSsize     = 72 // From the ECDSA-P384-SHA384 format in SEV SNP API specification.

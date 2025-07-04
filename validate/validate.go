@@ -530,7 +530,7 @@ func validatePlatformInfo(platformInfo uint64, required *abi.SnpPlatformInfo) er
 	}
 	reportInfo, err := abi.ParseSnpPlatformInfo(platformInfo)
 	if err != nil {
-		return fmt.Errorf("could not parse SNP platform info %x: %v", platformInfo, err)
+		return fmt.Errorf("could not parse SNP platform info %b: %v", platformInfo, err)
 	}
 	if reportInfo.SMTEnabled && !required.SMTEnabled {
 		return errors.New("unauthorized platform feature SMT enabled")
