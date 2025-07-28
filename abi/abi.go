@@ -568,7 +568,9 @@ func ReportToProto(data []uint8) (*pb.Report, error) {
 		return nil, err
 	}
 	r.LaunchTcb = binary.LittleEndian.Uint64(data[0x1F0:0x1F8])
-	if err := mbz(data, 0x1F8, signatureOffset); err != nil {
+	r.LaunchMitVector = binary.LittleEndian.Uint64(data[0x1F8:0x200])
+	r.CurrentMitVector = binary.LittleEndian.Uint64(data[0x200:0x208])
+	if err := mbz(data, 0x208, signatureOffset); err != nil {
 		return nil, err
 	}
 	if r.SignatureAlgo == SignEcdsaP384Sha384 {
@@ -726,6 +728,8 @@ func ReportToAbiBytes(r *pb.Report) ([]byte, error) {
 	data[0x1ED] = byte(r.CommittedMinor)
 	data[0x1EE] = byte(r.CommittedMajor)
 	binary.LittleEndian.PutUint64(data[0x1F0:0x1F8], r.LaunchTcb)
+	binary.LittleEndian.PutUint64(data[0x1F8:0x200], r.LaunchMitVector)
+	binary.LittleEndian.PutUint64(data[0x200:0x208], r.CurrentMitVector)
 
 	copy(data[signatureOffset:ReportSize], r.Signature[:])
 	return data, nil
