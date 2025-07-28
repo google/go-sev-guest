@@ -304,6 +304,9 @@ func validatePolicy(reportPolicy uint64, required abi.SnpPolicy) error {
 	if required.CipherTextHidingDRAM && !policy.CipherTextHidingDRAM {
 		return errors.New("chiphertext hiding in DRAM isn't enforced")
 	}
+	if required.PageSwapDisable && !policy.PageSwapDisable {
+		return errors.New("found unauthorized page swap capability")
+	}
 
 	return nil
 }
