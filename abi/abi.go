@@ -76,6 +76,7 @@ const (
 	policyMemAES256XTSBit         = 22
 	policyRAPLDisBit              = 23
 	policyCipherTextHidingDRAMBit = 24
+	policyPageSwapDisableBit      = 25
 
 	maxPlatformInfoBit = 5
 
@@ -143,7 +144,7 @@ const (
 	// https://www.amd.com/system/files/TechDocs/56860.pdf
 	ReportVersion3 = 3
 	// MaxSupportedReportVersion is the highest attestation report version that this library supports.
-	MaxSupportedReportVersion = 4
+	MaxSupportedReportVersion = 5
 )
 
 // CertTableHeaderEntry defines an entry of the beginning of an extended attestation report which
@@ -229,6 +230,8 @@ type SnpPolicy struct {
 	RAPLDis bool
 	// CipherTextHidingDRAM is true if ciphertext hiding for the DRAM must be enabled.
 	CipherTextHidingDRAM bool
+	// PageSwapDisable is true if Guest access to SNP_PAGE_MOVE, SNP_SWAP_OUT and SNP_SWAP_IN commands is disabled.
+	PageSwapDisable bool
 }
 
 // ParseSnpPolicy interprets the SEV SNP API's guest policy bitmask into an SnpPolicy struct type.
@@ -237,7 +240,7 @@ func ParseSnpPolicy(guestPolicy uint64) (SnpPolicy, error) {
 	if guestPolicy&uint64(1<<policyReserved1bit) == 0 {
 		return result, fmt.Errorf("policy[%d] is reserved, must be 1, got 0", policyReserved1bit)
 	}
-	if err := mbz64(guestPolicy, "policy", 63, 25); err != nil {
+	if err := mbz64(guestPolicy, "policy", 63, 26); err != nil {
 		return result, err
 	}
 	result.ABIMinor = uint8(guestPolicy & 0xff)
@@ -250,6 +253,7 @@ func ParseSnpPolicy(guestPolicy uint64) (SnpPolicy, error) {
 	result.MemAES256XTS = (guestPolicy & (1 << policyMemAES256XTSBit)) != 0
 	result.RAPLDis = (guestPolicy & (1 << policyRAPLDisBit)) != 0
 	result.CipherTextHidingDRAM = (guestPolicy & (1 << policyCipherTextHidingDRAMBit)) != 0
+	result.PageSwapDisable = (guestPolicy & (1 << policyPageSwapDisableBit)) != 0
 	return result, nil
 }
 
