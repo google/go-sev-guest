@@ -260,7 +260,7 @@ func TestSnpPlatformInfo(t *testing.T) {
 			},
 		},
 		{
-			input: 63,
+			input: 191,
 			want: SnpPlatformInfo{
 				TSMEEnabled:                 true,
 				SMTEnabled:                  true,
@@ -268,11 +268,16 @@ func TestSnpPlatformInfo(t *testing.T) {
 				RAPLDisabled:                true,
 				CiphertextHidingDRAMEnabled: true,
 				AliasCheckComplete:          true,
+				TIOEnabled:                  true,
 			},
 		},
 		{
+			input:   256,
+			wantErr: "unrecognized platform info bit(s): 0x100",
+		},
+		{
 			input:   64,
-			wantErr: "unrecognized platform info bit(s): 0x40",
+			wantErr: "reserved platform info bit 6 set: 0x40",
 		},
 	}
 	for _, tc := range tests {

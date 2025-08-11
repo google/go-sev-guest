@@ -78,7 +78,7 @@ const (
 	policyCipherTextHidingDRAMBit = 24
 	policyPageSwapDisableBit      = 25
 
-	maxPlatformInfoBit = 5
+	maxPlatformInfoBit = 7
 
 	signatureOffset = 0x2A0
 	ecdsaRSsize     = 72 // From the ECDSA-P384-SHA384 format in SEV SNP API specification.
@@ -208,6 +208,8 @@ type SnpPlatformInfo struct {
 	// AliasCheckComplete indicates that alias detection has completed since the last system reset and there are no aliasing addresses.
 	// Mitigation for https://badram.eu/, see https://www.amd.com/en/resources/product-security/bulletin/amd-sb-3015.html#mitigation.
 	AliasCheckComplete bool
+	// Indicates that SEV-TIO is enabled.
+	TIOEnabled bool
 }
 
 // SnpPolicy represents the bitmask guest policy that governs the VM's behavior from launch.
@@ -303,6 +305,10 @@ func ParseSnpPlatformInfo(platformInfo uint64) (SnpPlatformInfo, error) {
 		RAPLDisabled:                (platformInfo & (1 << 3)) != 0,
 		CiphertextHidingDRAMEnabled: (platformInfo & (1 << 4)) != 0,
 		AliasCheckComplete:          (platformInfo & (1 << 5)) != 0,
+		TIOEnabled:                  (platformInfo & (1 << 7)) != 0,
+	}
+	if platformInfo&(1<<6) != 0 {
+		return result, fmt.Errorf("reserved platform info bit 6 set: 0x%x", platformInfo)
 	}
 	reserved := platformInfo & ^uint64((1<<(maxPlatformInfoBit+1))-1)
 	if reserved != 0 {

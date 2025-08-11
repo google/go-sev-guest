@@ -553,6 +553,9 @@ func validatePlatformInfo(platformInfo uint64, required *abi.SnpPlatformInfo) er
 	if !reportInfo.AliasCheckComplete && required.AliasCheckComplete {
 		return errors.New("required memory alias check hasn't been completed")
 	}
+	if reportInfo.TIOEnabled && !required.TIOEnabled {
+		return errors.New("unauthorized feature SEV-TIO enabled")
+	}
 	return nil
 }
 
