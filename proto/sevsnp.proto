@@ -57,6 +57,8 @@ message Report {
   bytes signature = 28;  // Should be 512 bytes long
 
   uint32 cpuid1eax_fms = 29;  // The cpuid(1).eax & 0x0fff0fff representation of family/model/stepping
+  uint64 launch_mit_vector = 30; // The verified mitigation vector value at the time the guest was launched
+  uint64 current_mit_vector = 31; // Value of the current verified mitigation vector
 }
 
 message CertificateChain {
