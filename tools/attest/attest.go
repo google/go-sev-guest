@@ -100,7 +100,9 @@ func outputExtendedReport(data [abi.ReportDataSize]byte, out io.Writer) error {
 		if err != nil {
 			return err
 		}
-		out.Write(bin)
+		if _, err := out.Write(bin); err != nil {
+			return fmt.Errorf("failed to write report data to output: %w", err)
+		}
 		return nil
 	}
 	attestation, err := getProto(data)
@@ -111,7 +113,9 @@ func outputExtendedReport(data [abi.ReportDataSize]byte, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	out.Write(bytes)
+	if _, err := out.Write(bytes); err != nil {
+		return fmt.Errorf("failed to write report data to output: %w", err)
+	}
 	return nil
 }
 
@@ -165,7 +169,9 @@ func outputReport(data [abi.ReportDataSize]byte, out io.Writer) error {
 		if len(bytes) > abi.ReportSize {
 			bytes = bytes[:abi.ReportSize]
 		}
-		out.Write(bytes)
+		if _, err := out.Write(bytes); err != nil {
+			return fmt.Errorf("failed to write report data to output: %w", err)
+		}
 		return nil
 	}
 	attestation, err := getProto(data)
@@ -176,7 +182,9 @@ func outputReport(data [abi.ReportDataSize]byte, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	out.Write(bytes)
+	if _, err := out.Write(bytes); err != nil {
+		return fmt.Errorf("failed to write report data to output: %w", err)
+	}
 	return nil
 }
 

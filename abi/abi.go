@@ -143,7 +143,7 @@ const (
 	// https://www.amd.com/system/files/TechDocs/56860.pdf
 	ReportVersion3 = 3
 	// MaxSupportedReportVersion is the highest attestation report version that this library supports.
-	MaxSupportedReportVersion = 4
+	MaxSupportedReportVersion = 5
 )
 
 // CertTableHeaderEntry defines an entry of the beginning of an extended attestation report which
@@ -558,7 +558,11 @@ func ReportToProto(data []uint8) (*pb.Report, error) {
 		return nil, err
 	}
 	r.LaunchTcb = binary.LittleEndian.Uint64(data[0x1F0:0x1F8])
-	if err := mbz(data, 0x1F8, signatureOffset); err != nil {
+
+	r.LaunchMitVector = binary.LittleEndian.Uint64(data[0x1F8:0x200])
+	r.CurrentMitVector = binary.LittleEndian.Uint64(data[0x200:0x208])
+
+	if err := mbz(data, 0x208, signatureOffset); err != nil {
 		return nil, err
 	}
 	if r.SignatureAlgo == SignEcdsaP384Sha384 {
@@ -716,6 +720,9 @@ func ReportToAbiBytes(r *pb.Report) ([]byte, error) {
 	data[0x1ED] = byte(r.CommittedMinor)
 	data[0x1EE] = byte(r.CommittedMajor)
 	binary.LittleEndian.PutUint64(data[0x1F0:0x1F8], r.LaunchTcb)
+
+	binary.LittleEndian.PutUint64(data[0x1F8:0x200], r.LaunchMitVector)
+	binary.LittleEndian.PutUint64(data[0x200:0x208], r.CurrentMitVector)
 
 	copy(data[signatureOffset:ReportSize], r.Signature[:])
 	return data, nil
@@ -912,7 +919,9 @@ func (c *CertTable) Marshal() []byte {
 		size := uint32(len(entry.RawCert))
 		h := &CertTableHeaderEntry{GUID: entry.GUID, Offset: cursor, Length: size}
 		copy(output[cursor:cursor+size], entry.RawCert)
-		h.Write(output[i*CertTableEntrySize:])
+		if err := h.Write(output[i*CertTableEntrySize:]); err != nil {
+			panic(fmt.Sprintf("internal error: failed to write cert table header: %v", err))
+		}
 		cursor += size
 	}
 	return output
