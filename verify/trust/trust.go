@@ -421,14 +421,20 @@ func (r *AMDRootCerts) X509Options(now time.Time, key abi.ReportSigner) *x509.Ve
 // Parse ASK, ARK certificates from the embedded AMD certificate file.
 func init() {
 	milanCerts := new(AMDRootCerts)
-	milanCerts.FromKDSCertBytes(AskArkMilanVcekBytes)
+	if err := milanCerts.FromKDSCertBytes(AskArkMilanVcekBytes); err != nil {
+		panic(err)
+	}
 	milanCerts.ProductLine = "Milan"
 	genoaCerts := new(AMDRootCerts)
-	genoaCerts.FromKDSCertBytes(AskArkGenoaVcekBytes)
+	if err := genoaCerts.FromKDSCertBytes(AskArkGenoaVcekBytes); err != nil {
+		panic(err)
+	}
 	genoaCerts.ProductLine = "Genoa"
 	turinCerts := new(AMDRootCerts)
 	turinCerts.ProductLine = "Turin"
-	turinCerts.FromKDSCertBytes(AskArkTurinVcekBytes)
+	if err := turinCerts.FromKDSCertBytes(AskArkTurinVcekBytes); err != nil {
+		panic(err)
+	}
 	DefaultRootCerts = map[string]*AMDRootCerts{
 		"Milan": milanCerts,
 		"Genoa": genoaCerts,

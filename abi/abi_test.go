@@ -141,8 +141,8 @@ func TestReportMbz(t *testing.T) {
 		},
 		{
 			name:        "pre-signature reserved",
-			changeIndex: 0x1f9,
-			wantErr:     "mbz range [0x1f8:0x2a0] not all zero: 00cc",
+			changeIndex: 0x209,
+			wantErr:     "mbz range [0x208:0x2a0] not all zero: 00cc",
 		},
 		{
 			name:        "post-ecdsa signature reserved",
