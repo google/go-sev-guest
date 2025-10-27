@@ -28,7 +28,7 @@ builds:
 archives:
   -
     # this name template makes the OS and Arch compatible with the results of uname.
-    name: >-
+    name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
       {{- if eq .Arch "amd64" }}x86_64
@@ -40,9 +40,9 @@ archives:
     - goos: windows
       format: zip
 checksum:
-  name: 'checksums.txt'
+  name_template: 'checksums.txt'
 snapshot:
-  name: "{{ incpatch .Version }}-next"
+  version_template: "{{ incpatch .Version }}-next"
 changelog:
   sort: asc
   filters:
