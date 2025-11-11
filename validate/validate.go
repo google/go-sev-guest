@@ -97,6 +97,13 @@ type Options struct {
 	// CertTableOptions allows the caller to specify extra validation conditions on non-standard
 	// UUID entries in the certificate table returned by GetExtendedReport.
 	CertTableOptions map[string]*CertEntryOption
+	// MinimumLaunchMitigationVector, if set, specifies the minimum set of mitigation
+	// bits that must be present in the report's LaunchMitigationVector.
+	MinimumLaunchMitigationVector uint64
+
+	// MinimumCurrentMitigationVector, if set, specifies the minimum set of mitigation
+	// bits that must be present in the report's CurrentMitigationVector.
+	MinimumCurrentMitigationVector uint64
 }
 
 // CertEntryKind represents a simple policy kind for cert table entries. If a UUID string key is
@@ -686,6 +693,28 @@ func certTableOptions(attestation *spb.Attestation, options map[string]*CertEntr
 	return nil
 }
 
+// validateMitigationVectors verifies that the report's mitigation vectors satisfy the minimum requirements options.
+func validateMitigationVectors(report *spb.Report, opts *Options) error {
+	if opts == nil {
+		return nil
+	}
+
+	// 1. Check Launch Vector
+	// Ensure the report's vector is a superset of the required minimum vector.
+	if (report.GetLaunchMitVector() & opts.MinimumLaunchMitigationVector) != opts.MinimumLaunchMitigationVector {
+		return fmt.Errorf("launch mitigation vector (0x%x) is missing required bits; expected at least (0x%x)",
+			report.GetLaunchMitVector(), opts.MinimumLaunchMitigationVector)
+	}
+
+	// 2. Check Current Vector
+	if (report.GetCurrentMitVector() & opts.MinimumCurrentMitigationVector) != opts.MinimumCurrentMitigationVector {
+		return fmt.Errorf("current mitigation vector (0x%x) is missing required bits; expected at least (0x%x)",
+			report.GetCurrentMitVector(), opts.MinimumCurrentMitigationVector)
+	}
+
+	return nil
+}
+
 // SnpAttestation validates fields of the protobuf representation of an attestation report against
 // expectations. Does not check the attestation certificates or signature.
 func SnpAttestation(attestation *spb.Attestation, options *Options) error {
@@ -715,7 +744,8 @@ func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 		validateTcb(report, exts.TCBVersion, options),
 		validateVersion(report, options),
 		validatePlatformInfo(report.GetPlatformInfo(), options.PlatformInfo),
-		validateKeys(report, options)); err != nil {
+		validateKeys(report, options),
+		validateMitigationVectors(report, options)); err != nil {
 		return err
 	}
 
