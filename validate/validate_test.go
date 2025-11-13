@@ -538,3 +538,83 @@ func TestCertTableOptions(t *testing.T) {
 	}
 
 }
+
+func TestCheckMitigationVectors(t *testing.T) {
+	tests := []struct {
+		name          string
+		reportLaunch  uint64
+		reportCurrent uint64
+		opts          Options
+		wantErr       bool
+		wantErrSubstr string
+	}{
+		{
+			name:          "Pass_NoRequirements",
+			reportLaunch:  0x0,
+			reportCurrent: 0x0,
+			opts:          Options{},
+			wantErr:       false,
+		},
+		{
+			name:          "Pass_ExactMatch",
+			reportLaunch:  0x3,
+			reportCurrent: 0x1,
+			opts: Options{
+				MinimumLaunchMitigationVector:  0x3,
+				MinimumCurrentMitigationVector: 0x1,
+			},
+			wantErr: false,
+		},
+		{
+			name:          "Pass_Superset",
+			reportLaunch:  0x7,
+			reportCurrent: 0xF,
+			opts: Options{
+				MinimumLaunchMitigationVector:  0x3,
+				MinimumCurrentMitigationVector: 0x1,
+			},
+			wantErr: false,
+		},
+		{
+			name:          "Fail_MissingLaunchBit",
+			reportLaunch:  0x1,
+			reportCurrent: 0x3,
+			opts: Options{
+				MinimumLaunchMitigationVector: 0x3,
+			},
+			wantErr:       true,
+			wantErrSubstr: "launch mitigation vector",
+		},
+		{
+			name:          "Fail_MissingCurrentBit",
+			reportLaunch:  0x3,
+			reportCurrent: 0x4,
+			opts: Options{
+				MinimumCurrentMitigationVector: 0x5,
+			},
+			wantErr:       true,
+			wantErrSubstr: "current mitigation vector",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mockReport := &spb.Report{
+				LaunchMitVector:  tc.reportLaunch,
+				CurrentMitVector: tc.reportCurrent,
+			}
+
+			err := validateMitigationVectors(mockReport, &tc.opts)
+
+			if (err != nil) != tc.wantErr {
+				t.Errorf("checkMitigationVectors() error = %v, wantErr %v", err, tc.wantErr)
+				return
+			}
+			if tc.wantErr && err != nil {
+				if !strings.Contains(err.Error(), tc.wantErrSubstr) {
+					t.Errorf("expected error substring %q, got error: %v", tc.wantErrSubstr, err)
+				}
+			}
+		})
+	}
+}
