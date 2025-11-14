@@ -2,7 +2,8 @@
 
 This project offers libraries for a simple wrapper around the `/dev/sev-guest`
 device in Linux, as well as a library for attestation verification of
-fundamental components of an attestation report.
+fundamental components of an attestation report.It aligns with the AMD SEV-SNP
+ABI specification up to Rev. 1.58.
 
 This project is split into two complementary roles. The first role is producing
 an attestation report, and the second is checking an attestation report.  The
@@ -150,6 +151,10 @@ The fields that provide a minimum acceptable value are:
 
 *   `MinimumBuild` for the minimum build number for the AMD secure processor
     firmware.
+*   **`MinimumLaunchMitigationVector`**: A bitmask used to enforce a minimum set 
+of **required security mitigations** present in the report's `LAUNCH_MIT_VECTOR`.
+*   **`MinimumCurrentMitigationVector`**: A bitmask used to enforce a minimum set 
+of **required security mitigations** present in the report's `CURRENT_MIT_VECTOR`.
 *   `RequireAuthorKey` for whether `AUTHOR_KEY_EN` can be 0 or 1 (false), or
     just 1 (true).
 *   `RequireIDBlock` for whether IDBlock fields can be anything (false) or must
@@ -210,7 +215,7 @@ limitations under the License.
 ## Links
 
 *   [AMD SEV API specification](https://www.amd.com/system/files/TechDocs/55766_SEV-KM_API_Specification.pdf)
-*   [AMD SEV-SNP API specification](https://www.amd.com/system/files/TechDocs/56860.pdf)
+*   [AMD SEV-SNP API specification](https://www.amd.com/content/dam/amd/en/documents/developer/56860.pdf)
 *   [AMD KDS specification](https://www.amd.com/system/files/TechDocs/57230.pdf)
 
 ## Disclaimers
