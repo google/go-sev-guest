@@ -156,10 +156,10 @@ func TestReportMbz(t *testing.T) {
 			wantErr:     "policy[17] is reserved, must be 1, got 0",
 		},
 		{
-			name:        "Guest policy bit 25",
+			name:        "Guest policy bit 26",
 			changeIndex: policyOffset + 3, // Bits 24-31
-			changeValue: 0x80,             // Set bit 25
-			wantErr:     "malformed guest policy: mbz range policy[0x19:0x3f] not all zero",
+			changeValue: 0x40,             // Set bit 26
+			wantErr:     "malformed guest policy: mbz range policy[0x1a:0x3f] not all zero",
 		},
 	}
 	reportProto := &spb.Report{}
@@ -214,6 +214,7 @@ func TestSnpPolicySection(t *testing.T) {
 			MemAES256XTS:         (entropy[tc*3+2] & 32) != 0,
 			RAPLDis:              (entropy[tc*3+2] & 64) != 0,
 			CipherTextHidingDRAM: (entropy[tc*3+2] & 128) != 0,
+			PageSwapDisable:      (entropy[tc*3+3] & 1) != 0,
 		}
 
 		got, err := ParseSnpPolicy(SnpPolicyToBytes(policy))
@@ -256,7 +257,7 @@ func TestSnpPlatformInfo(t *testing.T) {
 			},
 		},
 		{
-			input: 63,
+			input: 191,
 			want: SnpPlatformInfo{
 				TSMEEnabled:                 true,
 				SMTEnabled:                  true,
@@ -264,11 +265,16 @@ func TestSnpPlatformInfo(t *testing.T) {
 				RAPLDisabled:                true,
 				CiphertextHidingDRAMEnabled: true,
 				AliasCheckComplete:          true,
+				TIOEnabled:                  true,
 			},
 		},
 		{
+			input:   256,
+			wantErr: "unrecognized platform info bit(s): 0x100",
+		},
+		{
 			input:   64,
-			wantErr: "unrecognized platform info bit(s): 0x40",
+			wantErr: "reserved platform info bit 6 set: 0x40",
 		},
 	}
 	for _, tc := range tests {
