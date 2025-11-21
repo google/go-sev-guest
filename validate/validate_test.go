@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2022-2025 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -79,10 +79,10 @@ func TestValidateSnpAttestation(t *testing.T) {
 		committedMinor uint8
 	}
 	makeReport := func(reportData [64]byte, opts testOptions) [labi.SnpReportRespReportSize]byte {
-		currentTcb, currerr := kds.ComposeTCBParts(opts.currentTcb)
-		reportedTcb, reportederr := kds.ComposeTCBParts(opts.reportedTcb)
-		committedTcb, committederr := kds.ComposeTCBParts(opts.committedTcb)
-		launchTcb, launcherr := kds.ComposeTCBParts(opts.launchTcb)
+		currentTcb, currerr := opts.currentTcb.ToTCBVersionStruct()
+		reportedTcb, reportederr := opts.reportedTcb.ToTCBVersionStruct()
+		committedTcb, committederr := opts.committedTcb.ToTCBVersionStruct()
+		launchTcb, launcherr := opts.launchTcb.ToTCBVersionStruct()
 		if err := multierr.Combine(currerr,
 			reportederr,
 			committederr,
@@ -111,10 +111,10 @@ func TestValidateSnpAttestation(t *testing.T) {
 			CurrentMajor:    uint32(opts.currentMajor),
 			CurrentMinor:    uint32(opts.currentMinor),
 			PlatformInfo:    1,
-			CommittedTcb:    uint64(committedTcb),
-			CurrentTcb:      uint64(currentTcb),
-			LaunchTcb:       uint64(launchTcb),
-			ReportedTcb:     uint64(reportedTcb),
+			CommittedTcb:    committedTcb.TCB,
+			CurrentTcb:      currentTcb.TCB,
+			LaunchTcb:       launchTcb.TCB,
+			ReportedTcb:     reportedTcb.TCB,
 			Signature:       make([]byte, abi.SignatureSize),
 		}
 		reportRaw, err := abi.ReportToAbiBytes(reportpb)
@@ -417,7 +417,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 			name:        "rejected provisional by tcb",
 			attestation: attestationcb1455,
 			opts:        &Options{ReportData: noncecb1455[:], GuestPolicy: abi.SnpPolicy{Debug: true}},
-			wantErr:     "the report's COMMITTED_TCB 0x9270000000007f00 does not match the report's CURRENT_TCB 0x9270000000007f1f",
+			wantErr:     "the report's COMMITTED_TCB Milan or Genoa TCB: 0x9270000000007f00 does not match the report's CURRENT_TCB Milan or Genoa TCB: 0x9270000000007f1f",
 		},
 		{
 			name:        "accepted provisional by version",
