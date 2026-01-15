@@ -101,16 +101,21 @@ var (
 		"Genoa-B2": {Name: pb.SevProduct_SEV_PRODUCT_GENOA, MachineStepping: uint2},
 		"Turin-B0": {Name: pb.SevProduct_SEV_PRODUCT_TURIN, MachineStepping: uint0},
 		"Turin-B1": {Name: pb.SevProduct_SEV_PRODUCT_TURIN, MachineStepping: uint1},
+		"Siena-B0": {Name: pb.SevProduct_SEV_PRODUCT_SIENA, MachineStepping: uint0},
+		"Siena-B1": {Name: pb.SevProduct_SEV_PRODUCT_SIENA, MachineStepping: uint1},
+		"Siena-B2": {Name: pb.SevProduct_SEV_PRODUCT_SIENA, MachineStepping: uint2},
 	}
 	milanSteppingVersions = []string{"B0", "B1"}
 	genoaSteppingVersions = []string{"B0", "B1", "B2"}
 	turinSteppingVersions = []string{"B0", "B1"}
+	sienaSteppingVersions = []string{"B0", "B1", "B2"}
 
 	// ProductLineCpuid associates the CPUID_1_EAX value (Stepping 0) to its AMD product name.
 	ProductLineCpuid = map[uint32]string{
 		0x00a00f10: "Milan",
 		0x00a10f10: "Genoa",
 		0x00b00f20: "Turin",
+		0x00aa0f00: "Siena",
 	}
 )
 
@@ -495,13 +500,20 @@ func ParseProductCertChain(pems []byte) ([]byte, []byte, error) {
 // given report signer kind.
 func productBaseURL(s abi.ReportSigner, name string) string {
 	path := "unknown"
+	kdsProductName := name
 	if s == abi.VcekReportSigner {
 		path = kdsVcekPath
 	}
 	if s == abi.VlekReportSigner {
 		path = kdsVlekPath
 	}
-	return fmt.Sprintf("%s%s%s", kdsBaseURL, path, name)
+	// Versioned Chip Endorsement Key (VCEK) Certificate and KDS Interface Specification (57230), pag 8:
+	// The Siena product uses the same root keys as the Genoa design and therefore uses
+	// Genoa ARK and ASK certificates to issue VCEK certificates.
+	if name == "Siena" {
+		kdsProductName = "Genoa"
+	}
+	return fmt.Sprintf("%s%s%s", kdsBaseURL, path, kdsProductName)
 }
 
 // ProductCertChainURL returns the AMD KDS URL for retrieving the ARK and AS(V)K
@@ -743,6 +755,8 @@ func ProductLine(product *pb.SevProduct) string {
 		return "Genoa"
 	case pb.SevProduct_SEV_PRODUCT_TURIN:
 		return "Turin"
+	case pb.SevProduct_SEV_PRODUCT_SIENA:
+		return "Siena"
 	default:
 		return "Unknown"
 	}
@@ -803,6 +817,11 @@ func ProductName(product *pb.SevProduct) string {
 			return "unmappedTurinStepping"
 		}
 		return fmt.Sprintf("Turin-%s", turinSteppingVersions[stepping])
+	case pb.SevProduct_SEV_PRODUCT_SIENA:
+		if int(stepping) >= len(sienaSteppingVersions) {
+			return "unmappedSienaStepping"
+		}
+		return fmt.Sprintf("Siena-%s", sienaSteppingVersions[stepping])
 	default:
 		return "Unknown"
 	}
@@ -833,6 +852,8 @@ func ParseProductLine(productLine string) (*pb.SevProduct, error) {
 		return &pb.SevProduct{Name: pb.SevProduct_SEV_PRODUCT_GENOA}, nil
 	case "Turin":
 		return &pb.SevProduct{Name: pb.SevProduct_SEV_PRODUCT_TURIN}, nil
+	case "Siena":
+		return &pb.SevProduct{Name: pb.SevProduct_SEV_PRODUCT_SIENA}, nil
 	default:
 		return nil, fmt.Errorf("unknown AMD SEV product: %q", productLine)
 	}
