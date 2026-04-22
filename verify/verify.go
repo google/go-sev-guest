@@ -24,6 +24,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/go-sev-guest/abi"
@@ -31,7 +32,6 @@ import (
 	cpb "github.com/google/go-sev-guest/proto/check"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/google/go-sev-guest/verify/trust"
-	"github.com/google/logger"
 	"go.uber.org/multierr"
 )
 
@@ -777,7 +777,7 @@ func cpuidWorkaround(attestation *spb.Attestation, options *Options) (string, fu
 		if options.Product != nil {
 			product = options.Product
 		} else {
-			logger.Warning("Attestation missing product information. KDS certificate may be invalid. Using default Milan-B1")
+			slog.Warn("Attestation missing product information. KDS certificate may be invalid. Using default Milan-B1")
 			attestation.Product = abi.DefaultSevProduct()
 		}
 		productUpdate = func(vcek []byte) error {

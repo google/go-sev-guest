@@ -20,10 +20,10 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"math/big"
 
 	pb "github.com/google/go-sev-guest/proto/sevsnp"
-	"github.com/google/logger"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/cryptobyte"
 	"golang.org/x/crypto/cryptobyte/asn1"
@@ -968,7 +968,7 @@ func (c *CertTable) Proto() *pb.CertificateChain {
 		}
 	}
 	if len(result.VcekCert) == 0 && len(result.VlekCert) == 0 {
-		logger.Warning("Warning: Neither VCEK nor VLEK certificate found in data pages")
+		slog.Warn("Neither VCEK nor VLEK certificate found in data pages")
 	}
 	return result
 }
