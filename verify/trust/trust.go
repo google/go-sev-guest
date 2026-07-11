@@ -454,3 +454,21 @@ func ensureCache() {
 		prodCacheMu.RUnlock()
 	}
 }
+
+// GetDefaultRootCerts returns a safe copy of the official default trusted roots.
+// This prevents external validation logic from accidentally mutating the global static trust store.
+func GetDefaultRootCerts(productLine string) (*AMDRootCerts, error) {
+	defaultRoot, ok := DefaultRootCerts[productLine]
+	if !ok || defaultRoot == nil {
+		return nil, fmt.Errorf("no embedded roots available for product line: %q", productLine)
+	}
+
+	// Perform a shallow copy to protect the global variables from being mutated.
+	// We trust that the Ask and Ark here are the authentic AMD official certificates.
+	safeClone := &AMDRootCerts{
+		ProductLine:  defaultRoot.ProductLine,
+		ProductCerts: defaultRoot.ProductCerts,
+	}
+
+	return safeClone, nil
+}

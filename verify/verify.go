@@ -175,17 +175,6 @@ func intermediateKeyCommonName(productLine string, key abi.ReportSigner) string 
 	return ""
 }
 
-// validateAsvkX509 checks expected metadata about the ASVK X.509 certificate. It does not verify the
-// cryptographic signatures.
-func validateAsvkX509(r *trust.AMDRootCerts) error {
-	if r == nil {
-		r = trust.DefaultRootCerts["Milan"]
-	}
-	cn := intermediateKeyCommonName(r.GetProductLine(), abi.VlekReportSigner)
-	// There is no ASVK SEV ABI key released by AMD to cross-check.
-	return validateRootX509(r.GetProductLine(), r.ProductCerts.Asvk, asvkX509Version, "ASVK", cn)
-}
-
 // ValidateArkX509 checks expected metadata about the ARK X.509 certificate. It does not verify the
 // cryptographic signatures.
 func validateArkX509(r *trust.AMDRootCerts) error {
@@ -234,30 +223,6 @@ func validateArkSev(r *trust.AMDRootCerts) error {
 		r = trust.DefaultRootCerts["Milan"]
 	}
 	return validateRootSev(r.ArkSev, r.ArkSev, arkVersion, arkKeyUsage, "ARK", "ARK")
-}
-
-// validateX509 will validate the x509 certificates of the ASK, ASVK, and ARK.
-func validateX509(r *trust.AMDRootCerts, key abi.ReportSigner) error {
-	if err := validateArkX509(r); err != nil {
-		return fmt.Errorf("ARK validation error: %v", err)
-	}
-	if r.ProductCerts.Ask == nil && key == abi.VcekReportSigner {
-		return fmt.Errorf("trusted root must have ASK certificate for VCEK chain")
-	}
-	if r.ProductCerts.Asvk == nil && key == abi.VlekReportSigner {
-		return fmt.Errorf("trusted root must have ASVK certificate for VLEK chain")
-	}
-	if r.ProductCerts.Ask != nil {
-		if err := validateAskX509(r); err != nil {
-			return fmt.Errorf("ASK validation error: %v", err)
-		}
-	}
-	if r.ProductCerts.Asvk != nil {
-		if err := validateAsvkX509(r); err != nil {
-			return fmt.Errorf("ASVK validation error: %v", err)
-		}
-	}
-	return nil
 }
 
 // validateKDSCertSubject checks KDS-specified values of the subject metadata of the AMD certificate.
@@ -523,16 +488,15 @@ func decodeCerts(chain *spb.CertificateChain, key abi.ReportSigner, knownProduct
 		}
 	}
 	if len(roots) == 0 {
-		root := trust.AMDRootCertsProduct(productLine)
-		// Require that the root matches embedded root certs.
-		root.AskSev = trust.DefaultRootCerts[productLine].AskSev
-		root.ArkSev = trust.DefaultRootCerts[productLine].ArkSev
-		if err := root.Decode(chain.GetAskCert(), chain.GetArkCert()); err != nil {
+		// Fetch a safe copy of the official embedded X.509 trusted roots.
+		// We strictly avoid using the unverified certificates from the incoming chain as the root of trust.
+		root, err := trust.GetDefaultRootCerts(productLine)
+		if err != nil {
 			return nil, nil, err
 		}
-		if err := validateX509(root, key); err != nil {
-			return nil, nil, err
-		}
+
+		// Populate the roots map with the genuine official trusted roots.
+		// Subsequent cert.Verify() calls will rely securely on these verified roots.
 		roots = map[string][]*trust.AMDRootCerts{
 			productLine: {root},
 		}

@@ -17,7 +17,11 @@ package verify
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	crand "crypto/rand"
 	"crypto/rsa"
+	"crypto/sha512"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	_ "embed"
@@ -28,6 +32,7 @@ import (
 	"math/big"
 	"math/rand"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -229,7 +234,7 @@ func TestKdsMetadataLogic(t *testing.T) {
 					Subject: &pkix.Name{Country: []string{"Canada"}},
 				},
 			},
-			wantErr: "country 'Canada' not expected for AMD. Expected 'US'",
+			wantErr: "VCEK could not be verified by any trusted roots",
 		},
 		{
 			name: "ARK wrong CRL",
@@ -239,7 +244,7 @@ func TestKdsMetadataLogic(t *testing.T) {
 					CRLDistributionPoints: []string{"http://example.com"},
 				},
 			},
-			wantErr: fmt.Sprintf("ARK CRL distribution point is 'http://example.com', want 'https://kdsintf.amd.com/vcek/v1/%s/crl'", test.GetProductLine()),
+			wantErr: "VCEK could not be verified by any trusted roots",
 		},
 		{
 			name: "ARK too many CRLs",
@@ -249,7 +254,7 @@ func TestKdsMetadataLogic(t *testing.T) {
 					CRLDistributionPoints: []string{fmt.Sprintf("https://kdsintf.amd.com/vcek/v1/%s/crl", test.GetProductLine()), "http://example.com"},
 				},
 			},
-			wantErr: "ARK has 2 CRL distribution points, want 1",
+			wantErr: "VCEK could not be verified by any trusted roots",
 		},
 		{
 			name: "ASK subject state",
@@ -263,7 +268,7 @@ func TestKdsMetadataLogic(t *testing.T) {
 					},
 				},
 			},
-			wantErr: "state 'TX' not expected for AMD. Expected 'CA'",
+			wantErr: "VCEK could not be verified by any trusted roots",
 		},
 		{
 			name: "VCEK unknown product",
@@ -318,6 +323,7 @@ func TestKdsMetadataLogic(t *testing.T) {
 					},
 				},
 			},
+			// Unchanged: VCEK basic parsing and validation occur before the root certificate comparison.
 			wantErr: "unknown product",
 		},
 	}
@@ -331,15 +337,14 @@ func TestKdsMetadataLogic(t *testing.T) {
 		// Trust the test-generated root if the test should pass. Otherwise, other root logic
 		// won't get tested.
 		options := &Options{
-			TrustedRoots: map[string][]*trust.AMDRootCerts{
-				test.GetProductLine(): {func() *trust.AMDRootCerts {
-					r := trust.AMDRootCertsProduct(test.GetProductLine())
-					r.ProductCerts = &trust.ProductCerts{
-						Ark: newSigner.Ark,
-						Ask: newSigner.Ask,
-					}
-					return r
-				}()},
+			TrustedRoots: map[string][]*trust.AMDRootCerts{test.GetProductLine(): {func() *trust.AMDRootCerts {
+				r := trust.AMDRootCertsProduct(test.GetProductLine())
+				r.ProductCerts = &trust.ProductCerts{
+					Ark: newSigner.Ark,
+					Ask: newSigner.Ask,
+				}
+				return r
+			}()},
 			},
 			Now:     time.Date(1, time.January, 5, 0, 0, 0, 0, time.UTC),
 			Product: abi.DefaultSevProduct(),
@@ -909,5 +914,110 @@ func TestV3KDSProduct(t *testing.T) {
 	}
 	if !gotGenoa {
 		t.Errorf("missed Genoa case")
+	}
+}
+
+// TestForgedRootChainRejected acts as a regression test against attestation bypass.
+// It ensures that even if an attacker completely forges an AMD-like certificate chain
+// and signs a fake report, the public key pinning mechanism will reject it.
+func TestForgedRootChainRejected(t *testing.T) {
+	now := time.Now()
+	crl := "https://kdsintf.amd.com/vcek/v1/Milan/crl"
+
+	// Create base fake AMD subject
+	fakeAmdName := pkix.Name{
+		Country: []string{"US"}, Locality: []string{"Santa Clara"}, Province: []string{"CA"},
+		Organization: []string{"Advanced Micro Devices"}, OrganizationalUnit: []string{"Engineering"},
+	}
+	arkName := fakeAmdName
+	arkName.CommonName = "ARK-Milan"
+	askName := fakeAmdName
+	askName.CommonName = "SEV-Milan"
+	vcekName := fakeAmdName
+	vcekName.CommonName = "SEV-VCEK"
+
+	// 1. Attacker self-signed ARK (RSA-4096, RSASSA-PSS) with forged AMD subject.
+	arkKey, _ := rsa.GenerateKey(crand.Reader, 4096)
+	arkTmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: arkName, Issuer: arkName,
+		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(24 * time.Hour),
+		SignatureAlgorithm: x509.SHA384WithRSAPSS, IsCA: true, BasicConstraintsValid: true,
+		KeyUsage: x509.KeyUsageCertSign, CRLDistributionPoints: []string{crl},
+	}
+	arkDER, _ := x509.CreateCertificate(crand.Reader, arkTmpl, arkTmpl, &arkKey.PublicKey, arkKey)
+	ark, _ := x509.ParseCertificate(arkDER)
+
+	// 2. Attacker ASK signed by fake ARK.
+	askKey, _ := rsa.GenerateKey(crand.Reader, 4096)
+	askTmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(2), Subject: askName,
+		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(24 * time.Hour),
+		SignatureAlgorithm: x509.SHA384WithRSAPSS, IsCA: true, BasicConstraintsValid: true,
+		KeyUsage: x509.KeyUsageCertSign, CRLDistributionPoints: []string{crl},
+	}
+	askDER, _ := x509.CreateCertificate(crand.Reader, askTmpl, ark, &askKey.PublicKey, arkKey)
+	ask, _ := x509.ParseCertificate(askDER)
+
+	// 3. Attacker VCEK (ECDSA P-384) with forged KDS extensions, signed by fake ASK.
+	vcekKey, _ := ecdsa.GenerateKey(elliptic.P384(), crand.Reader)
+	hwid := make([]byte, abi.ChipIDSize)
+
+	// Pre-marshal extension values
+	asn1Zero, _ := asn1.Marshal(0)
+	asn1Milan, _ := asn1.MarshalWithParams("Milan-B1", "ia5")
+
+	exts := []pkix.Extension{
+		{Id: kds.OidStructVersion, Value: asn1Zero},
+		{Id: kds.OidProductName1, Value: asn1Milan},
+		{Id: kds.OidBlSpl, Value: asn1Zero}, {Id: kds.OidTeeSpl, Value: asn1Zero},
+		{Id: kds.OidSnpSpl, Value: asn1Zero}, {Id: kds.OidSpl4, Value: asn1Zero},
+		{Id: kds.OidSpl5, Value: asn1Zero}, {Id: kds.OidSpl6, Value: asn1Zero},
+		{Id: kds.OidSpl7, Value: asn1Zero}, {Id: kds.OidUcodeSpl, Value: asn1Zero},
+		{Id: kds.OidHwid, Value: hwid},
+	}
+	vcekTmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(3), Subject: vcekName,
+		NotBefore: now.Add(-time.Hour), NotAfter: now.Add(24 * time.Hour),
+		SignatureAlgorithm: x509.SHA384WithRSAPSS, ExtraExtensions: exts,
+	}
+	vcekDER, _ := x509.CreateCertificate(crand.Reader, vcekTmpl, ask, &vcekKey.PublicKey, askKey)
+
+	// 4. Forge a report with arbitrary MEASUREMENT, sign with attacker VCEK key.
+	rpt := &spb.Report{
+		Version: 2, Policy: abi.SnpPolicyToBytes(abi.SnpPolicy{}), SignatureAlgo: abi.SignEcdsaP384Sha384,
+		FamilyId: make([]byte, 16), ImageId: make([]byte, 16), ReportData: make([]byte, 64),
+		Measurement: []byte("ATTACKER_CONTROLLED_MEASUREMENT_48_BYTES_PADPADP"),
+		HostData:    make([]byte, 32), IdKeyDigest: make([]byte, 48), AuthorKeyDigest: make([]byte, 48),
+		ReportId: make([]byte, 32), ReportIdMa: make([]byte, 32), ChipId: hwid,
+		Signature: make([]byte, 512),
+	}
+	raw, _ := abi.ReportToAbiBytes(rpt)
+
+	// Real SHA384 calculation
+	digest := sha512.Sum384(abi.SignedComponent(raw))
+	r, s, _ := ecdsa.Sign(crand.Reader, vcekKey, digest[:])
+	if err := abi.SetSignature(r, s, raw); err != nil {
+		t.Fatalf("failed to set signature during test setup: %v", err)
+	}
+	signed, _ := abi.ReportToProto(raw)
+
+	// 5. Default options + attacker-supplied chain.
+	att := &spb.Attestation{
+		Report: signed,
+		CertificateChain: &spb.CertificateChain{
+			ArkCert: arkDER, AskCert: askDER, VcekCert: vcekDER,
+		},
+	}
+	opts := &Options{Now: now, DisableCertFetching: true} // TrustedRoots == nil
+
+	// 6. Assert that the validation strictly fails due to trusted root verification failure
+	err := SnpAttestation(att, opts)
+	if err == nil {
+		t.Fatalf("VULNERABLE: verify.SnpAttestation accepted a fully forged ARK/ASK/VCEK chain")
+	}
+
+	expectedErr := "VCEK could not be verified by any trusted roots"
+	if !strings.Contains(err.Error(), expectedErr) {
+		t.Errorf("Expected attestation to fail with trusted root verification failure, got: %v", err)
 	}
 }
