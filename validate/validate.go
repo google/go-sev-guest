@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2022-2025 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -235,6 +235,27 @@ func PolicyToOptions(policy *cpb.Policy) (*Options, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	minTCBVersionStruct, err := kds.NewTCBVersionStruct(kds.ProductLine(policy.Product), policy.GetMinimumTcb())
+	if err != nil {
+		return nil, err
+	}
+
+	minTCBParts, err := kds.DecomposeTCBVersionStruct(minTCBVersionStruct)
+	if err != nil {
+		return nil, err
+	}
+
+	minLaunchTCBVersionStruct, err := kds.NewTCBVersionStruct(kds.ProductLine(policy.Product), policy.GetMinimumLaunchTcb())
+	if err != nil {
+		return nil, err
+	}
+
+	minLaunchTCBParts, err := kds.DecomposeTCBVersionStruct(minLaunchTCBVersionStruct)
+	if err != nil {
+		return nil, err
+	}
+
 	opts := &Options{
 		MinimumGuestSvn:           policy.GetMinimumGuestSvn(),
 		GuestPolicy:               guestPolicy,
@@ -247,8 +268,8 @@ func PolicyToOptions(policy *cpb.Policy) (*Options, error) {
 		HostData:                  policy.GetHostData(),
 		ReportData:                policy.GetReportData(),
 		PlatformInfo:              platformInfo,
-		MinimumTCB:                kds.DecomposeTCBVersion(kds.TCBVersion(policy.GetMinimumTcb())),
-		MinimumLaunchTCB:          kds.DecomposeTCBVersion(kds.TCBVersion(policy.GetMinimumLaunchTcb())),
+		MinimumTCB:                minTCBParts,
+		MinimumLaunchTCB:          minLaunchTCBParts,
 		MinimumBuild:              uint8(policy.GetMinimumBuild()),
 		MinimumVersion:            minVersion,
 		RequireAuthorKey:          policy.GetRequireAuthorKey(),
@@ -370,29 +391,50 @@ type reportTcbDescriptions struct {
 	cert partDescription
 }
 
-func getReportTcbs(report *spb.Report, certTcb kds.TCBVersion) *reportTcbDescriptions {
+func getReportTcbs(report *spb.Report, certTcb kds.TCBVersionStruct) (*reportTcbDescriptions, error) {
+	fms := report.GetCpuid1EaxFms()
+
+	reportedTCBVersionStruct, reportedTcbErr := kds.NewTCBVersionStruct(kds.ProductLineFromFms(fms), report.GetReportedTcb())
+	currentTCBVersionStruct, currentTcbErr := kds.NewTCBVersionStruct(kds.ProductLineFromFms(fms), report.GetCurrentTcb())
+	committedTCBVersionStruct, committedTcbErr := kds.NewTCBVersionStruct(kds.ProductLineFromFms(fms), report.GetCommittedTcb())
+	launchTCBVersionStruct, launchTcbErr := kds.NewTCBVersionStruct(kds.ProductLineFromFms(fms), report.GetLaunchTcb())
+	err := multierr.Combine(reportedTcbErr, currentTcbErr, committedTcbErr, launchTcbErr)
+	if err != nil {
+		return nil, err
+	}
+
+	reportedTCBParts, reportedTcbErr := kds.DecomposeTCBVersionStruct(reportedTCBVersionStruct)
+	currentTCBParts, currentTcbErr := kds.DecomposeTCBVersionStruct(currentTCBVersionStruct)
+	committedTCBParts, committedTcbErr := kds.DecomposeTCBVersionStruct(committedTCBVersionStruct)
+	launchTCBParts, launchTcbErr := kds.DecomposeTCBVersionStruct(launchTCBVersionStruct)
+	certTCBParts, certTcbErr := kds.DecomposeTCBVersionStruct(certTcb)
+	err = multierr.Combine(reportedTcbErr, currentTcbErr, committedTcbErr, launchTcbErr, certTcbErr)
+	if err != nil {
+		return nil, err
+	}
+
 	return &reportTcbDescriptions{
 		reported: partDescription{
-			parts: kds.DecomposeTCBVersion(kds.TCBVersion(report.GetReportedTcb())),
+			parts: reportedTCBParts,
 			desc:  "report's REPORTED_TCB",
 		},
 		current: partDescription{
-			parts: kds.DecomposeTCBVersion(kds.TCBVersion(report.GetCurrentTcb())),
+			parts: currentTCBParts,
 			desc:  "report's CURRENT_TCB",
 		},
 		committed: partDescription{
-			parts: kds.DecomposeTCBVersion(kds.TCBVersion(report.GetCommittedTcb())),
+			parts: committedTCBParts,
 			desc:  "report's COMMITTED_TCB",
 		},
 		launch: partDescription{
-			parts: kds.DecomposeTCBVersion(kds.TCBVersion(report.GetLaunchTcb())),
+			parts: launchTCBParts,
 			desc:  "report's LAUNCH_TCB",
 		},
 		cert: partDescription{
-			parts: kds.DecomposeTCBVersion(certTcb),
+			parts: certTCBParts,
 			desc:  "TCB of the V[CL]EK certificate",
 		},
-	}
+	}, nil
 }
 
 // policyTcbDescriptions is a collection of all TCB kinds that the validation policy specifies.
@@ -418,12 +460,12 @@ func getPolicyTcbs(options *Options) *policyTcbDescriptions {
 
 // tcbNeError return an error if the two TCBs are not equal
 func tcbNeError(left, right partDescription) error {
-	ltcb, _ := kds.ComposeTCBParts(left.parts)
-	rtcb, _ := kds.ComposeTCBParts(right.parts)
+	ltcb, _ := left.parts.ToTCBVersionStruct()
+	rtcb, _ := right.parts.ToTCBVersionStruct()
 	if ltcb == rtcb {
 		return nil
 	}
-	return fmt.Errorf("the %s 0x%x does not match the %s 0x%x", left.desc, ltcb, right.desc, rtcb)
+	return fmt.Errorf("the %s %s does not match the %s %s", left.desc, ltcb.String(), right.desc, rtcb.String())
 }
 
 // tcbGtError returns an error if wantLower is greater than (in part) wantHigher. It enforces
@@ -432,15 +474,18 @@ func tcbGtError(wantLower, wantHigher partDescription) error {
 	if kds.TCBPartsLE(wantLower.parts, wantHigher.parts) {
 		return nil
 	}
-	return fmt.Errorf("the %s %+v is lower than the %s %+v in at least one component",
-		wantHigher.desc, wantHigher.parts, wantLower.desc, wantLower.parts)
+	return fmt.Errorf("the %s %s is lower than the %s %s in at least one component",
+		wantHigher.desc, wantHigher.parts.String(), wantLower.desc, wantLower.parts.String())
 }
 
 // validateTcb returns an error if the TCB values present in the report and V[CL]EK certificate do not
 // obey expected relationships with respect to the given validation policy, or with respect to
 // internal consistency checks.
-func validateTcb(report *spb.Report, certTcb kds.TCBVersion, options *Options) error {
-	reportTcbs := getReportTcbs(report, certTcb)
+func validateTcb(report *spb.Report, certTcb kds.TCBVersionStruct, options *Options) error {
+	reportTcbs, err := getReportTcbs(report, certTcb)
+	if err != nil {
+		return err
+	}
 	policyTcbs := getPolicyTcbs(options)
 
 	var provisionalErr error
@@ -747,7 +792,7 @@ func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 	if err := multierr.Combine(
 		validatePolicy(report.GetPolicy(), options.GuestPolicy),
 		validateVerbatimFields(report, options),
-		validateTcb(report, exts.TCBVersion, options),
+		validateTcb(report, exts.TCBVersionStruct, options),
 		validateVersion(report, options),
 		validatePlatformInfo(report.GetPlatformInfo(), options.PlatformInfo),
 		validateKeys(report, options),

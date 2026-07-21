@@ -1,4 +1,4 @@
-// Copyright 2022 Google LLC
+// Copyright 2022-2025 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -111,7 +111,7 @@ type AmdSigner struct {
 	// This identity does not match AMD's notion of an HWID. It is purely to combine expectations of
 	// report data -> KDS URL construction for the fake KDS implementation.
 	HWID    [abi.ChipIDSize]byte
-	TCB     kds.TCBVersion
+	TCB     kds.TCBVersion //nolint:staticcheck
 	Product *spb.SevProduct
 }
 
@@ -187,7 +187,7 @@ type AmdSignerBuilder struct {
 	VlekCustom       CertOverride
 	CSPID            string
 	HWID             [abi.ChipIDSize]byte
-	TCB              kds.TCBVersion
+	TCB              kds.TCBVersion //nolint:staticcheck
 	// Intermediate built certificates
 	Ark    *x509.Certificate
 	Ask    *x509.Certificate
