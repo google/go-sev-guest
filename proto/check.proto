@@ -42,7 +42,7 @@ message Policy {
   bytes host_data = 12;          // Should be 32 bytes long
   bytes report_id = 13;          // Should be 32 bytes long
   bytes report_id_ma = 14;       // Should be 32 bytes long
-  bytes chip_id = 15;            // Should be 64 bytes long
+  bytes chip_id = 15;            // Should be either 64 or 8 bytes long
   uint32 minimum_build = 16;
   string minimum_version = 17;   // Should be "maj.min", both should be 0-255.
   bool permit_provisional_firmware = 18;
@@ -53,6 +53,8 @@ message Policy {
   repeated bytes trusted_id_key_hashes = 23;
   // The expected product that generated the attestation report. Stepping optional.
   sevsnp.SevProduct product = 24;
+  uint64 minimum_tcb_turin = 25;
+  uint64 minimum_launch_tcb_turin = 26;
 }
 
 // RootOfTrust represents configuration for which hardware root of trust

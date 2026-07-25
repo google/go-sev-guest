@@ -111,10 +111,10 @@ func TestValidateSnpAttestation(t *testing.T) {
 			CurrentMajor:    uint32(opts.currentMajor),
 			CurrentMinor:    uint32(opts.currentMinor),
 			PlatformInfo:    1,
-			CommittedTcb:    uint64(committedTcb),
-			CurrentTcb:      uint64(currentTcb),
-			LaunchTcb:       uint64(launchTcb),
-			ReportedTcb:     uint64(reportedTcb),
+			CommittedTcb:    committedTcb.Raw(),
+			CurrentTcb:      currentTcb.Raw(),
+			LaunchTcb:       launchTcb.Raw(),
+			ReportedTcb:     reportedTcb.Raw(),
 			Signature:       make([]byte, abi.SignatureSize),
 		}
 		reportRaw, err := abi.ReportToAbiBytes(reportpb)
@@ -387,8 +387,6 @@ func TestValidateSnpAttestation(t *testing.T) {
 			},
 			wantErr: "report ID key not trusted: ffff000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000ee",
 		},
-		// TODO(dionnaglaze): test varies ways provisional firmware shows up.
-		// {name: "Provisional firmware"},
 		{
 			name:        "accepted provisional by build",
 			attestation: attestationb1455,
@@ -477,10 +475,12 @@ func TestValidateSnpAttestation(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		if err := SnpAttestation(tc.attestation, tc.opts); (err == nil && tc.wantErr != "") ||
-			(err != nil && (tc.wantErr == "" || !strings.Contains(err.Error(), tc.wantErr))) {
-			t.Errorf("%s: SnpAttestation(%v) errored unexpectedly. Got '%v', want '%s'", tc.name, tc.attestation, err, tc.wantErr)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			if err := SnpAttestation(tc.attestation, tc.opts); (err == nil && tc.wantErr != "") ||
+				(err != nil && (tc.wantErr == "" || !strings.Contains(err.Error(), tc.wantErr))) {
+				t.Errorf("%s: SnpAttestation(%v) errored unexpectedly. Got '%v', want '%s'", tc.name, tc.attestation, err, tc.wantErr)
+			}
+		})
 	}
 }
 
