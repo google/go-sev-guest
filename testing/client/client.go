@@ -142,6 +142,16 @@ func GetSevQuoteProvider(tcs []test.TestCase, opts *test.DeviceOptions, tb testi
 					},
 				},
 			},
+			"Turin": {
+				{
+					ProductLine: "Turin",
+					ProductCerts: &trust.ProductCerts{
+						Ask:  sevQp.Device.Signer.Ask,
+						Ark:  sevQp.Device.Signer.Ark,
+						Asvk: sevQp.Device.Signer.Asvk,
+					},
+				},
+			},
 		}
 		badSnpRoot := map[string][]*trust.AMDRootCerts{
 			"Milan": {
@@ -162,6 +172,16 @@ func GetSevQuoteProvider(tcs []test.TestCase, opts *test.DeviceOptions, tb testi
 					ProductLine: "Genoa",
 					ProductCerts: &trust.ProductCerts{
 						// No ASK, oops.
+						Ask:  sevQp.Device.Signer.Ark,
+						Ark:  sevQp.Device.Signer.Ark,
+						Asvk: sevQp.Device.Signer.Ark,
+					},
+				},
+			},
+			"Turin": {
+				{
+					ProductLine: "Turin",
+					ProductCerts: &trust.ProductCerts{
 						Ask:  sevQp.Device.Signer.Ark,
 						Ark:  sevQp.Device.Signer.Ark,
 						Asvk: sevQp.Device.Signer.Ark,
