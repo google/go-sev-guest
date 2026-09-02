@@ -243,6 +243,28 @@ func PolicyToOptions(policy *cpb.Policy) (*Options, error) {
 	if err != nil {
 		return nil, err
 	}
+	var structVersion uint8
+	switch policy.GetProduct().GetName() {
+	case spb.SevProduct_SEV_PRODUCT_TURIN:
+		structVersion = 1
+	case spb.SevProduct_SEV_PRODUCT_UNKNOWN, spb.SevProduct_SEV_PRODUCT_MILAN, spb.SevProduct_SEV_PRODUCT_GENOA:
+		structVersion = 0
+	default:
+		return nil, fmt.Errorf("unknown product: %v", policy.GetProduct().GetName())
+	}
+	var minTCB, minLaunchTCB kds.TCBVersion
+	if policy.GetMinimumTcb() != 0 {
+		minTCB, err = kds.DecomposeTCBVersion(structVersion, policy.GetMinimumTcb())
+		if err != nil {
+			return nil, err
+		}
+	}
+	if policy.GetMinimumLaunchTcb() != 0 {
+		minLaunchTCB, err = kds.DecomposeTCBVersion(structVersion, policy.GetMinimumLaunchTcb())
+		if err != nil {
+			return nil, err
+		}
+	}
 	opts := &Options{
 		MinimumGuestSvn:           policy.GetMinimumGuestSvn(),
 		GuestPolicy:               guestPolicy,
@@ -255,8 +277,8 @@ func PolicyToOptions(policy *cpb.Policy) (*Options, error) {
 		HostData:                  policy.GetHostData(),
 		ReportData:                policy.GetReportData(),
 		PlatformInfo:              platformInfo,
-		MinimumTCB:                kds.DecomposeTCBVersionV0(policy.GetMinimumTcb()),
-		MinimumLaunchTCB:          kds.DecomposeTCBVersionV0(policy.GetMinimumLaunchTcb()),
+		MinimumTCB:                minTCB,
+		MinimumLaunchTCB:          minLaunchTCB,
 		MinimumBuild:              uint8(policy.GetMinimumBuild()),
 		MinimumVersion:            minVersion,
 		RequireAuthorKey:          policy.GetRequireAuthorKey(),
@@ -390,29 +412,45 @@ type reportTcbDescriptions struct {
 	cert partDescription
 }
 
-func getReportTcbs(report *spb.Report, certTcb kds.TCBVersion) *reportTcbDescriptions {
+func getReportTcbs(report *spb.Report, certTcb kds.TCBVersion, structVersion uint8) (*reportTcbDescriptions, error) {
+	reported, err := kds.DecomposeTCBVersion(structVersion, report.GetReportedTcb())
+	if err != nil {
+		return nil, err
+	}
+	current, err := kds.DecomposeTCBVersion(structVersion, report.GetCurrentTcb())
+	if err != nil {
+		return nil, err
+	}
+	committed, err := kds.DecomposeTCBVersion(structVersion, report.GetCommittedTcb())
+	if err != nil {
+		return nil, err
+	}
+	launch, err := kds.DecomposeTCBVersion(structVersion, report.GetLaunchTcb())
+	if err != nil {
+		return nil, err
+	}
 	return &reportTcbDescriptions{
 		reported: partDescription{
-			tcb:  kds.DecomposeTCBVersionV0(report.GetReportedTcb()),
+			tcb:  reported,
 			desc: "report's REPORTED_TCB",
 		},
 		current: partDescription{
-			tcb:  kds.DecomposeTCBVersionV0(report.GetCurrentTcb()),
+			tcb:  current,
 			desc: "report's CURRENT_TCB",
 		},
 		committed: partDescription{
-			tcb:  kds.DecomposeTCBVersionV0(report.GetCommittedTcb()),
+			tcb:  committed,
 			desc: "report's COMMITTED_TCB",
 		},
 		launch: partDescription{
-			tcb:  kds.DecomposeTCBVersionV0(report.GetLaunchTcb()),
+			tcb:  launch,
 			desc: "report's LAUNCH_TCB",
 		},
 		cert: partDescription{
 			tcb:  certTcb,
 			desc: "TCB of the V[CL]EK certificate",
 		},
-	}
+	}, nil
 }
 
 // policyTcbDescriptions is a collection of all TCB kinds that the validation policy specifies.
@@ -436,15 +474,26 @@ func getPolicyTcbs(options *Options) *policyTcbDescriptions {
 	}
 }
 
+func tcbStructVersionError(left, right partDescription) error {
+	if left.tcb.StructVersion() != right.tcb.StructVersion() {
+		return fmt.Errorf("the %s StructVersion %d does not match the %s StructVersion %d",
+			left.desc, left.tcb.StructVersion(), right.desc, right.tcb.StructVersion())
+	}
+	return nil
+}
+
 // tcbNeError return an error if the two TCBs are not equal
 func tcbNeError(left, right partDescription) error {
 	if left.tcb == nil || right.tcb == nil {
 		return nil
 	}
-	if left.tcb.StructVersion() == right.tcb.StructVersion() && left.tcb.Uint64() == right.tcb.Uint64() {
-		return nil
+	if err := tcbStructVersionError(left, right); err != nil {
+		return err
 	}
-	return fmt.Errorf("the %s 0x%x does not match the %s 0x%x", left.desc, left.tcb.Uint64(), right.desc, right.tcb.Uint64())
+	if left.tcb.Uint64() != right.tcb.Uint64() {
+		return fmt.Errorf("the %s 0x%x does not match the %s 0x%x", left.desc, left.tcb.Uint64(), right.desc, right.tcb.Uint64())
+	}
+	return nil
 }
 
 // tcbGtError returns an error if wantLower is greater than (in part) wantHigher. It enforces
@@ -452,6 +501,9 @@ func tcbNeError(left, right partDescription) error {
 func tcbGtError(wantLower, wantHigher partDescription) error {
 	if wantLower.tcb == nil || wantHigher.tcb == nil {
 		return nil
+	}
+	if err := tcbStructVersionError(wantLower, wantHigher); err != nil {
+		return err
 	}
 	if wantLower.tcb.LE(wantHigher.tcb) {
 		return nil
@@ -463,8 +515,11 @@ func tcbGtError(wantLower, wantHigher partDescription) error {
 // validateTcb returns an error if the TCB values present in the report and V[CL]EK certificate do not
 // obey expected relationships with respect to the given validation policy, or with respect to
 // internal consistency checks.
-func validateTcb(report *spb.Report, certTcb kds.TCBVersion, options *Options) error {
-	reportTcbs := getReportTcbs(report, certTcb)
+func validateTcb(report *spb.Report, certTcb kds.TCBVersion, options *Options, structVersion uint8) error {
+	reportTcbs, err := getReportTcbs(report, certTcb, structVersion)
+	if err != nil {
+		return err
+	}
 	policyTcbs := getPolicyTcbs(options)
 
 	var provisionalErr error
@@ -768,10 +823,19 @@ func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 			report.GetGuestSvn(), options.MinimumGuestSvn)
 	}
 
+	expectedStructVersion := uint8(0)
+	if abi.SevProductFromCpuid1Eax(report.GetCpuid1EaxFms()).GetName() == spb.SevProduct_SEV_PRODUCT_TURIN {
+		expectedStructVersion = 1
+	}
+	if info.SigningKey != abi.NoneReportSigner && exts.StructVersion != expectedStructVersion {
+		return fmt.Errorf("certificate structVersion %d does not match report expected structVersion %d",
+			exts.StructVersion, expectedStructVersion)
+	}
+
 	if err := multierr.Combine(
 		validatePolicy(report.GetPolicy(), options.GuestPolicy),
 		validateVerbatimFields(report, options),
-		validateTcb(report, exts.TCBVersion, options),
+		validateTcb(report, exts.TCBVersion, options, expectedStructVersion),
 		validateVersion(report, options),
 		validatePlatformInfo(report.GetPlatformInfo(), options.PlatformInfo),
 		validateKeys(report, options),
