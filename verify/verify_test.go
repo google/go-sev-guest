@@ -870,7 +870,9 @@ func TestV3KDSProduct(t *testing.T) {
 		"https://kdsintf.amd.com/vcek/v1/Milan/00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000?blSPL=0&snpSPL=0&teeSPL=0&ucodeSPL=0": []byte("milancert"),
 		"https://kdsintf.amd.com/vcek/v1/Milan/cert_chain": trust.AskArkMilanVcekBytes,
 		"https://kdsintf.amd.com/vcek/v1/Genoa/00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000?blSPL=0&snpSPL=0&teeSPL=0&ucodeSPL=0": []byte("genoacert"),
-		"https://kdsintf.amd.com/vcek/v1/Genoa/cert_chain": trust.AskArkGenoaVcekBytes,
+		"https://kdsintf.amd.com/vcek/v1/Genoa/cert_chain":                                                     trust.AskArkGenoaVcekBytes,
+		"https://kdsintf.amd.com/vcek/v1/Turin/0000000000000000?blSPL=0&fmcSPL=0&snpSPL=0&teeSPL=0&ucodeSPL=0": []byte("turincert"),
+		"https://kdsintf.amd.com/vcek/v1/Turin/cert_chain":                                                     trust.AskArkTurinVcekBytes,
 	})
 	options := &Options{
 		TrustedRoots: map[string][]*trust.AMDRootCerts{},
@@ -878,7 +880,7 @@ func TestV3KDSProduct(t *testing.T) {
 		Product:      abi.DefaultSevProduct(),
 		Getter:       getter,
 	}
-	for _, productLine := range []string{"Milan", "Genoa"} {
+	for _, productLine := range []string{"Milan", "Genoa", "Turin"} {
 		r := trust.AMDRootCertsProduct(productLine)
 		r.ProductCerts = &trust.ProductCerts{
 			Ark: signer.Ark,
@@ -886,7 +888,7 @@ func TestV3KDSProduct(t *testing.T) {
 		}
 		options.TrustedRoots[productLine] = []*trust.AMDRootCerts{r}
 	}
-	var gotGenoa, gotMilan bool
+	var gotGenoa, gotMilan, gotTurin bool
 	for _, tc := range tcs {
 		t.Run(tc.Name, func(t *testing.T) {
 			report, _ := abi.ReportToProto(tc.Output[:])
@@ -902,6 +904,11 @@ func TestV3KDSProduct(t *testing.T) {
 			case 0x00a10f10:
 				want = []byte("genoacert")
 				gotGenoa = true
+			case 0x00b00f20:
+				want = []byte("turincert")
+				gotTurin = true
+			default:
+				t.Fatalf("unexpected Cpuid1EaxFms: 0x%x", report.Cpuid1EaxFms)
 			}
 			got := a.CertificateChain.VcekCert
 			if !bytes.Equal(got, want) {
@@ -914,6 +921,9 @@ func TestV3KDSProduct(t *testing.T) {
 	}
 	if !gotGenoa {
 		t.Errorf("missed Genoa case")
+	}
+	if !gotTurin {
+		t.Errorf("missed Turin case")
 	}
 }
 
