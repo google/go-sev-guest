@@ -54,7 +54,7 @@ type Options struct {
 	ReportIDMA []byte
 	// Measurement is the expected MEASUREMENT field. Must be nil or 48 bytes long. Not checked if nil.
 	Measurement []byte
-	// ChipID is the expected CHIP_ID field. Must be nil or 64 bytes long. Not checked if nil.
+	// ChipID is the expected CHIP_ID field. Must be nil, abi.TurinSiliconIDSize bytes (Turin), or abi.ChipIDSize bytes. Not checked if nil.
 	ChipID []byte
 	// MinimumBuild is the minimum firmware build version reported in the attestation report.
 	MinimumBuild uint8
@@ -136,6 +136,10 @@ func lengthCheck(name string, length int, value []byte) error {
 }
 
 func checkOptionsLengths(opts *Options) error {
+	var chipIDErr error
+	if len(opts.ChipID) != 0 && len(opts.ChipID) != abi.TurinSiliconIDSize && len(opts.ChipID) != abi.ChipIDSize {
+		chipIDErr = fmt.Errorf("option %q length is %d. Want %d or %d", "chip_id", len(opts.ChipID), abi.TurinSiliconIDSize, abi.ChipIDSize)
+	}
 	return multierr.Combine(
 		lengthCheck("family_id", abi.FamilyIDSize, opts.FamilyID),
 		lengthCheck("image_id", abi.ImageIDSize, opts.ImageID),
@@ -144,7 +148,7 @@ func checkOptionsLengths(opts *Options) error {
 		lengthCheck("host_data", abi.HostDataSize, opts.HostData),
 		lengthCheck("report_id", abi.ReportIDSize, opts.ReportID),
 		lengthCheck("report_id_ma", abi.ReportIDMASize, opts.ReportIDMA),
-		lengthCheck("chip_id", abi.ChipIDSize, opts.ChipID))
+		chipIDErr)
 }
 
 // Converts "maj.min" to its uint16 representation or errors.
@@ -235,6 +239,25 @@ func PolicyToOptions(policy *cpb.Policy) (*Options, error) {
 	if err != nil {
 		return nil, err
 	}
+	var minTcb, minLaunchTcb kds.TCBVersion
+	switch policy.GetProduct().GetName() {
+	case spb.SevProduct_SEV_PRODUCT_TURIN:
+		if policy.GetMinimumTcb() != 0 {
+			minTcb = kds.DecomposeTCBVersionV1(policy.GetMinimumTcb())
+		}
+		if policy.GetMinimumLaunchTcb() != 0 {
+			minLaunchTcb = kds.DecomposeTCBVersionV1(policy.GetMinimumLaunchTcb())
+		}
+	case spb.SevProduct_SEV_PRODUCT_UNKNOWN, spb.SevProduct_SEV_PRODUCT_MILAN, spb.SevProduct_SEV_PRODUCT_GENOA:
+		if policy.GetMinimumTcb() != 0 {
+			minTcb = kds.DecomposeTCBVersionV0(policy.GetMinimumTcb())
+		}
+		if policy.GetMinimumLaunchTcb() != 0 {
+			minLaunchTcb = kds.DecomposeTCBVersionV0(policy.GetMinimumLaunchTcb())
+		}
+	default:
+		return nil, fmt.Errorf("unknown product: %v", policy.GetProduct().GetName())
+	}
 	opts := &Options{
 		MinimumGuestSvn:           policy.GetMinimumGuestSvn(),
 		GuestPolicy:               guestPolicy,
@@ -247,8 +270,8 @@ func PolicyToOptions(policy *cpb.Policy) (*Options, error) {
 		HostData:                  policy.GetHostData(),
 		ReportData:                policy.GetReportData(),
 		PlatformInfo:              platformInfo,
-		MinimumTCB:                kds.DecomposeTCBVersionV0(policy.GetMinimumTcb()),
-		MinimumLaunchTCB:          kds.DecomposeTCBVersionV0(policy.GetMinimumLaunchTcb()),
+		MinimumTCB:                minTcb,
+		MinimumLaunchTCB:          minLaunchTcb,
 		MinimumBuild:              uint8(policy.GetMinimumBuild()),
 		MinimumVersion:            minVersion,
 		RequireAuthorKey:          policy.GetRequireAuthorKey(),
@@ -332,7 +355,57 @@ func validateByteField(option, field string, size int, given, required []byte) e
 	return nil
 }
 
+// validateChipID verifies that the attestation report's CHIP_ID matches the expected ChipID option.
+//
+// AMD Publication #56860 Table 23 defines the attestation report's CHIP_ID as a fixed 64-byte
+// field (abi.ChipIDSize).
+//
+// For Family 19h (Milan, Genoa), the socket hardware ID is 64 bytes (AMD Publication #57230 Table 10).
+// For Family 1Ah (Turin and later), the socket hardware ID is 8 bytes (AMD Publication #57230 Table 11).
+// On Turin, the report buffer contains the 8-byte silicon ID in its prefix (abi.TurinSiliconIDSize).
+func validateChipID(product spb.SevProduct_SevProductName, reportChipID, expectedChipID []byte) error {
+	if len(expectedChipID) == 0 {
+		return nil
+	}
+	if len(expectedChipID) == abi.ChipIDSize {
+		if len(reportChipID) != abi.ChipIDSize {
+			return fmt.Errorf("report field CHIP_ID has size %d, want %d", len(reportChipID), abi.ChipIDSize)
+		}
+		if !bytes.Equal(expectedChipID, reportChipID) {
+			return fmt.Errorf("report field CHIP_ID is %s. Expect %s",
+				hex.EncodeToString(reportChipID), hex.EncodeToString(expectedChipID))
+		}
+		return nil
+	}
+	if len(expectedChipID) == abi.TurinSiliconIDSize {
+		switch product {
+		case spb.SevProduct_SEV_PRODUCT_TURIN:
+			if len(reportChipID) < abi.TurinSiliconIDSize {
+				return fmt.Errorf("report field CHIP_ID has size %d, want at least %d", len(reportChipID), abi.TurinSiliconIDSize)
+			}
+			if !bytes.Equal(expectedChipID, reportChipID[:abi.TurinSiliconIDSize]) {
+				return fmt.Errorf("report field CHIP_ID is %s. Expect %s",
+					hex.EncodeToString(reportChipID[:abi.TurinSiliconIDSize]), hex.EncodeToString(expectedChipID))
+			}
+			return nil
+		case spb.SevProduct_SEV_PRODUCT_UNKNOWN, spb.SevProduct_SEV_PRODUCT_MILAN, spb.SevProduct_SEV_PRODUCT_GENOA:
+			return fmt.Errorf("option ChipID must be nil or %d bytes", abi.ChipIDSize)
+		default:
+			return fmt.Errorf("unknown product: %v", product)
+		}
+	}
+	switch product {
+	case spb.SevProduct_SEV_PRODUCT_TURIN:
+		return fmt.Errorf("option ChipID for Turin must be nil, %d, or %d bytes", abi.TurinSiliconIDSize, abi.ChipIDSize)
+	case spb.SevProduct_SEV_PRODUCT_UNKNOWN, spb.SevProduct_SEV_PRODUCT_MILAN, spb.SevProduct_SEV_PRODUCT_GENOA:
+		return fmt.Errorf("option ChipID must be nil or %d bytes", abi.ChipIDSize)
+	default:
+		return fmt.Errorf("unknown product: %v", product)
+	}
+}
+
 func validateVerbatimFields(report *spb.Report, options *Options) error {
+	product := abi.SevProductFromCpuid1Eax(report.GetCpuid1EaxFms()).GetName()
 	return multierr.Combine(
 		validateByteField("ReportData", "REPORT_DATA", abi.ReportDataSize, report.GetReportData(), options.ReportData),
 		validateByteField("HostData", "HOST_DATA", abi.HostDataSize, report.GetHostData(), options.HostData),
@@ -341,7 +414,7 @@ func validateVerbatimFields(report *spb.Report, options *Options) error {
 		validateByteField("ReportID", "REPORT_ID", abi.ReportIDSize, report.GetReportId(), options.ReportID),
 		validateByteField("ReportIDMA", "REPORT_ID_MA", abi.ReportIDMASize, report.GetReportIdMa(), options.ReportIDMA),
 		validateByteField("Measurement", "MEASUREMENT", abi.MeasurementSize, report.GetMeasurement(), options.Measurement),
-		validateByteField("ChipID", "CHIP_ID", abi.ChipIDSize, report.GetChipId(), options.ChipID),
+		validateChipID(product, report.GetChipId(), options.ChipID),
 	)
 }
 
@@ -370,29 +443,44 @@ type reportTcbDescriptions struct {
 	cert partDescription
 }
 
-func getReportTcbs(report *spb.Report, certTcb kds.TCBVersion) *reportTcbDescriptions {
+func getReportTcbs(report *spb.Report, certTcb kds.TCBVersion, structVersion uint8) (*reportTcbDescriptions, error) {
+	var reported, current, committed, launch kds.TCBVersion
+	switch structVersion {
+	case 1:
+		reported = kds.DecomposeTCBVersionV1(report.GetReportedTcb())
+		current = kds.DecomposeTCBVersionV1(report.GetCurrentTcb())
+		committed = kds.DecomposeTCBVersionV1(report.GetCommittedTcb())
+		launch = kds.DecomposeTCBVersionV1(report.GetLaunchTcb())
+	case 0:
+		reported = kds.DecomposeTCBVersionV0(report.GetReportedTcb())
+		current = kds.DecomposeTCBVersionV0(report.GetCurrentTcb())
+		committed = kds.DecomposeTCBVersionV0(report.GetCommittedTcb())
+		launch = kds.DecomposeTCBVersionV0(report.GetLaunchTcb())
+	default:
+		return nil, fmt.Errorf("unsupported TCB structVersion: %d", structVersion)
+	}
 	return &reportTcbDescriptions{
 		reported: partDescription{
-			tcb:  kds.DecomposeTCBVersionV0(report.GetReportedTcb()),
+			tcb:  reported,
 			desc: "report's REPORTED_TCB",
 		},
 		current: partDescription{
-			tcb:  kds.DecomposeTCBVersionV0(report.GetCurrentTcb()),
+			tcb:  current,
 			desc: "report's CURRENT_TCB",
 		},
 		committed: partDescription{
-			tcb:  kds.DecomposeTCBVersionV0(report.GetCommittedTcb()),
+			tcb:  committed,
 			desc: "report's COMMITTED_TCB",
 		},
 		launch: partDescription{
-			tcb:  kds.DecomposeTCBVersionV0(report.GetLaunchTcb()),
+			tcb:  launch,
 			desc: "report's LAUNCH_TCB",
 		},
 		cert: partDescription{
 			tcb:  certTcb,
 			desc: "TCB of the V[CL]EK certificate",
 		},
-	}
+	}, nil
 }
 
 // policyTcbDescriptions is a collection of all TCB kinds that the validation policy specifies.
@@ -421,10 +509,14 @@ func tcbNeError(left, right partDescription) error {
 	if left.tcb == nil || right.tcb == nil {
 		return nil
 	}
-	if left.tcb.StructVersion() == right.tcb.StructVersion() && left.tcb.Uint64() == right.tcb.Uint64() {
-		return nil
+	if left.tcb.StructVersion() != right.tcb.StructVersion() {
+		return fmt.Errorf("the %s StructVersion %d does not match the %s StructVersion %d",
+			left.desc, left.tcb.StructVersion(), right.desc, right.tcb.StructVersion())
 	}
-	return fmt.Errorf("the %s 0x%x does not match the %s 0x%x", left.desc, left.tcb.Uint64(), right.desc, right.tcb.Uint64())
+	if left.tcb.Uint64() != right.tcb.Uint64() {
+		return fmt.Errorf("the %s 0x%x does not match the %s 0x%x", left.desc, left.tcb.Uint64(), right.desc, right.tcb.Uint64())
+	}
+	return nil
 }
 
 // tcbGtError returns an error if wantLower is greater than (in part) wantHigher. It enforces
@@ -432,6 +524,10 @@ func tcbNeError(left, right partDescription) error {
 func tcbGtError(wantLower, wantHigher partDescription) error {
 	if wantLower.tcb == nil || wantHigher.tcb == nil {
 		return nil
+	}
+	if wantLower.tcb.StructVersion() != wantHigher.tcb.StructVersion() {
+		return fmt.Errorf("the %s StructVersion %d does not match the %s StructVersion %d",
+			wantLower.desc, wantLower.tcb.StructVersion(), wantHigher.desc, wantHigher.tcb.StructVersion())
 	}
 	if wantLower.tcb.LE(wantHigher.tcb) {
 		return nil
@@ -443,8 +539,11 @@ func tcbGtError(wantLower, wantHigher partDescription) error {
 // validateTcb returns an error if the TCB values present in the report and V[CL]EK certificate do not
 // obey expected relationships with respect to the given validation policy, or with respect to
 // internal consistency checks.
-func validateTcb(report *spb.Report, certTcb kds.TCBVersion, options *Options) error {
-	reportTcbs := getReportTcbs(report, certTcb)
+func validateTcb(report *spb.Report, certTcb kds.TCBVersion, options *Options, structVersion uint8) error {
+	reportTcbs, err := getReportTcbs(report, certTcb, structVersion)
+	if err != nil {
+		return err
+	}
 	policyTcbs := getPolicyTcbs(options)
 
 	var provisionalErr error
@@ -748,10 +847,19 @@ func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 			report.GetGuestSvn(), options.MinimumGuestSvn)
 	}
 
+	expectedStructVersion := uint8(0)
+	if abi.SevProductFromCpuid1Eax(report.GetCpuid1EaxFms()).GetName() == spb.SevProduct_SEV_PRODUCT_TURIN {
+		expectedStructVersion = 1
+	}
+	if info.SigningKey != abi.NoneReportSigner && exts.StructVersion != expectedStructVersion {
+		return fmt.Errorf("certificate structVersion %d does not match report expected structVersion %d",
+			exts.StructVersion, expectedStructVersion)
+	}
+
 	if err := multierr.Combine(
 		validatePolicy(report.GetPolicy(), options.GuestPolicy),
 		validateVerbatimFields(report, options),
-		validateTcb(report, exts.TCBVersion, options),
+		validateTcb(report, exts.TCBVersion, options, expectedStructVersion),
 		validateVersion(report, options),
 		validatePlatformInfo(report.GetPlatformInfo(), options.PlatformInfo),
 		validateKeys(report, options),
@@ -763,10 +871,22 @@ func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 		return fmt.Errorf("report VMPL %d is not %d", report.GetVmpl(), *options.VMPL)
 	}
 
-	// MaskChipId might be 1 for the host, so only check if the the CHIP_ID is not all zeros.
-	if info.SigningKey == abi.VcekReportSigner && !allZero(report.GetChipId()) && !bytes.Equal(report.GetChipId(), exts.HWID[:]) {
-		return fmt.Errorf("report field CHIP_ID %s is not the same as the VCEK certificate's HWID %s",
-			hex.EncodeToString(report.GetChipId()), hex.EncodeToString(exts.HWID[:]))
+	// MaskChipId might be 1 for the host, so only check if the CHIP_ID is not all zeros.
+	// On Family 19h (Milan/Genoa), exts.HWID is 64 bytes (AMD #57230 Table 10) matching
+	// report.GetChipId() directly. On Family 1Ah (Turin), exts.HWID is 8 bytes (AMD #57230 Table 11)
+	// matching the 8-byte silicon ID prefix in report.GetChipId() (AMD #56860 Table 23).
+	if info.SigningKey == abi.VcekReportSigner {
+		hwidLen := len(exts.HWID)
+		if hwidLen == 0 {
+			return errors.New("certificate HWID is empty")
+		}
+		if len(report.GetChipId()) < hwidLen {
+			return fmt.Errorf("report field CHIP_ID has size %d, want at least %d", len(report.GetChipId()), hwidLen)
+		}
+		if !allZero(report.GetChipId()[:hwidLen]) && !bytes.Equal(report.GetChipId()[:hwidLen], exts.HWID) {
+			return fmt.Errorf("report field CHIP_ID %s is not the same as the VCEK certificate's HWID %s",
+				hex.EncodeToString(report.GetChipId()[:hwidLen]), hex.EncodeToString(exts.HWID))
+		}
 	}
 
 	return certTableOptions(attestation, options.CertTableOptions)
