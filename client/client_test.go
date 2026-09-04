@@ -140,7 +140,17 @@ func TestOpenGetReportClose(t *testing.T) {
 			fixReportWants(reportProto)
 
 			// Does the proto report match expectations?
-			attestation, err := GetQuoteProto(qp, tc.Input)
+			var attestation *spb.Attestation
+			var err error
+			// if the test case has a manifest, then request an SVSM report,
+			// which should contain a services manifest
+			if tc.Manifest != nil {
+				qpSVSM := qp.(SVSMQuoteProvider)
+				attestation, err = GetQuoteSVSMProto(qpSVSM, tc.Input)
+			} else {
+				attestation, err = GetQuoteProto(qp, tc.Input)
+			}
+
 			if !test.Match(err, tc.WantErr) {
 				t.Fatalf("GetReport(device, %v) = %v, %v. Want err: %v", tc.Input, attestation, err, tc.WantErr)
 			}
@@ -154,6 +164,17 @@ func TestOpenGetReportClose(t *testing.T) {
 					t.Errorf("GetReport(%v) expectation diff %s", tc.Input, diff)
 				}
 			}
+
+			if tc.Manifest != nil {
+				manifestProto := &spb.ServicesManifest{}
+				if err := prototext.Unmarshal([]byte(tc.ManifestProto), manifestProto); err != nil {
+					t.Fatalf("test failure: %v", err)
+				}
+				got := attestation.ServicesManifest
+				if diff := cmp.Diff(got, manifestProto, protocmp.Transform()); diff != "" {
+					t.Errorf("GetReport(%v) manifest diff %s", tc.Input, diff)
+				}
+			}
 		})
 	}
 }
@@ -162,7 +183,18 @@ func TestOpenGetRawExtendedReportClose(t *testing.T) {
 	devMu.Do(initDevice)
 	for _, tc := range tests {
 		t.Run(tc.Name, func(t *testing.T) {
-			rawcerts, err := qp.GetRawQuote(tc.Input)
+			var rawcerts []byte
+			var err error
+
+			// if the test case has a manifest, then request an SVSM report,
+			// which should contain a services manifest
+			if tc.Manifest != nil {
+				qpSVSM := qp.(SVSMQuoteProvider)
+				rawcerts, err = qpSVSM.GetRawQuoteSVSM(tc.Input)
+			} else {
+				rawcerts, err = qp.GetRawQuote(tc.Input)
+			}
+
 			if !test.Match(err, tc.WantErr) || (tc.WantErr == "" && len(rawcerts) < abi.ReportSize) {
 				t.Fatalf("qp.GetRawQuote(%v) = %v, %v. Want err: %v", tc.Input, rawcerts, err, tc.WantErr)
 			}
@@ -195,6 +227,13 @@ func TestOpenGetRawExtendedReportClose(t *testing.T) {
 						t.Errorf("signature with test keys did not verify: %v", err)
 					}
 				}
+
+				if tc.Manifest != nil {
+					got := rawcerts[len(rawcerts)-len(tc.Manifest):]
+					if !bytes.Equal(got, tc.Manifest) {
+						t.Errorf("qp.GetRawQuote(%v) = {data: _, certs: _, manifest: %v} want manifest %v", tc.Input, got, tc.Manifest)
+					}
+				}
 			}
 		})
 	}
@@ -204,7 +243,17 @@ func TestGetQuoteProto(t *testing.T) {
 	devMu.Do(initDevice)
 	for _, tc := range tests {
 		t.Run(tc.Name, func(t *testing.T) {
-			ereport, err := GetQuoteProto(qp, tc.Input)
+			var ereport *spb.Attestation
+			var err error
+
+			// if the test case has a manifest, then request an SVSM report,
+			// which should contain a services manifest
+			if tc.Manifest != nil {
+				qpSVSM := qp.(SVSMQuoteProvider)
+				ereport, err = GetQuoteSVSMProto(qpSVSM, tc.Input)
+			} else {
+				ereport, err = GetQuoteProto(qp, tc.Input)
+			}
 			if !test.Match(err, tc.WantErr) {
 				t.Fatalf("GetQuoteProto(qp, %v) = %v, %v. Want err: %v", tc.Input, ereport, err, tc.WantErr)
 			}
@@ -236,6 +285,17 @@ func TestGetQuoteProto(t *testing.T) {
 					if !bytes.Equal(ereport.GetCertificateChain().GetVcekCert(), tcdev.Signer.Vcek.Raw) {
 						t.Errorf("VCEK certificate mismatch. Got %v, want %v",
 							ereport.GetCertificateChain().GetVcekCert(), tcdev.Signer.Vcek.Raw)
+					}
+				}
+
+				if tc.Manifest != nil {
+					manifestProto := &spb.ServicesManifest{}
+					if err := prototext.Unmarshal([]byte(tc.ManifestProto), manifestProto); err != nil {
+						t.Fatalf("test failure: %v", err)
+					}
+					got := ereport.ServicesManifest
+					if diff := cmp.Diff(got, manifestProto, protocmp.Transform()); diff != "" {
+						t.Errorf("GetQuoteProto(%v) manifest diff %s", tc.Input, diff)
 					}
 				}
 			}

@@ -907,3 +907,20 @@ func RawSnpReportContext(ctx context.Context, rawReport []byte, options *Options
 	}
 	return SnpReportContext(ctx, report, options)
 }
+
+// GetAttestationWithCerts uses AMD's Key Distribution Service (KDS) to download the certificate
+// chain for the VCEK that supposedly signed the given attestation's report, and returns the
+// Attestation representation of their combination.
+func GetAttestationWithCerts(attestation *spb.Attestation, options *Options) error {
+	return GetAttestationWithCertsContext(context.Background(), attestation, options)
+}
+
+// GetAttestationWithCertsContext behaves like GetAttestationWithCerts but forwards the context
+func GetAttestationWithCertsContext(ctx context.Context, attestation *spb.Attestation, options *Options) error {
+	newAttestation, err := GetAttestationFromReportContext(ctx, attestation.GetReport(), options)
+	if err != nil {
+		return err
+	}
+	attestation.CertificateChain = newAttestation.CertificateChain
+	return nil
+}

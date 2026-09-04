@@ -78,3 +78,8 @@ func GetQuoteProvider() (QuoteProvider, error) {
 func GetLeveledQuoteProvider() (LeveledQuoteProvider, error) {
 	return nil, fmt.Errorf("Windows is unsupported")
 }
+
+// GetQuoteProvider returns a supported SVSM QuoteProvider.
+func GetSVSMQuoteProvider() (SVSMQuoteProvider, error) {
+	return nil, fmt.Errorf("Windows is unsupported")
+}

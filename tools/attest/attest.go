@@ -44,6 +44,11 @@ var (
 		"Get both the attestation report and "+
 			"the host-provided certificate chain. "+
 			"If -outform=bin, then the binary appears in that order.")
+	svsm = flag.Bool("svsm", false,
+		"Get an attestation report from the SVSM, "+
+			"which includes the host-provided certificate chain "+
+			"and a services manifest."+
+			"Cannot be specified with -vmpl.")
 	reportDataStr = flag.String("in", "",
 		"A string of 64 bytes REPORT_DATA to include in the output attestation. "+
 			"Big-endian hex, octal, or binary start with 0x, 0o, or 0b respectively, detected with -inform=auto."+
@@ -96,7 +101,13 @@ func nonBinOut() func(proto.Message) ([]byte, error) {
 
 func outputExtendedReport(data [abi.ReportDataSize]byte, out io.Writer) error {
 	if *outform == "bin" {
-		bin, err := getRaw(data)
+		var bin []byte
+		var err error
+		if *svsm {
+			bin, err = getRawSVSM(data)
+		} else {
+			bin, err = getRaw(data)
+		}
 		if err != nil {
 			return err
 		}
@@ -145,8 +156,23 @@ func getRaw(data [abi.ReportDataSize]byte) ([]byte, error) {
 	return qp.GetRawQuoteAtLevel(data, vmplInt)
 }
 
+func getRawSVSM(data [abi.ReportDataSize]byte) ([]byte, error) {
+	qp, err := client.GetSVSMQuoteProvider()
+	if err != nil {
+		return nil, err
+	}
+	return qp.GetRawQuoteSVSM(data)
+}
+
 func getProto(data [abi.ReportDataSize]byte) (*pb.Attestation, error) {
 	if *vmpl == "default" {
+		if *svsm {
+			qp, err := client.GetSVSMQuoteProvider()
+			if err != nil {
+				return nil, err
+			}
+			return client.GetQuoteSVSMProto(qp, data)
+		}
 		qp, err := client.GetQuoteProvider()
 		if err != nil {
 			return nil, err
@@ -216,6 +242,9 @@ func main() {
 	}
 
 	if *vmpl != "default" {
+		if *svsm {
+			logger.Fatal("cannot specify both of -vmpl and -svsm")
+		}
 		vint, err := getVmpl()
 		if err != nil || vint > 3 {
 			logger.Fatalf("--vmpl=%s. Expect 0-3 or \"default\"", *vmpl)
@@ -235,7 +264,7 @@ func main() {
 
 	var reportData64 [abi.ReportDataSize]byte
 	copy(reportData64[:], reportData)
-	if *extended {
+	if *extended || *svsm {
 		if err := outputExtendedReport(reportData64, outwriter); err != nil {
 			logger.Fatal(err)
 		}

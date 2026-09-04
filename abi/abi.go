@@ -611,6 +611,40 @@ func ReportCertsToProto(data []uint8) (*pb.Attestation, error) {
 	return &pb.Attestation{Report: mreport, CertificateChain: table.Proto()}, nil
 }
 
+// ReportCertsAndManifestToProto creates a pb.Attestation from the report,certificate table, and SVSM
+// services manifest represented in data. The report is expected to take exactly abi.ReportSize bytes,
+// followed by the certificate table and optionally a services manifest. Only reports fetched
+// from SVSM should contain a services manifest.
+func ReportCertsAndManifestToProto(data []uint8) (*pb.Attestation, error) {
+	var certs []uint8
+
+	report := data
+	if len(data) >= ReportSize {
+		report = data[:ReportSize]
+		certs = data[ReportSize:]
+	}
+	mreport, err := ReportToProto(report)
+	if err != nil {
+		return nil, err
+	}
+	certTable := new(CertTable)
+	if err := certTable.Unmarshal(certs); err != nil {
+		return nil, err
+	}
+
+	var manifest []uint8
+	servicesManifest := new(ServicesManifest)
+	if len(certs) > int(certTable.GetSizeInBytes()) {
+		certs = certs[:certTable.GetSizeInBytes()]
+		manifest = data[ReportSize+len(certs):]
+		if err := servicesManifest.Unmarshal(manifest); err != nil {
+			return nil, err
+		}
+	}
+
+	return &pb.Attestation{Report: mreport, CertificateChain: certTable.Proto(), ServicesManifest: servicesManifest.Proto()}, nil
+}
+
 func checkReportSizes(r *pb.Report) error {
 	if len(r.FamilyId) != FamilyIDSize {
 		return fmt.Errorf("report family_id length is %d, expect %d", len(r.FamilyId), FamilyIDSize)
@@ -919,7 +953,7 @@ func CertsFromProto(chain *pb.CertificateChain) *CertTable {
 	return c
 }
 
-// Marshal returns the CertTable in its GUID table ABI format.
+// Marshal returns the CertTable in its GUID Table ABI format.
 func (c *CertTable) Marshal() []byte {
 	if len(c.Entries) == 0 {
 		return nil
@@ -941,6 +975,16 @@ func (c *CertTable) Marshal() []byte {
 		cursor += size
 	}
 	return output
+}
+
+// GetSizeInBytes returns the number of bytes the CertTable will take up in its ABI format.
+func (c *CertTable) GetSizeInBytes() uint32 {
+	headerSize := uint32((len(c.Entries) + 1) * CertTableEntrySize)
+	var dataSize uint32
+	for _, entry := range c.Entries {
+		dataSize += uint32(len(entry.RawCert))
+	}
+	return headerSize + dataSize
 }
 
 // Proto returns the certificate chain represented in an extended guest request's

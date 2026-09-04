@@ -47,6 +47,18 @@ func parseAttestationBytes(b []byte) (*spb.Attestation, error) {
 	if err := certs.Unmarshal(certBytes); err != nil {
 		return nil, fmt.Errorf("could not parse certificate table: %v", err)
 	}
+
+	// if there are still bytes left, try parsing as services manifest returned in SVSM attestation
+	certTableSize := certs.GetSizeInBytes()
+	if len(b) > abi.ReportSize+int(certTableSize) {
+		manifestBytes := b[abi.ReportSize+int(certTableSize):]
+		manifest := new(abi.ServicesManifest)
+		if err := manifest.Unmarshal(manifestBytes); err != nil {
+			return nil, fmt.Errorf("could not parse services manifest: %v", err)
+		}
+		return &spb.Attestation{Report: report, CertificateChain: certs.Proto(), ServicesManifest: manifest.Proto()}, nil
+	}
+
 	return &spb.Attestation{Report: report, CertificateChain: certs.Proto()}, nil
 }
 
@@ -118,7 +130,25 @@ func asBin(report *spb.Attestation) ([]byte, error) {
 		return nil, err
 	}
 	certs := abi.CertsFromProto(report.CertificateChain).Marshal()
-	return append(r, certs...), nil
+
+	var manifestBytes []byte
+	if report.ServicesManifest != nil {
+		manifest, err := abi.ServicesManifestFromProto(report.ServicesManifest)
+		if err != nil {
+			return nil, err
+		}
+		manifestBytes, err = manifest.Marshal()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	result := make([]byte, 0, len(r)+len(certs)+len(manifestBytes))
+	result = append(result, r...)
+	result = append(result, certs...)
+	result = append(result, manifestBytes...)
+
+	return result, nil
 }
 
 func tcbBreakdown(tcb uint64) string {

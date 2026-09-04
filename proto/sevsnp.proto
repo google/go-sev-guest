@@ -101,10 +101,21 @@ message SevProduct {
   google.protobuf.UInt32Value machine_stepping = 3;
 }
 
+message ServicesManifestEntry {
+  string guid = 1;
+  bytes data = 2;
+}
+
+message ServicesManifest {
+  repeated ServicesManifestEntry services = 1;
+}
+
 message Attestation {
   Report report = 1;
 
   CertificateChain certificate_chain = 2;
 
   SevProduct product = 3;
+
+  ServicesManifest services_manifest = 4;
 }
