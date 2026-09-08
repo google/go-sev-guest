@@ -22,6 +22,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -30,7 +31,6 @@ import (
 
 	"github.com/google/go-sev-guest/abi"
 	"github.com/google/go-sev-guest/kds"
-	"github.com/google/logger"
 	"go.uber.org/multierr"
 )
 
@@ -282,7 +282,7 @@ func (r *ProductCerts) Decode(ask []byte, ark []byte) error {
 
 	arkCert, err := ParseCert(ark)
 	if err != nil {
-		logger.Errorf("could not parse ARK certificate: %v", err)
+		slog.Error("could not parse ARK certificate", "error", err)
 	}
 	r.Ark = arkCert
 	return nil

@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 
@@ -30,7 +31,6 @@ import (
 	"github.com/google/go-sev-guest/kds"
 	cpb "github.com/google/go-sev-guest/proto/check"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
-	"github.com/google/logger"
 	"go.uber.org/multierr"
 )
 
@@ -697,7 +697,7 @@ func certTableOptions(attestation *spb.Attestation, options map[string]*CertEntr
 			if opt.Kind == CertEntryRequire {
 				return err
 			}
-			logger.Warningf("Missing or invalid cert entry for %s", key)
+			slog.Warn("Missing or invalid cert entry", "key", key)
 		}
 	}
 	return nil
