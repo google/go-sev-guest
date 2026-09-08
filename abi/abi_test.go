@@ -426,6 +426,13 @@ func TestSevProduct(t *testing.T) {
 			},
 		},
 		{
+			eax: 0x00aa0f02,
+			want: &spb.SevProduct{
+				Name:            spb.SevProduct_SEV_PRODUCT_GENOA,
+				MachineStepping: &wrapperspb.UInt32Value{Value: 2},
+			},
+		},
+		{
 			eax: 0x0b010f0,
 			want: &spb.SevProduct{
 				Name:            spb.SevProduct_SEV_PRODUCT_UNKNOWN,
