@@ -398,6 +398,8 @@ func TestCRLRootValidity(t *testing.T) {
 	afterCreation := now.Add(1 * time.Minute)
 	template := &x509.RevocationList{
 		SignatureAlgorithm: x509.SHA384WithRSAPSS,
+		ThisUpdate:         now,
+		NextUpdate:         now.Add(24 * time.Hour),
 		RevokedCertificates: []pkix.RevokedCertificate{
 			// The default fake VCEK serial number is 0.
 			{SerialNumber: big.NewInt(0), RevocationTime: afterCreation},
@@ -430,7 +432,7 @@ func TestCRLRootValidity(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			wantErr := "CRL is not signed by ARK"
-			if err := vcekNotRevoked(root, signer2.Vcek, &Options{Getter: g2}); !test.Match(err, wantErr) {
+			if err := vcekNotRevoked(root, signer2.Vcek, &Options{Getter: g2, Now: afterCreation}); !test.Match(err, wantErr) {
 				t.Errorf("Bad Root: VcekNotRevoked(%v) did not error as expected. Got %v, want %v", signer.Vcek, err, wantErr)
 			}
 
@@ -441,10 +443,57 @@ func TestCRLRootValidity(t *testing.T) {
 				Ask: signer2.Ask,
 			}
 			wantErr2 := "ASK was revoked at 2022-06-14 12:01:00 +0000 UTC"
-			if err := vcekNotRevoked(root2, signer2.Vcek, &Options{Getter: g2}); !test.Match(err, wantErr2) {
+			if err := vcekNotRevoked(root2, signer2.Vcek, &Options{Getter: g2, Now: afterCreation}); !test.Match(err, wantErr2) {
 				t.Errorf("Bad ASK: VcekNotRevoked(%v) did not error as expected. Got %v, want %v", signer.Vcek, err, wantErr2)
 			}
 
+		})
+	}
+}
+
+func TestExpiredCRLRejected(t *testing.T) {
+	signMu.Do(initSigner)
+	trust.ClearProductCertCache()
+	now := time.Date(2022, time.June, 14, 12, 0, 0, 0, time.UTC)
+
+	root := trust.AMDRootCertsProduct(test.GetProductLine())
+	root.ProductCerts = &trust.ProductCerts{
+		Ark: signer.Ark,
+		Ask: signer.Ask,
+	}
+	crlURL := fmt.Sprintf("https://kdsintf.amd.com/vcek/v1/%s/crl", test.GetProductLine())
+
+	for name, tc := range map[string]struct {
+		thisUpdate time.Time
+		nextUpdate time.Time
+		wantErr    string
+	}{
+		"expired": {
+			thisUpdate: now.Add(-48 * time.Hour),
+			nextUpdate: now.Add(-24 * time.Hour),
+			wantErr:    "CRL is expired",
+		},
+		"not yet valid": {
+			thisUpdate: now.Add(24 * time.Hour),
+			nextUpdate: now.Add(48 * time.Hour),
+			wantErr:    "CRL is not yet valid",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			template := &x509.RevocationList{
+				SignatureAlgorithm: x509.SHA384WithRSAPSS,
+				ThisUpdate:         tc.thisUpdate,
+				NextUpdate:         tc.nextUpdate,
+				Number:             big.NewInt(1),
+			}
+			crl, err := x509.CreateRevocationList(insecureRandomness, template, signer.Ark, signer.Keys.Ark)
+			if err != nil {
+				t.Fatal(err)
+			}
+			g := test.SimpleGetter(map[string][]byte{crlURL: crl})
+			if err := VcekNotRevoked(root, signer.Vcek, &Options{Getter: g, Now: now}); !test.Match(err, tc.wantErr) {
+				t.Errorf("VcekNotRevoked(stale CRL) = %v, want error containing %q", err, tc.wantErr)
+			}
 		})
 	}
 }

@@ -272,8 +272,12 @@ func GetCrlAndCheckRootContext(ctx context.Context, r *trust.AMDRootCerts, opts 
 	if getter == nil {
 		getter = trust.DefaultHTTPSGetter()
 	}
-	if r.CRL != nil && opts.Now.Before(r.CRL.NextUpdate) {
-		if err := verifyCRL(r); err != nil {
+	now := opts.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if r.CRL != nil && now.Before(r.CRL.NextUpdate) {
+		if err := verifyCRL(r, now); err != nil {
 			return nil, err
 		}
 		return r.CRL, nil
@@ -291,7 +295,7 @@ func GetCrlAndCheckRootContext(ctx context.Context, r *trust.AMDRootCerts, opts 
 			continue
 		}
 		r.CRL = crl
-		if err := verifyCRL(r); err != nil {
+		if err := verifyCRL(r, now); err != nil {
 			return nil, err
 		}
 		return r.CRL, nil
@@ -299,9 +303,10 @@ func GetCrlAndCheckRootContext(ctx context.Context, r *trust.AMDRootCerts, opts 
 	return nil, CRLUnavailableErr{multierr.Append(errs, errors.New("could not fetch product CRL"))}
 }
 
-// verifyCRL checks that the VCEK CRL is signed by the ARK. Must be called after r.CRL is set and while
+// verifyCRL checks that the VCEK CRL is signed by the ARK and that it is currently within its
+// validity window (thisUpdate <= now < nextUpdate). Must be called after r.CRL is set and while
 // r.Mu is held.
-func verifyCRL(r *trust.AMDRootCerts) error {
+func verifyCRL(r *trust.AMDRootCerts, now time.Time) error {
 	if r.CRL == nil {
 		return errors.New("internal error: CRL not set")
 	}
@@ -313,6 +318,12 @@ func verifyCRL(r *trust.AMDRootCerts) error {
 	}
 	if err := r.CRL.CheckSignatureFrom(r.ProductCerts.Ark); err != nil {
 		return fmt.Errorf("CRL is not signed by ARK: %v", err)
+	}
+	if now.Before(r.CRL.ThisUpdate) {
+		return fmt.Errorf("CRL is not yet valid: thisUpdate is %v, now is %v", r.CRL.ThisUpdate, now)
+	}
+	if !now.Before(r.CRL.NextUpdate) {
+		return fmt.Errorf("CRL is expired: nextUpdate is %v, now is %v", r.CRL.NextUpdate, now)
 	}
 	for _, bad := range r.CRL.RevokedCertificates {
 		if r.ProductCerts.Ask.SerialNumber.Cmp(bad.SerialNumber) == 0 {
