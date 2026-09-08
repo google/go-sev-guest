@@ -91,6 +91,10 @@ func TestEmbeddedCertsAppendixB3Expectations(t *testing.T) {
 
 func TestFakeCertsKDSExpectations(t *testing.T) {
 	for _, productLine := range kds.ProductLineCpuid {
+		if productLine == "Siena" {
+			productLine = "Genoa"
+		}
+
 		trust.ClearProductCertCache()
 		signer, err := test.DefaultTestOnlyCertChain(productLine+"-B0", time.Now())
 		if err != nil {

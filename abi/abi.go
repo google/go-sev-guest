@@ -133,6 +133,7 @@ const (
 	milanModel     = 0 | 1
 	genoaModel     = (1 << 4) | 1
 	turinModel     = 2
+	sienaModel     = 0xA0
 
 	// ReportVersion2 is set by the SNP API specification
 	// https://web.archive.org/web/20231222054111if_/http://www.amd.com/content/dam/amd/en/documents/epyc-technical-docs/specifications/56860.pdf
@@ -1034,6 +1035,8 @@ func SevProductFromCpuid1Eax(eax uint32) *pb.SevProduct {
 			productName = pb.SevProduct_SEV_PRODUCT_MILAN
 		case genoaModel:
 			productName = pb.SevProduct_SEV_PRODUCT_GENOA
+		case sienaModel:
+			productName = pb.SevProduct_SEV_PRODUCT_SIENA
 		default:
 			unknown()
 		}
