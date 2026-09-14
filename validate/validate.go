@@ -69,7 +69,15 @@ type Options struct {
 	// PermitProvisionalFirmware if true, allows the committed TCB, build, and API values to be less
 	// than or equal to the current values. If false, committed and current values must be equal.
 	PermitProvisionalFirmware bool
-	// PlatformInfo is the maximum of acceptable PLATFORM_INFO data. Not checked if nil.
+	// PlatformInfo constrains the attestation report's PLATFORM_INFO bits. Not checked if nil.
+	// The direction differs per field, matching validatePlatformInfo:
+	//   SMTEnabled, TSMEEnabled and TIOEnabled are maximums. A true field permits the
+	//   corresponding report bit to be set; validation fails when the report sets a bit
+	//   that is false here.
+	//   ECCEnabled, RAPLDisabled, CiphertextHidingDRAMEnabled and AliasCheckComplete are
+	//   minimums. A true field requires the corresponding report bit to be set; validation
+	//   fails when the report leaves it unset. Setting one of these false imposes no
+	//   constraint, so there is currently no way to forbid them.
 	PlatformInfo *abi.SnpPlatformInfo
 	// RequireAuthorKey if true, will not validate a report without AUTHOR_KEY_EN equal to 1.
 	// Implies RequireIDBlock is true.
