@@ -281,10 +281,13 @@ func DecomposeTCBVersionV0(raw uint64) TCBVersionV0 {
 }
 
 // ParseTCBVersionV0 parses KDS REST query parameters into a TCBVersionV0.
+// Valid parameter value ranges are specified in AMD Publication #57230 Table 12
+// (Milan and Genoa REST API Parameters): ucodeSPL is in 0..255; all other SPL fields are in 0..127.
 func ParseTCBVersionV0(values url.Values) (TCBVersionV0, error) {
 	var blSpl, teeSpl, snpSpl, ucodeSpl uint8
 	for key, valuelist := range values {
 		var setter func(number uint8)
+		// AMD Publication #57230 Table 12: blSPL, teeSPL, snpSPL are in the range 0..127.
 		maxVal := 127
 		switch key {
 		case "blSPL":
@@ -294,6 +297,7 @@ func ParseTCBVersionV0(values url.Values) (TCBVersionV0, error) {
 		case "snpSPL":
 			setter = func(number uint8) { snpSpl = number }
 		case "ucodeSPL":
+			// AMD Publication #57230 Table 12: ucodeSPL is in the range 0..255.
 			maxVal = 255
 			setter = func(number uint8) { ucodeSpl = number }
 		default:
@@ -313,6 +317,174 @@ func ParseTCBVersionV0(values url.Values) (TCBVersionV0, error) {
 		SnpSpl:   snpSpl,
 		UcodeSpl: ucodeSpl,
 	}, nil
+}
+
+// TCBVersionV1 represents the platform security patch levels for StructVersion 1 (Turin).
+type TCBVersionV1 struct {
+	// FmcSpl is the FMC security patch level.
+	FmcSpl uint8
+	// BlSpl is the bootloader security patch level.
+	BlSpl uint8
+	// TeeSpl is the TEE security patch level.
+	TeeSpl uint8
+	// SnpSpl is the SNP security patch level.
+	SnpSpl uint8
+	// Spl5 is reserved.
+	Spl5 uint8
+	// Spl6 is reserved.
+	Spl6 uint8
+	// Spl7 is reserved.
+	Spl7 uint8
+	// UcodeSpl is the microcode security patch level.
+	UcodeSpl uint8
+}
+
+// StructVersion returns 1 for Turin.
+func (t TCBVersionV1) StructVersion() uint8 { return 1 }
+
+// Uint64 returns the 64-bit wire representation of TCBVersionV1.
+func (t TCBVersionV1) Uint64() uint64 {
+	return (uint64(t.UcodeSpl) << 56) |
+		(uint64(t.Spl7) << 48) |
+		(uint64(t.Spl6) << 40) |
+		(uint64(t.Spl5) << 32) |
+		(uint64(t.SnpSpl) << 24) |
+		(uint64(t.TeeSpl) << 16) |
+		(uint64(t.BlSpl) << 8) |
+		(uint64(t.FmcSpl) << 0)
+}
+
+// Values encodes TCBVersionV1 into KDS REST URL query parameters.
+func (t TCBVersionV1) Values() url.Values {
+	values := make(url.Values)
+	values.Set("fmcSPL", fmt.Sprintf("%d", t.FmcSpl))
+	values.Set("blSPL", fmt.Sprintf("%d", t.BlSpl))
+	values.Set("teeSPL", fmt.Sprintf("%d", t.TeeSpl))
+	values.Set("snpSPL", fmt.Sprintf("%d", t.SnpSpl))
+	values.Set("ucodeSPL", fmt.Sprintf("%d", t.UcodeSpl))
+	return values
+}
+
+// LE returns true iff all TCB components of t are <= the corresponding components of other.
+func (t TCBVersionV1) LE(other TCBVersion) bool {
+	o, ok := other.(TCBVersionV1)
+	if !ok {
+		return false
+	}
+	return t.UcodeSpl <= o.UcodeSpl &&
+		t.Spl7 <= o.Spl7 &&
+		t.Spl6 <= o.Spl6 &&
+		t.Spl5 <= o.Spl5 &&
+		t.SnpSpl <= o.SnpSpl &&
+		t.TeeSpl <= o.TeeSpl &&
+		t.BlSpl <= o.BlSpl &&
+		t.FmcSpl <= o.FmcSpl
+}
+
+func (t TCBVersionV1) String() string {
+	return fmt.Sprintf("{FmcSpl:%d BlSpl:%d TeeSpl:%d SnpSpl:%d Spl5:%d Spl6:%d Spl7:%d UcodeSpl:%d}",
+		t.FmcSpl, t.BlSpl, t.TeeSpl, t.SnpSpl, t.Spl5, t.Spl6, t.Spl7, t.UcodeSpl)
+}
+
+// DecomposeTCBVersionV1 decomposes a 64-bit raw TCB integer into a TCBVersionV1.
+func DecomposeTCBVersionV1(raw uint64) TCBVersionV1 {
+	return TCBVersionV1{
+		FmcSpl:   uint8(raw & 0xff),
+		BlSpl:    uint8((raw >> 8) & 0xff),
+		TeeSpl:   uint8((raw >> 16) & 0xff),
+		SnpSpl:   uint8((raw >> 24) & 0xff),
+		Spl5:     uint8((raw >> 32) & 0xff),
+		Spl6:     uint8((raw >> 40) & 0xff),
+		Spl7:     uint8((raw >> 48) & 0xff),
+		UcodeSpl: uint8((raw >> 56) & 0xff),
+	}
+}
+
+// ParseTCBVersionV1 parses KDS REST query parameters into a TCBVersionV1.
+// Valid parameter value ranges are specified in AMD Publication #57230 Table 13
+// (Turin REST API Parameters): ucodeSPL is in 0..255; all other SPL fields are in 0..127.
+func ParseTCBVersionV1(values url.Values) (TCBVersionV1, error) {
+	var fmcSpl, blSpl, teeSpl, snpSpl, ucodeSpl uint8
+	for key, valuelist := range values {
+		var setter func(number uint8)
+		// AMD Publication #57230 Table 13: fmcSPL, blSPL, teeSPL, snpSPL are in the range 0..127.
+		maxVal := 127
+		switch key {
+		case "fmcSPL":
+			setter = func(number uint8) { fmcSpl = number }
+		case "blSPL":
+			setter = func(number uint8) { blSpl = number }
+		case "teeSPL":
+			setter = func(number uint8) { teeSpl = number }
+		case "snpSPL":
+			setter = func(number uint8) { snpSpl = number }
+		case "ucodeSPL":
+			// AMD Publication #57230 Table 13: ucodeSPL is in the range 0..255.
+			maxVal = 255
+			setter = func(number uint8) { ucodeSpl = number }
+		default:
+			return TCBVersionV1{}, fmt.Errorf("unexpected KDS TCB version URL argument %q", key)
+		}
+		for _, val := range valuelist {
+			number, err := strconv.Atoi(val)
+			if err != nil || number < 0 || number > maxVal {
+				return TCBVersionV1{}, fmt.Errorf("invalid KDS TCB version URL argument value %q, want a value 0-%d", val, maxVal)
+			}
+			setter(uint8(number))
+		}
+	}
+	return TCBVersionV1{
+		FmcSpl:   fmcSpl,
+		BlSpl:    blSpl,
+		TeeSpl:   teeSpl,
+		SnpSpl:   snpSpl,
+		UcodeSpl: ucodeSpl,
+	}, nil
+}
+
+// DecomposeTCBVersion decomposes a raw 64-bit TCB integer into a TCBVersion for the given structVersion.
+func DecomposeTCBVersion(structVersion uint8, raw uint64) (TCBVersion, error) {
+	switch structVersion {
+	case 0:
+		return DecomposeTCBVersionV0(raw), nil
+	case 1:
+		return DecomposeTCBVersionV1(raw), nil
+	default:
+		return nil, fmt.Errorf("unsupported TCB structVersion: %d", structVersion)
+	}
+}
+
+// ParseTCBVersion parses query parameters into a TCBVersion based on structVersion.
+func ParseTCBVersion(structVersion uint8, values url.Values) (TCBVersion, error) {
+	switch structVersion {
+	case 0:
+		return ParseTCBVersionV0(values)
+	case 1:
+		return ParseTCBVersionV1(values)
+	default:
+		return nil, fmt.Errorf("unsupported TCB structVersion: %d", structVersion)
+	}
+}
+
+// StructVersionForProductLine returns the TCB StructVersion (0 or 1) for a given productLine.
+func StructVersionForProductLine(productLine string) (uint8, error) {
+	switch productLine {
+	case "Milan", "Genoa":
+		return 0, nil
+	case "Turin":
+		return 1, nil
+	default:
+		return 0, fmt.Errorf("unknown product line: %q", productLine)
+	}
+}
+
+// DecomposeProductTCB decomposes a raw 64-bit TCB integer into a TCBVersion for the given productLine.
+func DecomposeProductTCB(productLine string, raw uint64) (TCBVersion, error) {
+	v, err := StructVersionForProductLine(productLine)
+	if err != nil {
+		return nil, err
+	}
+	return DecomposeTCBVersion(v, raw)
 }
 
 func asn1U8(ext *pkix.Extension, field string, out *uint8) error {
