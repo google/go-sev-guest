@@ -95,7 +95,7 @@ var (
 	measurementS = flag.String("measurement", "", "The expected MEASUREMENT field as a hex string. Must encode 48 bytes. Unchecked if unset.")
 	measurement  = cmdline.Bytes("-measurement", abi.MeasurementSize, measurementS)
 	chipidS      = flag.String("chip_id", "", "The expected CHIP_ID field as a hex string. Must encode 64 bytes. Unchecked if unset.")
-	chipid       = cmdline.Bytes("-chip_id", abi.ChipIDSize, chipidS)
+	chipid       = cmdline.Bytes("-chip_id", abi.ChipIDReportSize, chipidS)
 
 	// Optional Uint64. We don't want 0 to override the policy message, so instead of parsing
 	// as Uint64 up front, we keep the flag a string and parse later if given.

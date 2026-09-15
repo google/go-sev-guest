@@ -85,7 +85,7 @@ func initDevice() {
 func cleanReport(report *spb.Report) {
 	report.ReportId = make([]byte, abi.ReportIDSize)
 	report.ReportIdMa = make([]byte, abi.ReportIDMASize)
-	report.ChipId = make([]byte, abi.ChipIDSize)
+	report.ChipId = make([]byte, abi.ChipIDReportSize)
 	report.Measurement = make([]byte, abi.MeasurementSize)
 	report.PlatformInfo = 0
 	report.CommittedTcb = 0

@@ -61,8 +61,16 @@ const (
 	ReportIDSize = 32
 	// ReportIDMASize is the field size of REPORT_ID_MA in an SEV-SNP attestation report.
 	ReportIDMASize = 32
-	// ChipIDSize is the field size of CHIP_ID in an SEV-SNP attestation report.
-	ChipIDSize = 64
+	// ChipIDReportSize is the field size of CHIP_ID in an SEV-SNP attestation report
+	// (AMD Publication #56860 Table 23).
+	ChipIDReportSize = 64
+
+	// ChipIDStruct0Size is the hardware silicon ID size for StructVersion 0 (Milan, Genoa)
+	// (AMD Publication #57230 Table 10).
+	ChipIDStruct0Size = 64
+	// ChipIDStruct1Size is the hardware silicon ID size for StructVersion 1 (Turin)
+	// (AMD Publication #57230 Table 11).
+	ChipIDStruct1Size = 8
 	// SignatureSize is the field size of SIGNATURE in an SEV-SNP attestation report.
 	SignatureSize = 512
 
@@ -639,8 +647,8 @@ func checkReportSizes(r *pb.Report) error {
 	if len(r.ReportIdMa) != ReportIDMASize {
 		return fmt.Errorf("report_id_ma length is %d, expect %d", len(r.ReportIdMa), ReportIDMASize)
 	}
-	if len(r.ChipId) != ChipIDSize {
-		return fmt.Errorf("chip_id length is %d, expect %d", len(r.ChipId), ChipIDSize)
+	if len(r.ChipId) != ChipIDReportSize {
+		return fmt.Errorf("chip_id length is %d, expect %d", len(r.ChipId), ChipIDReportSize)
 	}
 	if len(r.Signature) != SignatureSize {
 		return fmt.Errorf("signature length is %d, expect %d", len(r.Signature), SignatureSize)
@@ -1038,8 +1046,10 @@ func SevProductFromCpuid1Eax(eax uint32) *pb.SevProduct {
 			unknown()
 		}
 	case zen5Family:
-		switch model {
-		case turinModel:
+		// Table 4 of https://www.amd.com/system/files/TechDocs/57230.pdf defines Turin as
+		// Family 1Ah with Extended Model 0h or 1h. Shifting model >> 4 yields Extended Model.
+		switch model >> 4 {
+		case 0, 1:
 			productName = pb.SevProduct_SEV_PRODUCT_TURIN
 		default:
 			unknown()

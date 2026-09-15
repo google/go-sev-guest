@@ -33,6 +33,7 @@ import (
 	"github.com/google/go-sev-guest/verify"
 	"google.golang.org/protobuf/encoding/prototext"
 
+	cpb "github.com/google/go-sev-guest/proto/check"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
 )
 
@@ -462,7 +463,7 @@ func TestValidateSnpAttestation(t *testing.T) {
 			opts.Measurement = make([]byte, abi.MeasurementSize)
 		case 7:
 			name = "CHIP_ID"
-			opts.ChipID = make([]byte, abi.ChipIDSize)
+			opts.ChipID = make([]byte, abi.ChipIDReportSize)
 		}
 		tests = append(tests, testCase{
 			name:        fmt.Sprintf("Test incorrect %s", name),
@@ -614,5 +615,261 @@ func TestCheckMitigationVectors(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestValidateChipID(t *testing.T) {
+	hwid8 := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	reportChipID := make([]byte, abi.ChipIDReportSize)
+	copy(reportChipID, hwid8)
+
+	// Turin: 8-byte match
+	if err := validateChipID(spb.SevProduct_SEV_PRODUCT_TURIN, reportChipID, hwid8); err != nil {
+		t.Errorf("validateChipID with 8-byte HWID on Turin failed: %v", err)
+	}
+
+	// Turin: 64-byte match
+	if err := validateChipID(spb.SevProduct_SEV_PRODUCT_TURIN, reportChipID, reportChipID); err != nil {
+		t.Errorf("validateChipID with 64-byte HWID on Turin failed: %v", err)
+	}
+
+	// Turin: 8-byte mismatch
+	badHwid8 := []byte{1, 2, 3, 4, 5, 6, 7, 9}
+	if err := validateChipID(spb.SevProduct_SEV_PRODUCT_TURIN, reportChipID, badHwid8); err == nil {
+		t.Errorf("validateChipID with mismatched 8-byte HWID on Turin expected error, got nil")
+	}
+
+	// Turin: invalid option length (16 bytes)
+	if err := validateChipID(spb.SevProduct_SEV_PRODUCT_TURIN, reportChipID, make([]byte, 16)); err == nil {
+		t.Errorf("validateChipID with 16-byte HWID on Turin expected error, got nil")
+	}
+
+	// Turin: invalid option length (12 bytes)
+	if err := validateChipID(spb.SevProduct_SEV_PRODUCT_TURIN, reportChipID, make([]byte, 12)); err == nil {
+		t.Errorf("validateChipID with 12-byte HWID on Turin expected error, got nil")
+	}
+
+	// Milan: 8-byte option rejected
+	if err := validateChipID(spb.SevProduct_SEV_PRODUCT_MILAN, reportChipID, hwid8); err == nil {
+		t.Errorf("validateChipID with 8-byte HWID on Milan expected error, got nil")
+	}
+
+	// Milan: 64-byte match
+	if err := validateChipID(spb.SevProduct_SEV_PRODUCT_MILAN, reportChipID, reportChipID); err != nil {
+		t.Errorf("validateChipID with 64-byte HWID on Milan failed: %v", err)
+	}
+}
+
+func TestCheckOptionsLengthsChipID(t *testing.T) {
+	// Nil ChipID
+	if err := checkOptionsLengths(&Options{}); err != nil {
+		t.Errorf("checkOptionsLengths with nil ChipID failed: %v", err)
+	}
+	// Turin-size ChipID
+	if err := checkOptionsLengths(&Options{ChipID: make([]byte, abi.ChipIDStruct1Size)}); err != nil {
+		t.Errorf("checkOptionsLengths with %d-byte ChipID failed: %v", abi.ChipIDStruct1Size, err)
+	}
+	// 64-byte ChipID
+	if err := checkOptionsLengths(&Options{ChipID: make([]byte, abi.ChipIDReportSize)}); err != nil {
+		t.Errorf("checkOptionsLengths with %d-byte ChipID failed: %v", abi.ChipIDReportSize, err)
+	}
+	// 16-byte ChipID is invalid
+	if err := checkOptionsLengths(&Options{ChipID: make([]byte, 16)}); err == nil {
+		t.Errorf("checkOptionsLengths with 16-byte ChipID expected error, got nil")
+	}
+	// 12-byte ChipID is invalid
+	if err := checkOptionsLengths(&Options{ChipID: make([]byte, 12)}); err == nil {
+		t.Errorf("checkOptionsLengths with 12-byte ChipID expected error, got nil")
+	}
+}
+
+func TestTcbGtErrorStructVersionMismatch(t *testing.T) {
+	v0 := kds.TCBVersionV0{}
+	v1 := kds.TCBVersionV1{}
+	err := tcbGtError(
+		partDescription{tcb: v0, desc: "policy minimum TCB"},
+		partDescription{tcb: v1, desc: "report's REPORTED_TCB"},
+	)
+	if err == nil {
+		t.Fatalf("expected error on struct version mismatch, got nil")
+	}
+	wantSubstring := "StructVersion 0 does not match"
+	if !strings.Contains(err.Error(), wantSubstring) {
+		t.Errorf("tcbGtError returned %q, want substring %q", err.Error(), wantSubstring)
+	}
+}
+
+func TestTcbNeErrorStructVersionMismatch(t *testing.T) {
+	v0 := kds.TCBVersionV0{}
+	v1 := kds.TCBVersionV1{}
+	err := tcbNeError(
+		partDescription{tcb: v0, desc: "TCB of the V[CL]EK certificate"},
+		partDescription{tcb: v1, desc: "report's REPORTED_TCB"},
+	)
+	if err == nil {
+		t.Fatalf("expected error on struct version mismatch, got nil")
+	}
+	wantSubstring := "StructVersion 0 does not match"
+	if !strings.Contains(err.Error(), wantSubstring) {
+		t.Errorf("tcbNeError returned %q, want substring %q", err.Error(), wantSubstring)
+	}
+}
+
+func TestSnpAttestationCertificateStructVersionMismatch(t *testing.T) {
+	signMilan, err := test.DefaultTestOnlyCertChain("Milan-B0", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	signTurin, err := test.DefaultTestOnlyCertChain("Turin-B0", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	turinReport := &spb.Report{
+		SignerInfo:   abi.ComposeSignerInfo(abi.SignerInfo{SigningKey: abi.VcekReportSigner}),
+		Cpuid1EaxFms: abi.MaskedCpuid1EaxFromSevProduct(&spb.SevProduct{Name: spb.SevProduct_SEV_PRODUCT_TURIN}),
+	}
+	milanCertOnTurinReport := &spb.Attestation{
+		Report: turinReport,
+		CertificateChain: &spb.CertificateChain{
+			VcekCert: signMilan.Vcek.Raw,
+		},
+	}
+	err = SnpAttestation(milanCertOnTurinReport, &Options{})
+	if err == nil || !strings.Contains(err.Error(), "certificate structVersion 0 does not match report expected structVersion 1") {
+		t.Errorf("expected structVersion mismatch error, got: %v", err)
+	}
+
+	milanReport := &spb.Report{
+		SignerInfo:   abi.ComposeSignerInfo(abi.SignerInfo{SigningKey: abi.VcekReportSigner}),
+		Cpuid1EaxFms: abi.MaskedCpuid1EaxFromSevProduct(&spb.SevProduct{Name: spb.SevProduct_SEV_PRODUCT_MILAN}),
+	}
+	turinCertOnMilanReport := &spb.Attestation{
+		Report: milanReport,
+		CertificateChain: &spb.CertificateChain{
+			VcekCert: signTurin.Vcek.Raw,
+		},
+	}
+	err = SnpAttestation(turinCertOnMilanReport, &Options{})
+	if err == nil || !strings.Contains(err.Error(), "certificate structVersion 1 does not match report expected structVersion 0") {
+		t.Errorf("expected structVersion mismatch error, got: %v", err)
+	}
+}
+
+func TestSnpAttestationTurinSuccess(t *testing.T) {
+	signTurin, err := test.DefaultTestOnlyCertChain("Turin-B0", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	exts, err := kds.VcekCertificateExtensions(signTurin.Vcek)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reportChipID := make([]byte, abi.ChipIDReportSize)
+	copy(reportChipID, exts.HWID)
+
+	turinReport := &spb.Report{
+		SignerInfo:   abi.ComposeSignerInfo(abi.SignerInfo{SigningKey: abi.VcekReportSigner}),
+		Cpuid1EaxFms: abi.MaskedCpuid1EaxFromSevProduct(&spb.SevProduct{Name: spb.SevProduct_SEV_PRODUCT_TURIN}),
+		Policy:       abi.SnpPolicyToBytes(abi.SnpPolicy{}),
+		ReportedTcb:  exts.TCBVersion.Uint64(),
+		CurrentTcb:   exts.TCBVersion.Uint64(),
+		CommittedTcb: exts.TCBVersion.Uint64(),
+		LaunchTcb:    exts.TCBVersion.Uint64(),
+		ChipId:       reportChipID,
+	}
+	attestation := &spb.Attestation{
+		Report: turinReport,
+		CertificateChain: &spb.CertificateChain{
+			VcekCert: signTurin.Vcek.Raw,
+		},
+	}
+
+	// Default options (no explicit constraints)
+	if err := SnpAttestation(attestation, &Options{}); err != nil {
+		t.Errorf("SnpAttestation with valid Turin report and cert failed: %v", err)
+	}
+
+	// Matching Turin ChipID option
+	if err := SnpAttestation(attestation, &Options{ChipID: exts.HWID}); err != nil {
+		t.Errorf("SnpAttestation with matching %d-byte ChipID failed: %v", abi.ChipIDStruct1Size, err)
+	}
+
+	// Mismatched Turin ChipID option
+	mismatchedTurin := make([]byte, abi.ChipIDStruct1Size)
+	copy(mismatchedTurin, exts.HWID)
+	mismatchedTurin[0] ^= 0xff
+	if err := SnpAttestation(attestation, &Options{ChipID: mismatchedTurin}); err == nil {
+		t.Errorf("SnpAttestation with mismatched %d-byte ChipID expected error, got nil", abi.ChipIDStruct1Size)
+	}
+
+	// Matching 64-byte ChipID option
+	if err := SnpAttestation(attestation, &Options{ChipID: reportChipID}); err != nil {
+		t.Errorf("SnpAttestation with matching 64-byte ChipID failed: %v", err)
+	}
+
+	// Mismatched 64-byte ChipID option
+	mismatched64 := make([]byte, abi.ChipIDReportSize)
+	copy(mismatched64, reportChipID)
+	mismatched64[0] ^= 0xff
+	if err := SnpAttestation(attestation, &Options{ChipID: mismatched64}); err == nil {
+		t.Errorf("SnpAttestation with mismatched 64-byte ChipID expected error, got nil")
+	}
+}
+
+func TestPolicyToOptions(t *testing.T) {
+	validPolicy := abi.SnpPolicyToBytes(abi.SnpPolicy{})
+
+	// Turin product with non-zero minimum_tcb decomposes to TCBVersionV1
+	turinPolicy := &cpb.Policy{
+		Policy:     validPolicy,
+		Product:    &spb.SevProduct{Name: spb.SevProduct_SEV_PRODUCT_TURIN},
+		MinimumTcb: 0x0102030405060708,
+	}
+	turinOpts, err := PolicyToOptions(turinPolicy)
+	if err != nil {
+		t.Fatalf("PolicyToOptions(turinPolicy) failed: %v", err)
+	}
+	if turinOpts.MinimumTCB == nil || turinOpts.MinimumTCB.StructVersion() != 1 {
+		t.Errorf("PolicyToOptions(turinPolicy).MinimumTCB StructVersion = %v, want 1",
+			turinOpts.MinimumTCB)
+	}
+
+	// Milan product with non-zero minimum_tcb decomposes to TCBVersionV0
+	milanPolicy := &cpb.Policy{
+		Policy:     validPolicy,
+		Product:    &spb.SevProduct{Name: spb.SevProduct_SEV_PRODUCT_MILAN},
+		MinimumTcb: 0x0102030405060708,
+	}
+	milanOpts, err := PolicyToOptions(milanPolicy)
+	if err != nil {
+		t.Fatalf("PolicyToOptions(milanPolicy) failed: %v", err)
+	}
+	if milanOpts.MinimumTCB == nil || milanOpts.MinimumTCB.StructVersion() != 0 {
+		t.Errorf("PolicyToOptions(milanPolicy).MinimumTCB StructVersion = %v, want 0",
+			milanOpts.MinimumTCB)
+	}
+
+	// Zero minimum_tcb leaves MinimumTCB as nil
+	zeroPolicy := &cpb.Policy{
+		Policy:     validPolicy,
+		Product:    &spb.SevProduct{Name: spb.SevProduct_SEV_PRODUCT_TURIN},
+		MinimumTcb: 0,
+	}
+	zeroOpts, err := PolicyToOptions(zeroPolicy)
+	if err != nil {
+		t.Fatalf("PolicyToOptions(zeroPolicy) failed: %v", err)
+	}
+	if zeroOpts.MinimumTCB != nil {
+		t.Errorf("PolicyToOptions(zeroPolicy).MinimumTCB = %v, want nil", zeroOpts.MinimumTCB)
+	}
+}
+
+func TestValidateTcbUnsupportedStructVersion(t *testing.T) {
+	report := &spb.Report{}
+	err := validateTcb(report, kds.TCBVersionV0{}, &Options{}, 2)
+	if err == nil || !strings.Contains(err.Error(), "unsupported TCB structVersion: 2") {
+		t.Errorf("validateTcb with structVersion 2 error = %v, want unsupported TCB structVersion: 2", err)
 	}
 }
