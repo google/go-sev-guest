@@ -1,11 +1,11 @@
-module github.com/google/go-sev-guest
+module github.com/confidentsecurity/go-sev-guest
 
 go 1.19
 
 require (
-	github.com/golang/protobuf v1.5.0
-	github.com/google/go-cmp v0.5.7
-	github.com/google/go-configfs-tsm v0.2.2
+	github.com/google/go-cmp v0.5.5
+	github.com/google/go-configfs-tsm v0.3.3
+	github.com/google/go-sev-guest v0.0.0-00010101000000-000000000000
 	github.com/google/logger v1.1.1
 	github.com/google/uuid v1.6.0
 	go.uber.org/multierr v1.11.0
@@ -15,3 +15,5 @@ require (
 )
 
 require golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543 // indirect
+
+replace github.com/google/go-sev-guest => ./
