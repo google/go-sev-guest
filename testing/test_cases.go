@@ -18,13 +18,13 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/go-sev-guest/abi"
 	labi "github.com/google/go-sev-guest/client/linuxabi"
 	"github.com/google/go-sev-guest/kds"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
-	"github.com/google/logger"
 	"google.golang.org/protobuf/encoding/prototext"
 )
 
@@ -316,7 +316,7 @@ func TcDevice(tcs []TestCase, opts *DeviceOptions) (*Device, error) {
 	}
 	product := opts.Product
 	if product == nil {
-		logger.Warning("test missing sevproduct")
+		slog.Warn("test missing sevproduct")
 		product = abi.DefaultSevProduct()
 	}
 	return &Device{
