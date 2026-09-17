@@ -439,6 +439,13 @@ func TestSevProduct(t *testing.T) {
 				MachineStepping: &wrapperspb.UInt32Value{Value: 1},
 			},
 		},
+		{
+			eax: 0x00aa0f02,
+			want: &spb.SevProduct{
+				Name:            spb.SevProduct_SEV_PRODUCT_SIENA,
+				MachineStepping: &wrapperspb.UInt32Value{Value: 2},
+			},
+		},
 	}
 	for _, tc := range tcs {
 		t.Run(fmt.Sprintf("EAX_0x%x", tc.eax), func(t *testing.T) {
@@ -492,6 +499,7 @@ func TestExtendedPlatformCertTable(t *testing.T) {
 		stepping uint32
 	}{
 		{name: "Genoa-B2", pname: spb.SevProduct_SEV_PRODUCT_GENOA, eax: 0x00a10f12, stepping: 2},
+		{name: "Siena-B2", pname: spb.SevProduct_SEV_PRODUCT_SIENA, eax: 0x00aa0f02, stepping: 2},
 		{name: "Milan-B1", pname: spb.SevProduct_SEV_PRODUCT_MILAN, eax: 0x00a00f11, stepping: 1},
 		{name: "Milan-B0", pname: spb.SevProduct_SEV_PRODUCT_MILAN, eax: 0x00a00f10, stepping: 0},
 	}

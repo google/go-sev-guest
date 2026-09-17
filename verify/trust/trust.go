@@ -110,10 +110,17 @@ type AMDRootCerts struct {
 
 // GetProductLine returns the product line the certificate chain is associated with.
 func (r *AMDRootCerts) GetProductLine() string {
-	if r.ProductLine != "" {
-		return r.ProductLine
+	product := r.ProductLine
+	if product == "" {
+		product = r.Product
 	}
-	return r.Product
+	// Versioned Chip Endorsement Key (VCEK) Certificate and KDS Interface Specification (57230), pag 8:
+	// The Siena product uses the same root keys as the Genoa design and therefore uses
+	// Genoa ARK and ASK certificates to issue VCEK certificates.
+	if product == "Siena" {
+		product = "Genoa"
+	}
+	return product
 }
 
 // AMDRootCertsProduct returns a new *AMDRootCerts for a given product line.
@@ -435,10 +442,16 @@ func init() {
 	if err := turinCerts.FromKDSCertBytes(AskArkTurinVcekBytes); err != nil {
 		panic(err)
 	}
+	sienaCerts := new(AMDRootCerts)
+	if err := sienaCerts.FromKDSCertBytes(AskArkGenoaVcekBytes); err != nil {
+		panic(err)
+	}
+	sienaCerts.ProductLine = "Siena"
 	DefaultRootCerts = map[string]*AMDRootCerts{
 		"Milan": milanCerts,
 		"Genoa": genoaCerts,
 		"Turin": turinCerts,
+		"Siena": sienaCerts,
 	}
 }
 

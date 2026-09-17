@@ -45,6 +45,7 @@ const (
 	SevProduct_SEV_PRODUCT_MILAN   SevProduct_SevProductName = 1
 	SevProduct_SEV_PRODUCT_GENOA   SevProduct_SevProductName = 2
 	SevProduct_SEV_PRODUCT_TURIN   SevProduct_SevProductName = 3
+	SevProduct_SEV_PRODUCT_SIENA   SevProduct_SevProductName = 4
 )
 
 // Enum value maps for SevProduct_SevProductName.
@@ -54,12 +55,14 @@ var (
 		1: "SEV_PRODUCT_MILAN",
 		2: "SEV_PRODUCT_GENOA",
 		3: "SEV_PRODUCT_TURIN",
+		4: "SEV_PRODUCT_SIENA",
 	}
 	SevProduct_SevProductName_value = map[string]int32{
 		"SEV_PRODUCT_UNKNOWN": 0,
 		"SEV_PRODUCT_MILAN":   1,
 		"SEV_PRODUCT_GENOA":   2,
 		"SEV_PRODUCT_TURIN":   3,
+		"SEV_PRODUCT_SIENA":   4,
 	}
 )
 

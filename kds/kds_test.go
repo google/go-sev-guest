@@ -115,6 +115,16 @@ func TestParseProductCertChainURL(t *testing.T) {
 			product: "Milan",
 			wantKey: VlekCertFunction,
 		},
+		{
+			key:     abi.VcekReportSigner,
+			product: "Siena",
+			wantKey: VcekCertFunction,
+		},
+		{
+			key:     abi.VlekReportSigner,
+			product: "Siena",
+			wantKey: VlekCertFunction,
+		},
 	}
 	for _, tc := range tests {
 		url := ProductCertChainURL(tc.key, tc.product)
@@ -122,7 +132,12 @@ func TestParseProductCertChainURL(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ParseProductCertChainURL(%q) = _, _, %v, want nil", tc.product, err)
 		}
-		if got != tc.product || key != tc.wantKey {
+		if got != tc.product {
+			if !(got == "Genoa" && tc.product == "Siena") {
+				t.Errorf("ProductCertChainURL(%q) = %q, %v, nil want %q, %v", url, got, key, tc.product, tc.wantKey)
+			}
+		}
+		if key != tc.wantKey {
 			t.Errorf("ProductCertChainURL(%q) = %q, %v, nil want %q, %v", url, got, key, tc.product, tc.wantKey)
 		}
 	}
@@ -221,9 +236,25 @@ func TestProductName(t *testing.T) {
 			want: "Milan-B0",
 		},
 		{
+			name: "Siena-B2",
+			input: &pb.SevProduct{
+				Name:            pb.SevProduct_SEV_PRODUCT_SIENA,
+				MachineStepping: &wrapperspb.UInt32Value{Value: 2},
+			},
+			want: "Siena-B2",
+		},
+		{
 			name: "Genoa-FF",
 			input: &pb.SevProduct{
 				Name:            pb.SevProduct_SEV_PRODUCT_GENOA,
+				MachineStepping: &wrapperspb.UInt32Value{Value: 0xff},
+			},
+			want: "badstepping",
+		},
+		{
+			name: "Siena-FF",
+			input: &pb.SevProduct{
+				Name:            pb.SevProduct_SEV_PRODUCT_SIENA,
 				MachineStepping: &wrapperspb.UInt32Value{Value: 0xff},
 			},
 			want: "badstepping",
@@ -243,6 +274,14 @@ func TestProductName(t *testing.T) {
 				MachineStepping: &wrapperspb.UInt32Value{Value: 15},
 			},
 			want: "unmappedGenoaStepping",
+		},
+		{
+			name: "unknown siena stepping",
+			input: &pb.SevProduct{
+				Name:            pb.SevProduct_SEV_PRODUCT_SIENA,
+				MachineStepping: &wrapperspb.UInt32Value{Value: 15},
+			},
+			want: "unmappedSienaStepping",
 		},
 		{
 			name: "unknown",
@@ -285,6 +324,14 @@ func TestParseProductName(t *testing.T) {
 			want: &pb.SevProduct{
 				Name:            pb.SevProduct_SEV_PRODUCT_GENOA,
 				MachineStepping: &wrapperspb.UInt32Value{Value: 1},
+			},
+		},
+		{
+			name:  "happy path Siena",
+			input: "Siena-B2",
+			want: &pb.SevProduct{
+				Name:            pb.SevProduct_SEV_PRODUCT_SIENA,
+				MachineStepping: &wrapperspb.UInt32Value{Value: 2},
 			},
 		},
 		{
