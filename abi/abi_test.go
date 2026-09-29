@@ -439,6 +439,44 @@ func TestSevProduct(t *testing.T) {
 				MachineStepping: &wrapperspb.UInt32Value{Value: 1},
 			},
 		},
+		{
+			eax: 0x00b10f20,
+			want: &spb.SevProduct{
+				Name:            spb.SevProduct_SEV_PRODUCT_TURIN,
+				MachineStepping: &wrapperspb.UInt32Value{Value: 0},
+			},
+		},
+		{
+			eax: 0x00b10f21,
+			want: &spb.SevProduct{
+				Name:            spb.SevProduct_SEV_PRODUCT_TURIN,
+				MachineStepping: &wrapperspb.UInt32Value{Value: 1},
+			},
+		},
+		{
+			// Turin with base model 0 (0x00b00f00)
+			eax: 0x00b00f00,
+			want: &spb.SevProduct{
+				Name:            spb.SevProduct_SEV_PRODUCT_TURIN,
+				MachineStepping: &wrapperspb.UInt32Value{Value: 0},
+			},
+		},
+		{
+			// Turin Dense / Zen 5c with base model 1 (0x00b10f10)
+			eax: 0x00b10f10,
+			want: &spb.SevProduct{
+				Name:            spb.SevProduct_SEV_PRODUCT_TURIN,
+				MachineStepping: &wrapperspb.UInt32Value{Value: 0},
+			},
+		},
+		{
+			// Zen 5 Family 1Ah with Extended Model 2 (unmapped) -> Unknown
+			eax: 0x00b20f00,
+			want: &spb.SevProduct{
+				Name:            spb.SevProduct_SEV_PRODUCT_UNKNOWN,
+				MachineStepping: &wrapperspb.UInt32Value{Value: 0},
+			},
+		},
 	}
 	for _, tc := range tcs {
 		t.Run(fmt.Sprintf("EAX_0x%x", tc.eax), func(t *testing.T) {
