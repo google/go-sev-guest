@@ -547,8 +547,8 @@ type Options struct {
 	// CheckRevocations set to true if the verifier should retrieve the CRL from the network and check
 	// if the VCEK or ASK have been revoked according to the ARK.
 	CheckRevocations bool
-	// DisableCertFetching set to true if SnpAttestation should not connect to the AMD KDS to fill in
-	// any missing certificates in an attestation's certificate chain. Uses Getter if false.
+	// DisableCertFetching prevents fetching missing certificates from AMD KDS. Verification only
+	// fetches the endorsement certificate; GetAttestationFromReport also fetches the root chain.
 	DisableCertFetching bool
 	// Getter takes a URL and returns the body of its contents. By default uses http.Get and returns
 	// the body. If Getter implements trust.ContextHTTPSGetter, GetContext will be preferred over Get.
@@ -641,6 +641,7 @@ func updateProductExpectation(product **spb.SevProduct, reportProduct *spb.SevPr
 
 // SnpAttestation verifies the protobuf representation of an attestation report's signature based
 // on the report's SignatureAlgo, provided the certificate chain is valid.
+// Missing ASK and ARK certificates are not added to the attestation.
 func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 	return SnpAttestationContext(context.TODO(), attestation, options)
 }
@@ -653,9 +654,8 @@ func SnpAttestationContext(ctx context.Context, attestation *spb.Attestation, op
 	if attestation == nil {
 		return fmt.Errorf("attestation cannot be nil")
 	}
-	// Make sure we have the whole certificate chain, or at least the product
-	// info.
-	if err := fillInAttestation(ctx, attestation, options); err != nil {
+	// Verification uses configured or embedded roots, not the report's root chain.
+	if err := fillInAttestation(ctx, attestation, options, false); err != nil {
 		return err
 	}
 
@@ -769,9 +769,8 @@ func cpuidWorkaround(attestation *spb.Attestation, options *Options) (string, fu
 	return kds.ProductLine(product), productUpdate, updateExpectation, nil
 }
 
-// fillInAttestation uses AMD's KDS to populate any empty certificate field in the attestation's
-// certificate chain.
-func fillInAttestation(ctx context.Context, attestation *spb.Attestation, options *Options) error {
+// fillInAttestation fetches missing endorsement certificates and, if requested, the root chain.
+func fillInAttestation(ctx context.Context, attestation *spb.Attestation, options *Options, fetchChain bool) error {
 	if options.DisableCertFetching {
 		return nil
 	}
@@ -794,7 +793,7 @@ func fillInAttestation(ctx context.Context, attestation *spb.Attestation, option
 		chain = &spb.CertificateChain{}
 		attestation.CertificateChain = chain
 	}
-	if len(chain.GetAskCert()) == 0 || len(chain.GetArkCert()) == 0 {
+	if fetchChain && (len(chain.GetAskCert()) == 0 || len(chain.GetArkCert()) == 0) {
 		askark, err := trust.GetProductChainContext(ctx, productLine, info.SigningKey, getter)
 		if err != nil {
 			return err
@@ -849,7 +848,7 @@ func GetAttestationFromReportContext(ctx context.Context, report *spb.Report, op
 		Report:           report,
 		CertificateChain: &spb.CertificateChain{Extras: map[string][]byte{}},
 	}
-	if err := fillInAttestation(ctx, result, options); err != nil {
+	if err := fillInAttestation(ctx, result, options, true); err != nil {
 		return nil, err
 	}
 	// Attempt to fill in the product field of the attestation. Don't error at this
