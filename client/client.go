@@ -330,7 +330,7 @@ func GetDerivedKeyAcknowledgingItsLimitations(d Device, request *SnpDerivedKeyRe
 		RespData: response,
 	}
 	if err := message(d, labi.IocSnpGetDerivedKey, guestRequest); err != nil {
-		return nil, fmt.Errorf("error getting derived key: %v", err)
+		return nil, fmt.Errorf("error getting derived key: %w", err)
 	}
 	return response, nil
 }
