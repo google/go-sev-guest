@@ -872,7 +872,7 @@ func (c *CertTable) Unmarshal(certs []byte) error {
 	for i, entry := range certTableHeader {
 		var next CertTableEntry
 		copy(next.GUID[:], entry.GUID[:])
-		if entry.Offset+entry.Length > uint32(len(certs)) {
+		if uint64(entry.Offset)+uint64(entry.Length) > uint64(len(certs)) {
 			return fmt.Errorf("cert table entry %d specifies a byte range outside the certificate data block (size %d): offset=%d, length%d", i, len(certs), entry.Offset, entry.Length)
 		}
 		next.RawCert = make([]byte, entry.Length)
