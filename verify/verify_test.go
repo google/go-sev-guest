@@ -1172,7 +1172,10 @@ func TestAttestationCertificateFetching(t *testing.T) {
 			wantChain := attestation.CertificateChain
 			productLine := test.GetProductLine()
 			report := attestation.Report
-			vcekURL := kds.VCEKCertURL(productLine, report.ChipId, kds.DecomposeTCBVersionV0(report.ReportedTcb))
+			vcekURL, err := kds.VCEKCertURL(productLine, report.ChipId, kds.DecomposeTCBVersionV0(report.ReportedTcb))
+			if err != nil {
+				t.Fatalf("kds.VCEKCertURL(%q, %v) failed: %v", productLine, report.ChipId, err)
+			}
 			wantURLs := []string{vcekURL}
 			if tc.Reconstruct {
 				wantURLs = []string{kds.ProductCertChainURL(abi.VcekReportSigner, productLine)}
