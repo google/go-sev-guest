@@ -1,6 +1,7 @@
 *
 !*.*
 !*/
+!**/testdata/fuzz/*/*
 *~
 external/*
 kdsdatabase.bin*

@@ -16,6 +16,7 @@ package abi
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
+	"github.com/google/go-sev-guest/verify/testdata"
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/testing/protocmp"
@@ -605,4 +607,138 @@ func TestExtendedPlatformCertTable(t *testing.T) {
 			}
 		})
 	}
+}
+
+func FuzzCertTableUnmarshal(f *testing.F) {
+	f.Add([]byte{})
+	f.Add(make([]byte, 16))
+	f.Add(make([]byte, CertTableEntrySize))
+	f.Add(testRawCertTable(f).table)
+	f.Add(testRawCertTableNoVcek(f).table)
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		table := new(CertTable)
+		if err := table.Unmarshal(data); err != nil {
+			return
+		}
+		roundTrip := new(CertTable)
+		if err := roundTrip.Unmarshal(table.Marshal()); err != nil {
+			t.Fatalf("Unmarshal(Marshal()) failed on a table that parsed: %v", err)
+		}
+		if diff := cmp.Diff(table.Entries, roundTrip.Entries); diff != "" {
+			t.Fatalf("round-trip entries mismatch (-want +got):\n%s", diff)
+		}
+	})
+}
+
+// FuzzCertTableUnmarshalStructured lets the fuzzer drive header fields directly so that
+// offset/length arithmetic is explored without first having to discover the GUID table framing.
+func FuzzCertTableUnmarshalStructured(f *testing.F) {
+	f.Add(uint32(2*CertTableEntrySize), uint32(16), uint32(0), uint32(0), make([]byte, 16))
+	f.Add(uint32(0xffffff00), uint32(0x150), uint32(0), uint32(0), make([]byte, 100))
+	f.Add(uint32(48), uint32(math.MaxUint32-10), uint32(0), uint32(0), make([]byte, 100))
+	f.Add(uint32(3*CertTableEntrySize), uint32(8), uint32(3*CertTableEntrySize+8), uint32(8), make([]byte, 16))
+
+	f.Fuzz(func(t *testing.T, off0, len0, off1, len1 uint32, payload []byte) {
+		headers := []CertTableHeaderEntry{
+			{GUID: uuid.MustParse(ArkGUID), Offset: off0, Length: len0},
+			{GUID: uuid.MustParse(AskGUID), Offset: off1, Length: len1},
+			{}, // terminator
+		}
+		table := make([]byte, len(headers)*CertTableEntrySize+len(payload))
+		for i, h := range headers {
+			if err := h.Write(table[i*CertTableEntrySize : (i+1)*CertTableEntrySize]); err != nil {
+				t.Fatalf("Write(header %d) failed: %v", i, err)
+			}
+		}
+		copy(table[len(headers)*CertTableEntrySize:], payload)
+
+		c := new(CertTable)
+		if err := c.Unmarshal(table); err != nil {
+			return
+		}
+		for i, e := range c.Entries {
+			if uint64(headers[i].Offset)+uint64(headers[i].Length) > uint64(len(table)) {
+				t.Fatalf("entry %d accepted with offset=%d length=%d beyond table size %d", i, headers[i].Offset, headers[i].Length, len(table))
+			}
+			if uint32(len(e.RawCert)) != headers[i].Length {
+				t.Fatalf("entry %d RawCert length = %d, want %d", i, len(e.RawCert), headers[i].Length)
+			}
+		}
+	})
+}
+
+func FuzzReportToProto(f *testing.F) {
+	f.Add(testdata.AttestationBytes)
+	f.Add(make([]byte, ReportSize))
+	f.Add(make([]byte, ReportSize-1))
+	f.Add([]byte{})
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		report, err := ReportToProto(data)
+		if err != nil {
+			return
+		}
+		raw, err := ReportToAbiBytes(report)
+		if err != nil {
+			t.Fatalf("ReportToAbiBytes failed on a report that parsed: %v", err)
+		}
+		again, err := ReportToProto(raw)
+		if err != nil {
+			t.Fatalf("ReportToProto(ReportToAbiBytes()) failed: %v", err)
+		}
+		if diff := cmp.Diff(report, again, protocmp.Transform()); diff != "" {
+			t.Fatalf("round-trip report mismatch (-want +got):\n%s", diff)
+		}
+		// Crash probe only: the certificate suffix is arbitrary, so no result is asserted.
+		_, _ = ReportCertsToProto(data)
+	})
+}
+
+// Report field offsets from AMD Publication #56860 Table 23 that are not already named in abi.go.
+const (
+	reportVersionOffset    = 0x00
+	reportSignerInfoOffset = 0x48
+	reportFamilyOffset     = 0x188
+	reportModelOffset      = 0x189
+	reportSteppingOffset   = 0x18A
+)
+
+// FuzzReportToProtoStructured starts from a well-formed report and lets the fuzzer overwrite the
+// fields that gate parsing decisions, so that version- and algorithm-dependent branches are reached
+// without the fuzzer having to preserve the reserved-zero regions by chance.
+func FuzzReportToProtoStructured(f *testing.F) {
+	f.Add(uint32(2), uint32(0), uint32(1), uint64(0x30000), byte(0), byte(0), byte(0), []byte{})
+	f.Add(uint32(3), uint32(0), uint32(1), uint64(0x30000), byte(0x19), byte(0x01), byte(0x01), []byte{})
+	f.Add(uint32(3), uint32(4), uint32(0), uint64(0x30000), byte(0x1a), byte(0x02), byte(0x00), make([]byte, CertTableEntrySize))
+
+	f.Fuzz(func(t *testing.T, version, signerInfo, sigAlgo uint32, policy uint64, family, model, stepping byte, certs []byte) {
+		data := make([]byte, ReportSize, ReportSize+len(certs))
+		copy(data, testdata.AttestationBytes[:ReportSize])
+		binary.LittleEndian.PutUint32(data[reportVersionOffset:], version)
+		binary.LittleEndian.PutUint64(data[policyOffset:], policy)
+		binary.LittleEndian.PutUint32(signatureAlgoSlice(data), sigAlgo)
+		binary.LittleEndian.PutUint32(data[reportSignerInfoOffset:], signerInfo)
+		data[reportFamilyOffset] = family
+		data[reportModelOffset] = model
+		data[reportSteppingOffset] = stepping
+		data = append(data, certs...)
+
+		report, err := ReportToProto(data)
+		if err != nil {
+			return
+		}
+		if report.Version != version || report.SignatureAlgo != sigAlgo || report.Policy != policy {
+			t.Fatalf("parsed fields do not match input: version=%d sigAlgo=%d policy=%#x", report.Version, report.SignatureAlgo, report.Policy)
+		}
+		if version >= ReportVersion3 {
+			// CPUID_1_EAX carries only 4 bits of stepping, so the high nibble is dropped by design.
+			gotFamily, gotModel, gotStepping := FmsFromCpuid1Eax(report.Cpuid1EaxFms)
+			if gotFamily != family || gotModel != model || gotStepping != stepping&0xf {
+				t.Fatalf("FMS round-trip: got %#x/%#x/%#x, want %#x/%#x/%#x", gotFamily, gotModel, gotStepping, family, model, stepping&0xf)
+			}
+		}
+		// Crash probe only: the certificate suffix is arbitrary, so no result is asserted.
+		_, _ = ReportCertsToProto(data)
+	})
 }

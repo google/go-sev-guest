@@ -17,12 +17,14 @@ package trust_test
 import (
 	"bytes"
 	"context"
+	"encoding/pem"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/google/go-sev-guest/abi"
 	test "github.com/google/go-sev-guest/testing"
+	"github.com/google/go-sev-guest/verify/testdata"
 	"github.com/google/go-sev-guest/verify/trust"
 )
 
@@ -253,3 +255,20 @@ var (
 	_ = trust.ContextHTTPSGetter(&trust.SimpleHTTPSGetter{})
 	_ = trust.ContextHTTPSGetter(&trust.RetryHTTPSGetter{})
 )
+
+func FuzzParseCert(f *testing.F) {
+	vcekPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: testdata.VcekBytes,
+	})
+	f.Add([]byte{})
+	f.Add(testdata.VcekBytes)
+	f.Add(vcekPEM)
+	f.Add(append(append([]byte{}, vcekPEM...), vcekPEM...))
+	f.Add(append(append([]byte{}, vcekPEM...), "trailing"...))
+	f.Add([]byte("-----BEGIN CERTIFICATE-----\nnot base64\n-----END CERTIFICATE-----\n"))
+
+	f.Fuzz(func(_ *testing.T, data []byte) {
+		_, _ = trust.ParseCert(data)
+	})
+}
