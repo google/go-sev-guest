@@ -394,3 +394,579 @@ func TestTCBVersionV0(t *testing.T) {
 		}
 	}
 }
+
+func TestTCBVersionV1_StructVersion(t *testing.T) {
+	tcb := TCBVersionV1{}
+	if got, want := tcb.StructVersion(), uint8(1); got != want {
+		t.Errorf("StructVersion() = %d, want %d", got, want)
+	}
+}
+
+func TestTCBVersionV1_Uint64DecomposeRoundtrip(t *testing.T) {
+	tcb := TCBVersionV1{
+		FmcSpl:   1,
+		BlSpl:    2,
+		TeeSpl:   3,
+		SnpSpl:   4,
+		Spl5:     5,
+		Spl6:     6,
+		Spl7:     7,
+		UcodeSpl: 8,
+	}
+	wantRaw := uint64(0x0807060504030201)
+	if got := tcb.Uint64(); got != wantRaw {
+		t.Errorf("Uint64() = 0x%016x, want 0x%016x", got, wantRaw)
+	}
+	gotDecomp := DecomposeTCBVersionV1(wantRaw)
+	if diff := cmp.Diff(tcb, gotDecomp); diff != "" {
+		t.Errorf("DecomposeTCBVersionV1(0x%x) mismatch (-want +got):\n%s", wantRaw, diff)
+	}
+}
+
+func TestTCBVersionV1_ValuesParseRoundtrip(t *testing.T) {
+	tcb := TCBVersionV1{
+		FmcSpl:   1,
+		BlSpl:    2,
+		TeeSpl:   3,
+		SnpSpl:   4,
+		Spl5:     5,
+		Spl6:     6,
+		Spl7:     7,
+		UcodeSpl: 8,
+	}
+	vals := tcb.Values()
+	parsed, err := ParseTCBVersionV1(vals)
+	if err != nil {
+		t.Fatalf("ParseTCBVersionV1(%v) failed: %v", vals, err)
+	}
+	wantParsed := TCBVersionV1{
+		FmcSpl:   1,
+		BlSpl:    2,
+		TeeSpl:   3,
+		SnpSpl:   4,
+		UcodeSpl: 8,
+	}
+	if diff := cmp.Diff(wantParsed, parsed); diff != "" {
+		t.Errorf("ParseTCBVersionV1 mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestTCBVersionV1_LE_ComponentWise(t *testing.T) {
+	base := TCBVersionV1{
+		FmcSpl:   10,
+		BlSpl:    10,
+		TeeSpl:   10,
+		SnpSpl:   10,
+		Spl5:     10,
+		Spl6:     10,
+		Spl7:     10,
+		UcodeSpl: 10,
+	}
+	if !base.LE(base) {
+		t.Errorf("expected base.LE(base) to be true")
+	}
+	higher := []struct {
+		name string
+		tcb  TCBVersionV1
+	}{
+		{
+			name: "FmcSpl",
+			tcb: TCBVersionV1{
+				FmcSpl:   11,
+				BlSpl:    10,
+				TeeSpl:   10,
+				SnpSpl:   10,
+				Spl5:     10,
+				Spl6:     10,
+				Spl7:     10,
+				UcodeSpl: 10,
+			},
+		},
+		{
+			name: "BlSpl",
+			tcb: TCBVersionV1{
+				FmcSpl:   10,
+				BlSpl:    11,
+				TeeSpl:   10,
+				SnpSpl:   10,
+				Spl5:     10,
+				Spl6:     10,
+				Spl7:     10,
+				UcodeSpl: 10,
+			},
+		},
+		{
+			name: "TeeSpl",
+			tcb: TCBVersionV1{
+				FmcSpl:   10,
+				BlSpl:    10,
+				TeeSpl:   11,
+				SnpSpl:   10,
+				Spl5:     10,
+				Spl6:     10,
+				Spl7:     10,
+				UcodeSpl: 10,
+			},
+		},
+		{
+			name: "SnpSpl",
+			tcb: TCBVersionV1{
+				FmcSpl:   10,
+				BlSpl:    10,
+				TeeSpl:   10,
+				SnpSpl:   11,
+				Spl5:     10,
+				Spl6:     10,
+				Spl7:     10,
+				UcodeSpl: 10,
+			},
+		},
+		{
+			name: "Spl5",
+			tcb: TCBVersionV1{
+				FmcSpl:   10,
+				BlSpl:    10,
+				TeeSpl:   10,
+				SnpSpl:   10,
+				Spl5:     11,
+				Spl6:     10,
+				Spl7:     10,
+				UcodeSpl: 10,
+			},
+		},
+		{
+			name: "Spl6",
+			tcb: TCBVersionV1{
+				FmcSpl:   10,
+				BlSpl:    10,
+				TeeSpl:   10,
+				SnpSpl:   10,
+				Spl5:     10,
+				Spl6:     11,
+				Spl7:     10,
+				UcodeSpl: 10,
+			},
+		},
+		{
+			name: "Spl7",
+			tcb: TCBVersionV1{
+				FmcSpl:   10,
+				BlSpl:    10,
+				TeeSpl:   10,
+				SnpSpl:   10,
+				Spl5:     10,
+				Spl6:     10,
+				Spl7:     11,
+				UcodeSpl: 10,
+			},
+		},
+		{
+			name: "UcodeSpl",
+			tcb: TCBVersionV1{
+				FmcSpl:   10,
+				BlSpl:    10,
+				TeeSpl:   10,
+				SnpSpl:   10,
+				Spl5:     10,
+				Spl6:     10,
+				Spl7:     10,
+				UcodeSpl: 11,
+			},
+		},
+	}
+	for _, tc := range higher {
+		if !base.LE(tc.tcb) {
+			t.Errorf("expected base.LE(higher for %s) to be true", tc.name)
+		}
+		if tc.tcb.LE(base) {
+			t.Errorf("expected higher.LE(base for %s) to be false", tc.name)
+		}
+	}
+}
+
+func TestTCBVersionV1_LE_CrossVersionRejection(t *testing.T) {
+	// Verify type assertion failure in LE: zero receiver must return false against maximal foreign TCB.
+	zeroV1 := TCBVersionV1{}
+	maxV0 := TCBVersionV0{
+		BlSpl:    255,
+		TeeSpl:   255,
+		Spl4:     255,
+		Spl5:     255,
+		Spl6:     255,
+		Spl7:     255,
+		SnpSpl:   255,
+		UcodeSpl: 255,
+	}
+	if zeroV1.LE(maxV0) {
+		t.Errorf("expected zeroV1.LE(maxV0) to be false due to type assertion failure")
+	}
+	zeroV0 := TCBVersionV0{}
+	maxV1 := TCBVersionV1{
+		FmcSpl:   255,
+		BlSpl:    255,
+		TeeSpl:   255,
+		SnpSpl:   255,
+		Spl5:     255,
+		Spl6:     255,
+		Spl7:     255,
+		UcodeSpl: 255,
+	}
+	if zeroV0.LE(maxV1) {
+		t.Errorf("expected zeroV0.LE(maxV1) to be false due to type assertion failure")
+	}
+}
+
+func TestTCBVersionV1_String(t *testing.T) {
+	tcb := TCBVersionV1{
+		FmcSpl:   1,
+		BlSpl:    2,
+		TeeSpl:   3,
+		SnpSpl:   4,
+		Spl5:     5,
+		Spl6:     6,
+		Spl7:     7,
+		UcodeSpl: 8,
+	}
+	wantString := "{FmcSpl:1 BlSpl:2 TeeSpl:3 SnpSpl:4 Spl5:5 Spl6:6 Spl7:7 UcodeSpl:8}"
+	if got := tcb.String(); got != wantString {
+		t.Errorf("String() = %q, want %q", got, wantString)
+	}
+}
+
+func TestParseTCBVersionV1(t *testing.T) {
+	tcs := []struct {
+		name   string
+		values url.Values
+		want   TCBVersionV1
+	}{
+		{
+			name: "max legal boundaries",
+			values: url.Values{
+				"fmcSPL":   []string{"127"},
+				"blSPL":    []string{"127"},
+				"teeSPL":   []string{"127"},
+				"snpSPL":   []string{"127"},
+				"ucodeSPL": []string{"255"},
+			},
+			want: TCBVersionV1{
+				FmcSpl:   127,
+				BlSpl:    127,
+				TeeSpl:   127,
+				SnpSpl:   127,
+				UcodeSpl: 255,
+			},
+		},
+		{
+			name:   "empty values default to zero",
+			values: url.Values{},
+			want:   TCBVersionV1{},
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ParseTCBVersionV1(tc.values)
+			if err != nil {
+				t.Fatalf("ParseTCBVersionV1(%v) unexpected error: %v", tc.values, err)
+			}
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("ParseTCBVersionV1(%v) mismatch (-want +got):\n%s", tc.values, diff)
+			}
+		})
+	}
+}
+
+func TestParseTCBVersionV1_Errors(t *testing.T) {
+	tcs := []struct {
+		name    string
+		values  url.Values
+		wantErr string
+	}{
+		{
+			name: "fmcSPL exceeds 127",
+			values: url.Values{
+				"fmcSPL": []string{"128"},
+			},
+			wantErr: "want a value 0-127",
+		},
+		{
+			name: "ucodeSPL exceeds 255",
+			values: url.Values{
+				"ucodeSPL": []string{"256"},
+			},
+			wantErr: "want a value 0-255",
+		},
+		{
+			name: "negative value",
+			values: url.Values{
+				"blSPL": []string{"-1"},
+			},
+			wantErr: "want a value 0-127",
+		},
+		{
+			name: "non-numeric value",
+			values: url.Values{
+				"teeSPL": []string{"invalid"},
+			},
+			wantErr: "want a value 0-127",
+		},
+		{
+			name: "unexpected argument",
+			values: url.Values{
+				"unknown": []string{"1"},
+			},
+			wantErr: "unexpected KDS TCB version URL argument",
+		},
+		{
+			name: "duplicate parameter",
+			values: url.Values{
+				"fmcSPL": []string{"1", "2"},
+			},
+			wantErr: "expected exactly one value",
+		},
+		{
+			name: "empty parameter value list",
+			values: url.Values{
+				"fmcSPL": []string{},
+			},
+			wantErr: "expected exactly one value",
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ParseTCBVersionV1(tc.values)
+			if err == nil {
+				t.Fatalf("ParseTCBVersionV1(%v) = %v, want error containing %q", tc.values, got, tc.wantErr)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("ParseTCBVersionV1(%v) error = %v, want containing %q", tc.values, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestDecomposeTCBVersion_StructVersion0(t *testing.T) {
+	raw := uint64(0x0807060504030201)
+	got, err := DecomposeTCBVersion(0, raw)
+	if err != nil {
+		t.Fatalf("DecomposeTCBVersion(0) failed: %v", err)
+	}
+	want := TCBVersionV0{
+		BlSpl:    1,
+		TeeSpl:   2,
+		Spl4:     3,
+		Spl5:     4,
+		Spl6:     5,
+		Spl7:     6,
+		SnpSpl:   7,
+		UcodeSpl: 8,
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("DecomposeTCBVersion(0) mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestDecomposeTCBVersion_StructVersion1(t *testing.T) {
+	raw := uint64(0x0807060504030201)
+	got, err := DecomposeTCBVersion(1, raw)
+	if err != nil {
+		t.Fatalf("DecomposeTCBVersion(1) failed: %v", err)
+	}
+	want := TCBVersionV1{
+		FmcSpl:   1,
+		BlSpl:    2,
+		TeeSpl:   3,
+		SnpSpl:   4,
+		Spl5:     5,
+		Spl6:     6,
+		Spl7:     7,
+		UcodeSpl: 8,
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("DecomposeTCBVersion(1) mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestDecomposeTCBVersion_Unsupported(t *testing.T) {
+	raw := uint64(0x0807060504030201)
+	if _, err := DecomposeTCBVersion(2, raw); err == nil {
+		t.Errorf("DecomposeTCBVersion(2) expected error, got nil")
+	}
+}
+
+func TestParseTCBVersion_StructVersion0(t *testing.T) {
+	vals := TCBVersionV0{BlSpl: 1, TeeSpl: 2, SnpSpl: 3, UcodeSpl: 4}.Values()
+	got, err := ParseTCBVersion(0, vals)
+	if err != nil {
+		t.Fatalf("ParseTCBVersion(0) failed: %v", err)
+	}
+	want := TCBVersionV0{
+		BlSpl:    1,
+		TeeSpl:   2,
+		SnpSpl:   3,
+		UcodeSpl: 4,
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("ParseTCBVersion(0) mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestParseTCBVersion_StructVersion1(t *testing.T) {
+	vals := TCBVersionV1{FmcSpl: 1, BlSpl: 2, TeeSpl: 3, SnpSpl: 4, UcodeSpl: 5}.Values()
+	got, err := ParseTCBVersion(1, vals)
+	if err != nil {
+		t.Fatalf("ParseTCBVersion(1) failed: %v", err)
+	}
+	want := TCBVersionV1{
+		FmcSpl:   1,
+		BlSpl:    2,
+		TeeSpl:   3,
+		SnpSpl:   4,
+		UcodeSpl: 5,
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("ParseTCBVersion(1) mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestParseTCBVersion_ErrorReturnsUntypedNil(t *testing.T) {
+	badVals := url.Values{"blSPL": []string{"999"}}
+	for _, v := range []uint8{0, 1} {
+		got, err := ParseTCBVersion(v, badVals)
+		if err == nil {
+			t.Fatalf("ParseTCBVersion(%d) expected error, got nil", v)
+		}
+		if got != nil {
+			t.Errorf("ParseTCBVersion(%d) expected nil interface, got %v", v, got)
+		}
+	}
+}
+
+func TestParseTCBVersion_Unsupported(t *testing.T) {
+	got, err := ParseTCBVersion(2, url.Values{})
+	if err == nil {
+		t.Errorf("ParseTCBVersion(2) expected error, got nil")
+	}
+	if got != nil {
+		t.Errorf("ParseTCBVersion(2) expected nil interface, got %v", got)
+	}
+}
+
+func TestStructVersionForProductLine(t *testing.T) {
+	tcs := []struct {
+		productLine string
+		want        uint8
+	}{
+		{"Milan", 0},
+		{"Genoa", 0},
+		{"Turin", 1},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.productLine, func(t *testing.T) {
+			got, err := StructVersionForProductLine(tc.productLine)
+			if err != nil {
+				t.Fatalf("StructVersionForProductLine(%q) failed: %v", tc.productLine, err)
+			}
+			if got != tc.want {
+				t.Errorf("StructVersionForProductLine(%q) = %d, want %d", tc.productLine, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestStructVersionForProductLine_Unknown(t *testing.T) {
+	if _, err := StructVersionForProductLine("Unknown"); err == nil {
+		t.Errorf("StructVersionForProductLine(Unknown) expected error, got nil")
+	}
+}
+
+func TestDecomposeProductTCB(t *testing.T) {
+	raw := uint64(0x0807060504030201)
+	wantV0 := TCBVersionV0{
+		BlSpl:    1,
+		TeeSpl:   2,
+		Spl4:     3,
+		Spl5:     4,
+		Spl6:     5,
+		Spl7:     6,
+		SnpSpl:   7,
+		UcodeSpl: 8,
+	}
+	wantV1 := TCBVersionV1{
+		FmcSpl:   1,
+		BlSpl:    2,
+		TeeSpl:   3,
+		SnpSpl:   4,
+		Spl5:     5,
+		Spl6:     6,
+		Spl7:     7,
+		UcodeSpl: 8,
+	}
+	tcs := []struct {
+		product string
+		want    TCBVersion
+	}{
+		{"Milan", wantV0},
+		{"Genoa", wantV0},
+		{"Turin", wantV1},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.product, func(t *testing.T) {
+			got, err := DecomposeProductTCB(tc.product, raw)
+			if err != nil {
+				t.Fatalf("DecomposeProductTCB(%q) failed: %v", tc.product, err)
+			}
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("DecomposeProductTCB(%q) mismatch (-want +got):\n%s", tc.product, diff)
+			}
+		})
+	}
+}
+
+func TestDecomposeProductTCB_Unknown(t *testing.T) {
+	raw := uint64(0x0807060504030201)
+	if _, err := DecomposeProductTCB("Unknown", raw); err == nil {
+		t.Errorf("DecomposeProductTCB(Unknown) expected error, got nil")
+	}
+}
+
+func TestParseProductTCB(t *testing.T) {
+	wantV0 := TCBVersionV0{
+		BlSpl:    1,
+		TeeSpl:   2,
+		SnpSpl:   3,
+		UcodeSpl: 4,
+	}
+	wantV1 := TCBVersionV1{
+		FmcSpl:   1,
+		BlSpl:    2,
+		TeeSpl:   3,
+		SnpSpl:   4,
+		UcodeSpl: 5,
+	}
+	tcs := []struct {
+		product string
+		values  url.Values
+		want    TCBVersion
+	}{
+		{"Milan", wantV0.Values(), wantV0},
+		{"Genoa", wantV0.Values(), wantV0},
+		{"Turin", wantV1.Values(), wantV1},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.product, func(t *testing.T) {
+			got, err := ParseProductTCB(tc.product, tc.values)
+			if err != nil {
+				t.Fatalf("ParseProductTCB(%q) failed: %v", tc.product, err)
+			}
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("ParseProductTCB(%q) mismatch (-want +got):\n%s", tc.product, diff)
+			}
+		})
+	}
+}
+
+func TestParseProductTCB_Unknown(t *testing.T) {
+	if _, err := ParseProductTCB("Unknown", url.Values{}); err == nil {
+		t.Errorf("ParseProductTCB(Unknown) expected error, got nil")
+	}
+}
