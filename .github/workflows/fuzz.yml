@@ -1,0 +1,44 @@
+name: Fuzz
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Keep in sync with `go test -list '^Fuzz' ./...`.
+        include:
+          - pkg: ./abi
+            target: FuzzCertTableUnmarshal
+          - pkg: ./abi
+            target: FuzzCertTableUnmarshalStructured
+          - pkg: ./abi
+            target: FuzzReportToProto
+          - pkg: ./abi
+            target: FuzzReportToProtoStructured
+          - pkg: ./kds
+            target: FuzzParseProductCertChain
+          - pkg: ./kds
+            target: FuzzParseProductCertChainStructured
+          - pkg: ./verify/trust
+            target: FuzzParseCert
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+        with:
+          go-version: stable
+      - name: Run Go Fuzz (${{ matrix.target }})
+        run: go test ${{ matrix.pkg }} -run=^$ -fuzz=^${{ matrix.target }}$ -fuzztime=30s
+      - name: Upload crashers
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fuzz-crashers-${{ matrix.target }}
+          path: '**/testdata/fuzz/${{ matrix.target }}/*'
+          if-no-files-found: ignore
