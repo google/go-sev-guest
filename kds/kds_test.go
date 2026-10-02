@@ -16,14 +16,17 @@ package kds
 
 import (
 	"encoding/hex"
+	"encoding/pem"
 	"fmt"
 	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/google/go-sev-guest/abi"
 	pb "github.com/google/go-sev-guest/proto/sevsnp"
+	"github.com/google/go-sev-guest/verify/testdata"
 	"google.golang.org/protobuf/testing/protocmp"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
@@ -393,4 +396,76 @@ func TestTCBVersionV0(t *testing.T) {
 			t.Errorf("expected higher.LE(base for %s) to be false", tc.name)
 		}
 	}
+}
+
+func pemCert(der []byte) []byte {
+	return pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: der,
+	})
+}
+
+// pemBlock encodes body as a PEM block whose framing is chosen by the flags: a CERTIFICATE or a
+// PRIVATE KEY type, with or without a header line.
+func pemBlock(isCert, withHeaders bool, body []byte) []byte {
+	b := &pem.Block{
+		Type:  "PRIVATE KEY",
+		Bytes: body,
+	}
+	if isCert {
+		b.Type = "CERTIFICATE"
+	}
+	if withHeaders {
+		b.Headers = map[string]string{"X": "y"}
+	}
+	return pem.EncodeToMemory(b)
+}
+
+func FuzzParseProductCertChain(f *testing.F) {
+	vcekPEM := pemCert(testdata.VcekBytes)
+	f.Add([]byte{})
+	f.Add(vcekPEM)
+	f.Add(testdata.VcekBytes)
+	f.Add(append(append([]byte{}, vcekPEM...), vcekPEM...))
+	f.Add(append(append([]byte{}, vcekPEM...), testdata.VcekBytes...))
+
+	f.Fuzz(func(_ *testing.T, data []byte) {
+		_, _, _ = ParseProductCertChain(data)
+	})
+}
+
+// FuzzParseProductCertChainStructured lets the fuzzer choose the PEM framing (block types,
+// headers, bodies, trailer) so that every checkForm branch is reachable without the fuzzer
+// having to synthesize valid base64 and armor by mutation.
+func FuzzParseProductCertChainStructured(f *testing.F) {
+	f.Add(true, true, false, false, testdata.VcekBytes, testdata.VcekBytes, []byte{})
+	f.Add(true, false, false, false, testdata.VcekBytes, testdata.VcekBytes, []byte{})
+	f.Add(true, true, true, false, testdata.VcekBytes, testdata.VcekBytes, []byte{})
+	f.Add(true, true, false, false, []byte{}, []byte{}, []byte("x"))
+
+	f.Fuzz(func(t *testing.T, askIsCert, arkIsCert, askHeaders, arkHeaders bool, askBody, arkBody, trailer []byte) {
+		input := append(pemBlock(askIsCert, askHeaders, askBody), pemBlock(arkIsCert, arkHeaders, arkBody)...)
+		input = append(input, trailer...)
+
+		ask, ark, err := ParseProductCertChain(input)
+		// Mirrors the acceptance rules in ParseProductCertChain's checkForm plus its trailing-bytes
+		// check; update both together.
+		wantErr := !askIsCert || !arkIsCert || askHeaders || arkHeaders || len(trailer) != 0
+		if wantErr {
+			if err == nil {
+				t.Fatalf("ParseProductCertChain accepted malformed input: isCert=%v/%v headers=%v/%v trailer=%d bytes",
+					askIsCert, arkIsCert, askHeaders, arkHeaders, len(trailer))
+			}
+			return
+		}
+		if err != nil {
+			t.Fatalf("ParseProductCertChain rejected well-formed input: %v", err)
+		}
+		if diff := cmp.Diff(askBody, ask, cmpopts.EquateEmpty()); diff != "" {
+			t.Fatalf("ask body mismatch (-want +got):\n%s", diff)
+		}
+		if diff := cmp.Diff(arkBody, ark, cmpopts.EquateEmpty()); diff != "" {
+			t.Fatalf("ark body mismatch (-want +got):\n%s", diff)
+		}
+	})
 }
