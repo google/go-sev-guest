@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"math/rand"
 	"runtime"
 	"strings"
@@ -387,6 +388,40 @@ func TestCertTableProto(t *testing.T) {
 	bs := c.Marshal()
 	if !bytes.Equal(bs, result.table) {
 		t.Errorf("c.Marshal() = %v, want %v", bs, result.table)
+	}
+}
+
+func TestCertTableUnmarshalUint32Overflow(t *testing.T) {
+	// Each row describes a single entry whose offset+length wraps around in uint32 arithmetic to a
+	// value that fits inside the 100-byte table, so a 32-bit bounds check would accept it.
+	for _, tc := range []struct {
+		name   string
+		offset uint32
+		length uint32
+	}{
+		{name: "large offset", offset: 0xffffff00, length: 0x150},       // wraps to 80
+		{name: "large length", offset: 48, length: math.MaxUint32 - 10}, // wraps to 37
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// One entry plus the null terminator entry occupy the first 48 bytes.
+			headers := make([]CertTableHeaderEntry, 2)
+			headers[0].GUID = uuid.MustParse(extraGUID)
+			headers[0].Offset = tc.offset
+			headers[0].Length = tc.length
+
+			table := make([]byte, 100)
+			if err := headers[0].Write(table[:CertTableEntrySize]); err != nil {
+				t.Fatalf("could not write header 0: %v", err)
+			}
+			if err := headers[1].Write(table[CertTableEntrySize : 2*CertTableEntrySize]); err != nil {
+				t.Fatalf("could not write header 1: %v", err)
+			}
+
+			c := new(CertTable)
+			if err := c.Unmarshal(table); err == nil {
+				t.Errorf("c.Unmarshal() succeeded unexpectedly, want error")
+			}
+		})
 	}
 }
 
