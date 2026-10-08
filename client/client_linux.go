@@ -45,6 +45,10 @@ var (
 	defaultVMPL      = flag.String("default_vmpl", "", "Default VMPL to use for attestation (empty for driver default)")
 )
 
+// string to pass into the serviceProvider blob in order to request an SVSM report,
+// as described in the torvalds/linux github repository: https://github.com/torvalds/linux/blob/master/Documentation/ABI/testing/configfs-tsm-report#L106
+var svsmServiceProvider = "svsm"
+
 // LinuxDevice implements the Device interface with Linux ioctls.
 type LinuxDevice struct {
 	fd      int
@@ -206,52 +210,74 @@ func (p *LinuxConfigFsQuoteProvider) IsSupported() bool {
 	return err == nil && string(provider) == "sev_guest\n"
 }
 
-// GetRawQuoteAtLevel returns byte format attestation plus certificate table via ConfigFS.
-func (p *LinuxConfigFsQuoteProvider) GetRawQuoteAtLevel(reportData [64]byte, level uint) ([]uint8, error) {
-	req := &report.Request{
-		InBlob:     reportData[:],
-		GetAuxBlob: true,
-		Privilege: &report.Privilege{
-			Level: level,
-		},
+func (p *LinuxConfigFsQuoteProvider) requestReport(reportData [64]byte, level *report.Privilege, serviceProvider string) ([]uint8, error) {
+	request := &report.Request{
+		InBlob:          reportData[:],
+		GetAuxBlob:      true,
+		ServiceProvider: serviceProvider,
+		Privilege:       level,
 	}
-	resp, err := linuxtsm.GetReport(req)
+
+	resp, err := linuxtsm.GetReport(request)
 	if err != nil {
 		return nil, err
 	}
+
 	// Mix the platform info in with the auxblob.
 	extended, err := abi.ExtendedPlatformCertTable(resp.AuxBlob)
 	if err != nil {
 		return nil, fmt.Errorf("invalid certificate table: %v", err)
 	}
-	return append(resp.OutBlob, extended...), nil
+
+	responseLen := len(resp.OutBlob) + len(extended)
+	if serviceProvider == svsmServiceProvider {
+		responseLen += len(resp.ManifestBlob)
+	}
+	result := make([]byte, 0, responseLen)
+	result = append(result, resp.OutBlob...)
+	result = append(result, extended...)
+	if serviceProvider == svsmServiceProvider {
+		result = append(result, resp.ManifestBlob...)
+	}
+
+	return result, nil
+}
+
+// GetRawQuoteAtLevel returns byte format attestation plus certificate table via ConfigFS.
+func (p *LinuxConfigFsQuoteProvider) GetRawQuoteAtLevel(reportData [64]byte, level uint) ([]uint8, error) {
+	return p.requestReport(reportData, &report.Privilege{Level: level}, "")
 }
 
 // GetRawQuote returns byte format attestation plus certificate table via ConfigFS.
 func (p *LinuxConfigFsQuoteProvider) GetRawQuote(reportData [64]byte) ([]uint8, error) {
-	req := &report.Request{
-		InBlob:     reportData[:],
-		GetAuxBlob: true,
-	}
+	var level *report.Privilege
 	if *defaultVMPL != "" {
 		vmpl, err := strconv.ParseUint(*defaultVMPL, 10, 32)
 		if err != nil {
 			return nil, fmt.Errorf("bad default_vmpl: %q", *defaultVMPL)
 		}
-		req.Privilege = &report.Privilege{
+		level = &report.Privilege{
 			Level: uint(vmpl),
 		}
 	}
-	resp, err := linuxtsm.GetReport(req)
-	if err != nil {
-		return nil, err
+
+	return p.requestReport(reportData, level, "")
+}
+
+// GetRawQuoteSVSM returns byte format attestation, certificate table, and SVSM services manifest via ConfigFS.
+func (p *LinuxConfigFsQuoteProvider) GetRawQuoteSVSM(reportData [64]byte) ([]uint8, error) {
+	var level *report.Privilege
+	if *defaultVMPL != "" {
+		vmpl, err := strconv.ParseUint(*defaultVMPL, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("bad default_vmpl: %q", *defaultVMPL)
+		}
+		level = &report.Privilege{
+			Level: uint(vmpl),
+		}
 	}
-	// Mix the platform info in with the auxblob.
-	extended, err := abi.ExtendedPlatformCertTable(resp.AuxBlob)
-	if err != nil {
-		return nil, fmt.Errorf("invalid certificate table: %v", err)
-	}
-	return append(resp.OutBlob, extended...), nil
+
+	return p.requestReport(reportData, level, svsmServiceProvider)
 }
 
 // Product returns the current CPU's associated AMD SEV product information.
@@ -287,4 +313,13 @@ func GetLeveledQuoteProvider() (LeveledQuoteProvider, error) {
 		return provider, nil
 	}
 	return nil, fmt.Errorf("no supported SEV-SNP LeveledQuoteProvider found")
+}
+
+// GetSVSMQuoteProvider returns a supported SVSM QuoteProvider.
+func GetSVSMQuoteProvider() (SVSMQuoteProvider, error) {
+	var provider SVSMQuoteProvider = &LinuxConfigFsQuoteProvider{}
+	if provider.IsSupported() {
+		return provider, nil
+	}
+	return nil, fmt.Errorf("no supported SVSM QuoteProvider found")
 }
