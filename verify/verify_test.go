@@ -46,7 +46,6 @@ import (
 	testclient "github.com/google/go-sev-guest/testing/client"
 	"github.com/google/go-sev-guest/verify/testdata"
 	"github.com/google/go-sev-guest/verify/trust"
-	"github.com/google/logger"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
@@ -68,7 +67,6 @@ func initSigner() {
 }
 
 func TestMain(m *testing.M) {
-	logger.Init("VerifyTestLog", false, false, os.Stderr)
 	os.Exit(m.Run())
 }
 
