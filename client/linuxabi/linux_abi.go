@@ -16,10 +16,11 @@
 package linuxabi
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
 	"unsafe"
+
+	"github.com/google/go-sev-guest/abi"
 )
 
 // EsResult is the status code type for Linux's GHCB communication results.
@@ -146,17 +147,32 @@ func (r *SnpReportRespABI) Pointer() unsafe.Pointer {
 	return unsafe.Pointer(r)
 }
 
+type responseError struct {
+	message string
+	err     error
+}
+
+func (e *responseError) Error() string { return e.message }
+
+func (e *responseError) Unwrap() error {
+	return e.err
+}
+
 // Finish checks the status of the message and translates it to a Golang error.
 func (r *SnpReportRespABI) Finish(_ BinaryConvertible) error {
-	if r.Status != 0 {
-		switch r.Status {
-		case 0x16: // Value from MSG_REPORT_RSP specification in SNP API.
-			return errors.New("get_report had invalid parameters")
-		default:
-			return fmt.Errorf("unknown status: 0x%x", r.Status)
-		}
+	var message string
+	switch r.Status {
+	case 0:
+		return nil
+	case abi.InvalidParam:
+		message = "get_report had invalid parameters"
+	default:
+		message = fmt.Sprintf("unknown status: 0x%x", r.Status)
 	}
-	return nil
+	return &responseError{
+		message: message,
+		err:     &abi.SevFirmwareErr{Status: abi.SevFirmwareStatus(r.Status)},
+	}
 }
 
 // SnpDerivedKeyReqABI is the ABI representation of a request to the SEV guest device to derive a
@@ -196,15 +212,20 @@ func (r *SnpDerivedKeyRespABI) ABI() BinaryConversion { return r }
 // Pointer returns a pointer to the object itself.
 func (r *SnpDerivedKeyRespABI) Pointer() unsafe.Pointer { return unsafe.Pointer(r) }
 
-// Finish is a no-op.
+// Finish checks the key derivation status.
 func (r *SnpDerivedKeyRespABI) Finish(BinaryConvertible) error {
+	var message string
 	switch r.Status {
 	case 0:
 		return nil
-	case 0x16:
-		return errors.New("msg_key_req error: invalid parameters")
+	case abi.InvalidParam:
+		message = "msg_key_req error: invalid parameters"
 	default:
-		return fmt.Errorf("msg_key_req unknown status code: 0x%x", r.Status)
+		message = fmt.Sprintf("msg_key_req unknown status code: 0x%x", r.Status)
+	}
+	return &responseError{
+		message: message,
+		err:     &abi.SevFirmwareErr{Status: abi.SevFirmwareStatus(r.Status)},
 	}
 }
 
@@ -314,7 +335,7 @@ func (r *snpUserGuestRequestConversion) Finish(b BinaryConvertible) error {
 		return fmt.Errorf("could not finalize request data: %v", err)
 	}
 	if err := r.respConv.Finish(s.RespData); err != nil {
-		return fmt.Errorf("could not finalize response data: %v", err)
+		return fmt.Errorf("could not finalize response data: %w", err)
 	}
 	s.FwErr = r.abi.FwErr
 	return nil
