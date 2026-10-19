@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
@@ -26,6 +27,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/google/go-sev-guest/verify/testdata"
 	"github.com/google/uuid"
@@ -423,6 +425,151 @@ func TestCertTableUnmarshalUint32Overflow(t *testing.T) {
 			c := new(CertTable)
 			if err := c.Unmarshal(table); err == nil {
 				t.Errorf("c.Unmarshal() succeeded unexpectedly, want error")
+			}
+		})
+	}
+}
+
+// rawCertTable encodes headers, a zero terminator, and data into a single certificate table slice.
+func rawCertTable(t testing.TB, headers []CertTableHeaderEntry, data []byte) []byte {
+	t.Helper()
+	headerSize := (len(headers) + 1) * CertTableEntrySize
+	table := make([]byte, headerSize+len(data))
+	for i, h := range headers {
+		if err := h.Write(table[i*CertTableEntrySize:]); err != nil {
+			t.Fatalf("headers[%d].Write() = %v, want nil", i, err)
+		}
+	}
+	copy(table[headerSize:], data)
+	return table
+}
+
+func TestCertTableUnmarshalDisjointRanges(t *testing.T) {
+	const headerSize = (2 + 1) * CertTableEntrySize
+	arkGUID := uuid.MustParse(ArkGUID)
+	askGUID := uuid.MustParse(AskGUID)
+	data := []byte("0123456789abcdef")
+
+	tests := []struct {
+		name    string
+		headers []CertTableHeaderEntry
+		want    []CertTableEntry
+	}{
+		{
+			name: "contiguous_entries",
+			headers: []CertTableHeaderEntry{
+				{GUID: arkGUID, Offset: headerSize, Length: 10},
+				{GUID: askGUID, Offset: headerSize + 10, Length: 6},
+			},
+			want: []CertTableEntry{
+				{GUID: arkGUID, RawCert: []byte("0123456789")},
+				{GUID: askGUID, RawCert: []byte("abcdef")},
+			},
+		},
+		{
+			name: "gap_and_trailing_padding",
+			headers: []CertTableHeaderEntry{
+				{GUID: arkGUID, Offset: headerSize, Length: 4},
+				{GUID: askGUID, Offset: headerSize + 10, Length: 4},
+			},
+			want: []CertTableEntry{
+				{GUID: arkGUID, RawCert: []byte("0123")},
+				{GUID: askGUID, RawCert: []byte("abcd")},
+			},
+		},
+		{
+			name: "out_of_order_entries",
+			headers: []CertTableHeaderEntry{
+				{GUID: arkGUID, Offset: headerSize + 10, Length: 6},
+				{GUID: askGUID, Offset: headerSize, Length: 4},
+			},
+			want: []CertTableEntry{
+				{GUID: arkGUID, RawCert: []byte("abcdef")},
+				{GUID: askGUID, RawCert: []byte("0123")},
+			},
+		},
+		{
+			name: "zero_length_entry",
+			headers: []CertTableHeaderEntry{
+				{GUID: arkGUID, Offset: headerSize, Length: 6},
+				{GUID: askGUID, Offset: headerSize + 2, Length: 0},
+			},
+			want: []CertTableEntry{
+				{GUID: arkGUID, RawCert: []byte("012345")},
+				{GUID: askGUID},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			table := rawCertTable(t, tc.headers, data)
+			c := new(CertTable)
+			if err := c.Unmarshal(table); err != nil {
+				t.Fatalf("c.Unmarshal(%+v) = %v, want nil", tc.headers, err)
+			}
+			if diff := cmp.Diff(tc.want, c.Entries, cmpopts.EquateEmpty()); diff != "" {
+				t.Errorf("c.Unmarshal(%+v) entries diff (-want +got):\n%s", tc.headers, diff)
+			}
+		})
+	}
+}
+
+func TestCertTableUnmarshalRejectsOverlap(t *testing.T) {
+	const twoEntryHeaderSize = (2 + 1) * CertTableEntrySize
+	const threeEntryHeaderSize = (3 + 1) * CertTableEntrySize
+	arkGUID := uuid.MustParse(ArkGUID)
+	askGUID := uuid.MustParse(AskGUID)
+	vcekGUID := uuid.MustParse(VcekGUID)
+	// Use a padded data block larger than the sum of entry lengths to confirm overlap is checked directly.
+	paddedData := make([]byte, 64)
+
+	tests := []struct {
+		name    string
+		headers []CertTableHeaderEntry
+	}{
+		{
+			name: "one_byte_overlap_with_trailing_padding",
+			headers: []CertTableHeaderEntry{
+				{GUID: arkGUID, Offset: twoEntryHeaderSize, Length: 11},
+				{GUID: askGUID, Offset: twoEntryHeaderSize + 10, Length: 6},
+			},
+		},
+		{
+			name: "out_of_order_overlap",
+			headers: []CertTableHeaderEntry{
+				{GUID: arkGUID, Offset: twoEntryHeaderSize + 10, Length: 6},
+				{GUID: askGUID, Offset: twoEntryHeaderSize, Length: 11},
+			},
+		},
+		{
+			name: "duplicate_range",
+			headers: []CertTableHeaderEntry{
+				{GUID: arkGUID, Offset: twoEntryHeaderSize, Length: 16},
+				{GUID: askGUID, Offset: twoEntryHeaderSize, Length: 16},
+			},
+		},
+		{
+			name: "nested_range",
+			headers: []CertTableHeaderEntry{
+				{GUID: arkGUID, Offset: twoEntryHeaderSize, Length: 16},
+				{GUID: askGUID, Offset: twoEntryHeaderSize + 4, Length: 4},
+			},
+		},
+		{
+			name: "overlap_across_zero_length_entry",
+			headers: []CertTableHeaderEntry{
+				{GUID: arkGUID, Offset: threeEntryHeaderSize, Length: 10},
+				{GUID: vcekGUID, Offset: threeEntryHeaderSize + 4, Length: 0},
+				{GUID: askGUID, Offset: threeEntryHeaderSize + 5, Length: 10},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			table := rawCertTable(t, tc.headers, paddedData)
+			c := new(CertTable)
+			if err := c.Unmarshal(table); !errors.Is(err, ErrCertTableOverlap) {
+				t.Errorf("c.Unmarshal(%+v) = %v, want %v", tc.headers, err, ErrCertTableOverlap)
 			}
 		})
 	}

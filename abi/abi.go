@@ -19,8 +19,10 @@ import (
 	"crypto/ecdsa"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math/big"
+	"sort"
 
 	pb "github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/google/logger"
@@ -862,19 +864,51 @@ func ParseSnpCertTableHeader(certs []byte) ([]CertTableHeaderEntry, error) {
 	return entries, nil
 }
 
+// ErrCertTableOverlap indicates that two certificate table entries have overlapping byte ranges.
+var ErrCertTableOverlap = errors.New("cert table entries overlap")
+
 // Unmarshal populates the certTable with the (GUID, Blob) pairs represented in the given bytes.
 // The format of the bytes is specified by the SEV SNP API for extended guest requests.
+//
+// Entry byte ranges must not overlap.
 func (c *CertTable) Unmarshal(certs []byte) error {
 	certTableHeader, err := ParseSnpCertTableHeader(certs)
 	if err != nil {
 		return err
 	}
+	type certSpan struct {
+		index int
+		start uint64
+		end   uint64
+	}
+	spans := make([]certSpan, 0, len(certTableHeader))
 	for i, entry := range certTableHeader {
-		var next CertTableEntry
-		copy(next.GUID[:], entry.GUID[:])
-		if uint64(entry.Offset)+uint64(entry.Length) > uint64(len(certs)) {
+		start := uint64(entry.Offset)
+		end := start + uint64(entry.Length)
+		if end > uint64(len(certs)) {
 			return fmt.Errorf("cert table entry %d specifies a byte range outside the certificate data block (size %d): offset=%d, length=%d", i, len(certs), entry.Offset, entry.Length)
 		}
+		if entry.Length > 0 {
+			spans = append(spans, certSpan{index: i, start: start, end: end})
+		}
+	}
+	sort.Slice(spans, func(i, j int) bool {
+		if spans[i].start != spans[j].start {
+			return spans[i].start < spans[j].start
+		}
+		return spans[i].index < spans[j].index
+	})
+	for i := 1; i < len(spans); i++ {
+		if spans[i].start < spans[i-1].end {
+			return fmt.Errorf("%w: entry %d [%d:%d] overlaps entry %d [%d:%d]",
+				ErrCertTableOverlap,
+				spans[i-1].index, spans[i-1].start, spans[i-1].end,
+				spans[i].index, spans[i].start, spans[i].end)
+		}
+	}
+	for _, entry := range certTableHeader {
+		var next CertTableEntry
+		copy(next.GUID[:], entry.GUID[:])
 		next.RawCert = make([]byte, entry.Length)
 		copy(next.RawCert, certs[entry.Offset:entry.Offset+entry.Length])
 		c.Entries = append(c.Entries, next)
