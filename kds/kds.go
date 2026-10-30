@@ -280,44 +280,60 @@ func DecomposeTCBVersionV0(raw uint64) TCBVersionV0 {
 	}
 }
 
+// Largest valid SPL values in KDS REST TCB query parameters, from AMD Publication #57230 Table 13
+// (Milan, Genoa, and Turin REST API Parameters).
+const (
+	// maxSPL is the largest valid value of every SPL parameter except ucodeSPL.
+	maxSPL = 127
+	// maxUcodeSPL is the largest valid value of the ucodeSPL parameter.
+	maxUcodeSPL = 255
+)
+
+// parseSPL returns the value of the KDS TCB version URL argument key. The argument must be present
+// exactly once, with a value in 0..maxVal.
+func parseSPL(values url.Values, key string, maxVal int) (uint8, error) {
+	valuelist, ok := values[key]
+	if !ok {
+		return 0, fmt.Errorf("missing KDS TCB version URL argument %q", key)
+	}
+	if len(valuelist) != 1 {
+		return 0, fmt.Errorf("expected exactly one value for KDS TCB version URL argument %q, got %d", key, len(valuelist))
+	}
+	number, err := strconv.Atoi(valuelist[0])
+	if err != nil || number < 0 || number > maxVal {
+		return 0, fmt.Errorf("invalid KDS TCB version URL argument value %q, want a value 0-%d", valuelist[0], maxVal)
+	}
+	return uint8(number), nil
+}
+
 // ParseTCBVersionV0 parses KDS REST query parameters into a TCBVersionV0.
-// Valid parameter value ranges are specified in AMD Publication #57230 Table 13
-// (Milan and Genoa REST API Parameters): ucodeSPL is in 0..255; all other SPL fields are in 0..127.
+// The parameters blSPL, teeSPL, snpSPL, and ucodeSPL must each be present exactly once, and no
+// other parameters are allowed. Valid parameter value ranges are specified in AMD Publication
+// #57230 Table 13 (Milan and Genoa REST API Parameters): ucodeSPL is in 0..255; all other SPL
+// fields are in 0..127.
 func ParseTCBVersionV0(values url.Values) (TCBVersionV0, error) {
-	var blSpl, teeSpl, snpSpl, ucodeSpl uint8
-	for key, valuelist := range values {
-		if len(valuelist) != 1 {
-			return TCBVersionV0{}, fmt.Errorf("expected exactly one value for KDS TCB version URL argument %q, got %d", key, len(valuelist))
-		}
-		var target *uint8
-		// AMD Publication #57230 Table 13: blSPL, teeSPL, snpSPL are in the range 0..127.
-		maxVal := 127
+	for key := range values {
 		switch key {
-		case "blSPL":
-			target = &blSpl
-		case "teeSPL":
-			target = &teeSpl
-		case "snpSPL":
-			target = &snpSpl
-		case "ucodeSPL":
-			// AMD Publication #57230 Table 13: ucodeSPL is in the range 0..255.
-			maxVal = 255
-			target = &ucodeSpl
+		case "blSPL", "teeSPL", "snpSPL", "ucodeSPL":
 		default:
 			return TCBVersionV0{}, fmt.Errorf("unexpected KDS TCB version URL argument %q", key)
 		}
-		number, err := strconv.Atoi(valuelist[0])
-		if err != nil || number < 0 || number > maxVal {
-			return TCBVersionV0{}, fmt.Errorf("invalid KDS TCB version URL argument value %q, want a value 0-%d", valuelist[0], maxVal)
-		}
-		*target = uint8(number)
 	}
-	return TCBVersionV0{
-		BlSpl:    blSpl,
-		TeeSpl:   teeSpl,
-		SnpSpl:   snpSpl,
-		UcodeSpl: ucodeSpl,
-	}, nil
+	var t TCBVersionV0
+	var err error
+	if t.BlSpl, err = parseSPL(values, "blSPL", maxSPL); err != nil {
+		return TCBVersionV0{}, err
+	}
+	if t.TeeSpl, err = parseSPL(values, "teeSPL", maxSPL); err != nil {
+		return TCBVersionV0{}, err
+	}
+	if t.SnpSpl, err = parseSPL(values, "snpSPL", maxSPL); err != nil {
+		return TCBVersionV0{}, err
+	}
+	if t.UcodeSpl, err = parseSPL(values, "ucodeSPL", maxUcodeSPL); err != nil {
+		return TCBVersionV0{}, err
+	}
+	return t, nil
 }
 
 // TCBVersionV1 represents the platform security patch levels for StructVersion 1 (Turin).
@@ -402,46 +418,36 @@ func DecomposeTCBVersionV1(raw uint64) TCBVersionV1 {
 }
 
 // ParseTCBVersionV1 parses KDS REST query parameters into a TCBVersionV1.
-// Valid parameter value ranges are specified in AMD Publication #57230 Table 13
-// (Turin REST API Parameters): ucodeSPL is in 0..255; all other SPL fields are in 0..127.
+// The parameters fmcSPL, blSPL, teeSPL, snpSPL, and ucodeSPL must each be present exactly once,
+// and no other parameters are allowed. Valid parameter value ranges are specified in AMD
+// Publication #57230 Table 13 (Turin REST API Parameters): ucodeSPL is in 0..255; all other SPL
+// fields are in 0..127.
 func ParseTCBVersionV1(values url.Values) (TCBVersionV1, error) {
-	var fmcSpl, blSpl, teeSpl, snpSpl, ucodeSpl uint8
-	for key, valuelist := range values {
-		if len(valuelist) != 1 {
-			return TCBVersionV1{}, fmt.Errorf("expected exactly one value for KDS TCB version URL argument %q, got %d", key, len(valuelist))
-		}
-		var target *uint8
-		// AMD Publication #57230 Table 13: fmcSPL, blSPL, teeSPL, snpSPL are in the range 0..127.
-		maxVal := 127
+	for key := range values {
 		switch key {
-		case "fmcSPL":
-			target = &fmcSpl
-		case "blSPL":
-			target = &blSpl
-		case "teeSPL":
-			target = &teeSpl
-		case "snpSPL":
-			target = &snpSpl
-		case "ucodeSPL":
-			// AMD Publication #57230 Table 13: ucodeSPL is in the range 0..255.
-			maxVal = 255
-			target = &ucodeSpl
+		case "fmcSPL", "blSPL", "teeSPL", "snpSPL", "ucodeSPL":
 		default:
 			return TCBVersionV1{}, fmt.Errorf("unexpected KDS TCB version URL argument %q", key)
 		}
-		number, err := strconv.Atoi(valuelist[0])
-		if err != nil || number < 0 || number > maxVal {
-			return TCBVersionV1{}, fmt.Errorf("invalid KDS TCB version URL argument value %q, want a value 0-%d", valuelist[0], maxVal)
-		}
-		*target = uint8(number)
 	}
-	return TCBVersionV1{
-		FmcSpl:   fmcSpl,
-		BlSpl:    blSpl,
-		TeeSpl:   teeSpl,
-		SnpSpl:   snpSpl,
-		UcodeSpl: ucodeSpl,
-	}, nil
+	var t TCBVersionV1
+	var err error
+	if t.FmcSpl, err = parseSPL(values, "fmcSPL", maxSPL); err != nil {
+		return TCBVersionV1{}, err
+	}
+	if t.BlSpl, err = parseSPL(values, "blSPL", maxSPL); err != nil {
+		return TCBVersionV1{}, err
+	}
+	if t.TeeSpl, err = parseSPL(values, "teeSPL", maxSPL); err != nil {
+		return TCBVersionV1{}, err
+	}
+	if t.SnpSpl, err = parseSPL(values, "snpSPL", maxSPL); err != nil {
+		return TCBVersionV1{}, err
+	}
+	if t.UcodeSpl, err = parseSPL(values, "ucodeSPL", maxUcodeSPL); err != nil {
+		return TCBVersionV1{}, err
+	}
+	return t, nil
 }
 
 // DecomposeTCBVersion decomposes a raw 64-bit TCB integer into a TCBVersion for the given structVersion.
