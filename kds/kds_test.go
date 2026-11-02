@@ -15,6 +15,7 @@
 package kds
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/pem"
 	"fmt"
@@ -450,7 +451,7 @@ func FuzzParseProductCertChainStructured(f *testing.F) {
 		ask, ark, err := ParseProductCertChain(input)
 		// Mirrors the acceptance rules in ParseProductCertChain's checkForm plus its trailing-bytes
 		// check; update both together.
-		wantErr := !askIsCert || !arkIsCert || askHeaders || arkHeaders || len(trailer) != 0
+		wantErr := !askIsCert || !arkIsCert || askHeaders || arkHeaders || len(bytes.TrimSpace(trailer)) != 0
 		if wantErr {
 			if err == nil {
 				t.Fatalf("ParseProductCertChain accepted malformed input: isCert=%v/%v headers=%v/%v trailer=%d bytes",

@@ -16,6 +16,7 @@
 package kds
 
 import (
+	"bytes"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
@@ -729,7 +730,8 @@ func ParseProductCertChain(pems []byte) ([]byte, []byte, error) {
 	if err := multierr.Combine(checkForm("ASK or ASVK", askBlock), checkForm("ARK", arkBlock)); err != nil {
 		return nil, nil, err
 	}
-	if len(noRest) != 0 {
+	// AMD KDS serves some chains, e.g. vlek/v1/Turin, with a trailing blank line.
+	if len(bytes.TrimSpace(noRest)) != 0 {
 		return nil, nil, fmt.Errorf("unexpected trailing bytes: %d bytes", len(noRest))
 	}
 	return askBlock.Bytes, arkBlock.Bytes, nil

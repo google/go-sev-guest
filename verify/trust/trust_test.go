@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/google/go-sev-guest/abi"
+	"github.com/google/go-sev-guest/kds"
 	test "github.com/google/go-sev-guest/testing"
 	"github.com/google/go-sev-guest/verify/testdata"
 	"github.com/google/go-sev-guest/verify/trust"
@@ -197,6 +198,24 @@ func TestGetProductChainForRaceDetector(t *testing.T) {
 	}
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestVlekProductCertChains(t *testing.T) {
+	testCases := []struct {
+		name  string
+		chain []byte
+	}{
+		{name: "Milan", chain: trust.AskArkMilanVlekBytes},
+		{name: "Genoa", chain: trust.AskArkGenoaVlekBytes},
+		{name: "Turin", chain: trust.AskArkTurinVlekBytes},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, err := kds.ParseProductCertChain(tc.chain); err != nil {
+				t.Errorf("ParseProductCertChain() = %v, want nil", err)
+			}
+		})
 	}
 }
 
