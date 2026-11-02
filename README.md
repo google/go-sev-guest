@@ -94,7 +94,9 @@ This type contains three fields:
 
 *   `CheckRevocations bool`: if true, then `SnpAttestation` will download the
     certificate revocation list (CRL) and check for revocations.
-*   `Getter HTTPSGetter`: must be non-`nil` if `CheckRevocations` is true.
+*   `Getter HTTPSGetter`: required if `CheckRevocations` is true or if the
+    attestation is missing certificates. If `nil`, the library makes no network
+    requests, and a missing certificate or CRL returns `ErrNoGetter`.
 *   `TrustedRoots map[string][]*AMDRootCerts`: if `nil`, uses the library's embedded certificates.
      Maps a product name to all allowed root certifications for that product (e.g., Milan).
 

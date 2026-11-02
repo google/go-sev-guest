@@ -27,6 +27,7 @@ import (
 	_ "embed"
 	"encoding/asn1"
 	"encoding/pem"
+	"errors"
 	"flag"
 	"fmt"
 	"math/big"
@@ -1206,5 +1207,100 @@ func TestAttestationCertificateFetching(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// mustFakeAttestationWithCompleteChain returns a test attestation and root certificates to verify its chain.
+func mustFakeAttestationWithCompleteChain(t *testing.T) (*spb.Attestation, map[string][]*trust.AMDRootCerts) {
+	t.Helper()
+	if !sg.UseDefaultSevGuest() {
+		t.Skip("requires test certificates")
+	}
+	qp, roots, _, _ := testclient.GetSevQuoteProvider(test.TestCases(), &test.DeviceOptions{Now: time.Now()}, t)
+	attestation, err := sg.GetQuoteProto(qp, [64]byte{})
+	if err != nil {
+		t.Fatalf("Setup: GetQuoteProto() failed: %v", err)
+	}
+	return attestation, roots
+}
+
+func mustSignCRL(t *testing.T, s *test.AmdSigner, number int64, thisUpdate, nextUpdate time.Time) []byte {
+	t.Helper()
+	der, err := x509.CreateRevocationList(crand.Reader, &x509.RevocationList{
+		SignatureAlgorithm: x509.SHA384WithRSAPSS,
+		Number:             big.NewInt(number),
+		ThisUpdate:         thisUpdate,
+		NextUpdate:         nextUpdate,
+	}, s.Ark, s.Keys.Ark)
+	if err != nil {
+		t.Fatalf("Setup: CreateRevocationList() failed: %v", err)
+	}
+	return der
+}
+
+func mustParseCRL(t *testing.T, der []byte) *x509.RevocationList {
+	t.Helper()
+	crl, err := x509.ParseRevocationList(der)
+	if err != nil {
+		t.Fatalf("Setup: ParseRevocationList() failed: %v", err)
+	}
+	return crl
+}
+
+func TestSnpAttestationNilGetterCompleteChainVerifies(t *testing.T) {
+	attestation, roots := mustFakeAttestationWithCompleteChain(t)
+	options := &Options{TrustedRoots: roots, Now: time.Now(), Product: attestation.Product}
+
+	if err := SnpAttestation(attestation, options); err != nil {
+		t.Errorf("SnpAttestation() = %v, want nil", err)
+	}
+}
+
+func TestSnpAttestationNilGetterMissingVcekReturnsErrNoGetter(t *testing.T) {
+	attestation, roots := mustFakeAttestationWithCompleteChain(t)
+	attestation.CertificateChain.VcekCert = nil
+	options := &Options{TrustedRoots: roots, Now: time.Now(), Product: attestation.Product}
+
+	if err := SnpAttestation(attestation, options); !errors.Is(err, ErrNoGetter) {
+		t.Errorf("SnpAttestation() = %v, want %v", err, ErrNoGetter)
+	}
+}
+
+func TestGetAttestationFromReportNilGetterReturnsErrNoGetter(t *testing.T) {
+	attestation, roots := mustFakeAttestationWithCompleteChain(t)
+	options := &Options{TrustedRoots: roots, Now: time.Now(), Product: attestation.Product}
+
+	if _, err := GetAttestationFromReport(attestation.Report, options); !errors.Is(err, ErrNoGetter) {
+		t.Errorf("GetAttestationFromReport() = _, %v, want _, %v", err, ErrNoGetter)
+	}
+}
+
+func TestSnpAttestationNilGetterUncachedCRLFailsClosed(t *testing.T) {
+	attestation, roots := mustFakeAttestationWithCompleteChain(t)
+	options := &Options{
+		TrustedRoots:     roots,
+		Now:              time.Now(),
+		Product:          attestation.Product,
+		CheckRevocations: true,
+	}
+
+	err := SnpAttestation(attestation, options)
+	var crlErr CRLUnavailableErr
+	if !errors.Is(err, ErrNoGetter) || errors.As(err, &crlErr) {
+		t.Errorf("SnpAttestation() = %v, want %v and not CRLUnavailableErr", err, ErrNoGetter)
+	}
+}
+
+func TestGetCrlAndCheckRootNilGetterUsesCachedCRL(t *testing.T) {
+	signMu.Do(initSigner)
+	now := time.Now()
+	crl := mustParseCRL(t, mustSignCRL(t, signer, 1, now.Add(-time.Hour), now.Add(time.Hour)))
+	root := trust.AMDRootCertsProduct(test.GetProductLine())
+	root.ProductCerts = &trust.ProductCerts{Ark: signer.Ark, Ask: signer.Ask}
+	root.CRL = crl
+
+	got, err := GetCrlAndCheckRoot(root, &Options{Now: now})
+	if err != nil || got != crl {
+		t.Errorf("GetCrlAndCheckRoot() = %v, %v, want the cached CRL and nil", got, err)
 	}
 }
