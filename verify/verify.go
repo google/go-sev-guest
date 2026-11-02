@@ -266,6 +266,9 @@ func GetCrlAndCheckRoot(r *trust.AMDRootCerts, opts *Options) (*x509.RevocationL
 // GetCrlAndCheckRootContext behaves like GetCrlAndCheckRoot but forwards the context to the
 // HTTPSGetter.
 func GetCrlAndCheckRootContext(ctx context.Context, r *trust.AMDRootCerts, opts *Options) (*x509.RevocationList, error) {
+	if opts.Now.IsZero() {
+		return nil, ErrZeroNow
+	}
 	r.Mu.Lock()
 	defer r.Mu.Unlock()
 	getter := opts.Getter
@@ -542,6 +545,9 @@ func SnpProtoReportSignature(report *spb.Report, vcek *x509.Certificate) error {
 	return SnpReportSignature(raw, vcek)
 }
 
+// ErrZeroNow indicates that Options.Now is zero.
+var ErrZeroNow = errors.New("zero Options.Now")
+
 // Options represents verification options for an SEV-SNP attestation report.
 type Options struct {
 	// CheckRevocations set to true if the verifier should retrieve the CRL from the network and check
@@ -553,7 +559,8 @@ type Options struct {
 	// Getter takes a URL and returns the body of its contents. By default uses http.Get and returns
 	// the body. If Getter implements trust.ContextHTTPSGetter, GetContext will be preferred over Get.
 	Getter trust.HTTPSGetter
-	// Now is the time at which to verify the validity of certificates. If unset, uses time.Now().
+	// Now is the time at which verification checks certificate validity. If Now is zero,
+	// verification returns ErrZeroNow.
 	Now time.Time
 	// TrustedRoots specifies the ARK and ASK certificates to trust when checking the VCEK. If nil,
 	// then verification will fall back on embedded AMD-published root certificates.
@@ -653,6 +660,9 @@ func SnpAttestationContext(ctx context.Context, attestation *spb.Attestation, op
 	}
 	if attestation == nil {
 		return fmt.Errorf("attestation cannot be nil")
+	}
+	if options.Now.IsZero() {
+		return ErrZeroNow
 	}
 	// Verification uses configured or embedded roots, not the report's root chain.
 	if err := fillInAttestation(ctx, attestation, options, false); err != nil {

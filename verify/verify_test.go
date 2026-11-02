@@ -27,6 +27,7 @@ import (
 	_ "embed"
 	"encoding/asn1"
 	"encoding/pem"
+	"errors"
 	"flag"
 	"fmt"
 	"math/big"
@@ -350,7 +351,7 @@ func TestKdsMetadataLogic(t *testing.T) {
 			Product: abi.DefaultSevProduct(),
 		}
 		if tc.wantErr != "" {
-			options = &Options{Product: abi.DefaultSevProduct()}
+			options = &Options{Now: options.Now, Product: abi.DefaultSevProduct()}
 		}
 		vcekPem := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: newSigner.Vcek.Raw})
 		vcek, _, err := decodeCerts(&spb.CertificateChain{VcekCert: vcekPem, AskCert: newSigner.Ask.Raw, ArkCert: newSigner.Ark.Raw}, abi.VcekReportSigner, "", options)
@@ -430,7 +431,7 @@ func TestCRLRootValidity(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			wantErr := "CRL is not signed by ARK"
-			if err := vcekNotRevoked(root, signer2.Vcek, &Options{Getter: g2}); !test.Match(err, wantErr) {
+			if err := vcekNotRevoked(root, signer2.Vcek, &Options{Getter: g2, Now: now}); !test.Match(err, wantErr) {
 				t.Errorf("Bad Root: VcekNotRevoked(%v) did not error as expected. Got %v, want %v", signer.Vcek, err, wantErr)
 			}
 
@@ -441,7 +442,7 @@ func TestCRLRootValidity(t *testing.T) {
 				Ask: signer2.Ask,
 			}
 			wantErr2 := "ASK was revoked at 2022-06-14 12:01:00 +0000 UTC"
-			if err := vcekNotRevoked(root2, signer2.Vcek, &Options{Getter: g2}); !test.Match(err, wantErr2) {
+			if err := vcekNotRevoked(root2, signer2.Vcek, &Options{Getter: g2, Now: now}); !test.Match(err, wantErr2) {
 				t.Errorf("Bad ASK: VcekNotRevoked(%v) did not error as expected. Got %v, want %v", signer.Vcek, err, wantErr2)
 			}
 
@@ -491,6 +492,7 @@ func (p *providerCache) forceProvider(t testing.TB, fms uint32) *providerData {
 	options := &Options{
 		TrustedRoots:        goodRoots,
 		Getter:              kds,
+		Now:                 dopts.Now,
 		Product:             dopts.Product,
 		DisableCertFetching: *requireCache && !sg.UseDefaultSevGuest(),
 	}
@@ -529,7 +531,7 @@ func fullQuoteTest(t *testing.T, pd *providerData, getReport *reportGetterProfil
 		if tc.EK == test.KeyChoiceVlek && getReport.vlekBadRootErr != "" {
 			wantBad = getReport.vlekBadRootErr
 		}
-		badOptions := &Options{TrustedRoots: pd.badRoots, Getter: pd.opts.Getter, Product: pd.opts.Product}
+		badOptions := &Options{TrustedRoots: pd.badRoots, Getter: pd.opts.Getter, Now: pd.opts.Now, Product: pd.opts.Product}
 		if err := snpAttestation(ereport, badOptions); !test.Match(err, wantBad) {
 			t.Errorf("%s(_) bad root test errored unexpectedly: %v, want %s",
 				name, err, wantBad)
@@ -673,7 +675,7 @@ func TestGetQuoteProviderVerify(t *testing.T) {
 						if err := snpAttestation(ereport, pd.opts); !test.Match(err, wantAttestationErr) {
 							t.Errorf("%s(%v) = %v. Want err: %q", name, ereport, err, wantAttestationErr)
 						}
-						badOptions := &Options{TrustedRoots: pd.badRoots, Getter: pd.opts.Getter, Product: pd.opts.Product}
+						badOptions := &Options{TrustedRoots: pd.badRoots, Getter: pd.opts.Getter, Now: pd.opts.Now, Product: pd.opts.Product}
 						wantBad := "error verifying VCEK certificate"
 						if err := snpAttestation(ereport, badOptions); !test.Match(err, wantBad) {
 							t.Errorf("%s(_) bad root test errored unexpectedly: %v, want %s",
@@ -707,6 +709,7 @@ func TestGetQuoteProviderVerifyProductNameSteppingMismatch(t *testing.T) {
 	options := &Options{
 		TrustedRoots:        goodRoots,
 		Getter:              kds,
+		Now:                 time.Now(),
 		DisableCertFetching: *requireCache && !sg.UseDefaultSevGuest(),
 	}
 	withProduct := func(p *spb.SevProduct) *Options {
@@ -823,7 +826,7 @@ func TestRealAttestationVerification(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				t.Run(name, func(t *testing.T) {
-					opts := &Options{Getter: getter, Product: tc.product}
+					opts := &Options{Getter: getter, Now: time.Now(), Product: tc.product}
 					if err := rawSnpReport(testdata.AttestationBytes, opts); !test.Match(err, tc.wantErr) {
 						t.Errorf("%s(_, %+v) = %v errored unexpectedly. Want %q", name, opts, err, tc.wantErr)
 					}
@@ -1206,5 +1209,17 @@ func TestAttestationCertificateFetching(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSnpAttestationRejectsZeroNow(t *testing.T) {
+	if err := SnpAttestation(&spb.Attestation{}, &Options{}); !errors.Is(err, ErrZeroNow) {
+		t.Errorf("SnpAttestation() = %v, want %v", err, ErrZeroNow)
+	}
+}
+
+func TestGetCrlAndCheckRootRejectsZeroNow(t *testing.T) {
+	if _, err := GetCrlAndCheckRoot(&trust.AMDRootCerts{}, &Options{}); !errors.Is(err, ErrZeroNow) {
+		t.Errorf("GetCrlAndCheckRoot() = %v, want %v", err, ErrZeroNow)
 	}
 }

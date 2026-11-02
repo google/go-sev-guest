@@ -484,6 +484,7 @@ func main() {
 		die(err)
 	}
 	sopts.Product = product
+	sopts.Now = time.Now()
 	sopts.Getter = &trust.RetryHTTPSGetter{
 		Timeout:       *timeout,
 		MaxRetryDelay: *maxRetryDelay,

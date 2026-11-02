@@ -90,13 +90,15 @@ verify.SnpAttestation(myAttestation, verify.DefaultOptions())
 
 #### `Options` type
 
-This type contains three fields:
+This type contains these fields:
 
 *   `CheckRevocations bool`: if true, then `SnpAttestation` will download the
     certificate revocation list (CRL) and check for revocations.
 *   `Getter HTTPSGetter`: must be non-`nil` if `CheckRevocations` is true.
 *   `TrustedRoots map[string][]*AMDRootCerts`: if `nil`, uses the library's embedded certificates.
      Maps a product name to all allowed root certifications for that product (e.g., Milan).
+*   `Now time.Time`: the time at which verification checks certificate validity.
+    If zero, verification returns `ErrZeroNow`.
 
 The `HTTPSGetter` interface consists of a single method `Get(url string)
 ([]byte, error)` that should return the body of the HTTPS response.
