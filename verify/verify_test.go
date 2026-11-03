@@ -1375,3 +1375,12 @@ func FuzzSnpAttestation(f *testing.F) {
 		_ = SnpAttestation(attestation, &Options{Getter: getter, Now: now})
 	})
 }
+
+func TestGetCrlAndCheckRootZeroNowExpiredCRL(t *testing.T) {
+	root := trust.AMDRootCertsProduct(test.GetProductLine())
+	root.CRL = &x509.RevocationList{NextUpdate: time.Now().Add(-time.Hour)}
+
+	if _, err := GetCrlAndCheckRoot(root, &Options{}); !errors.Is(err, ErrNoGetter) {
+		t.Errorf("GetCrlAndCheckRoot() = _, %v, want _, %v", err, ErrNoGetter)
+	}
+}

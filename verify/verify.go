@@ -270,7 +270,11 @@ func GetCrlAndCheckRoot(r *trust.AMDRootCerts, opts *Options) (*x509.RevocationL
 func GetCrlAndCheckRootContext(ctx context.Context, r *trust.AMDRootCerts, opts *Options) (*x509.RevocationList, error) {
 	r.Mu.Lock()
 	defer r.Mu.Unlock()
-	if r.CRL != nil && opts.Now.Before(r.CRL.NextUpdate) {
+	now := opts.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if r.CRL != nil && now.Before(r.CRL.NextUpdate) {
 		if err := verifyCRL(r); err != nil {
 			return nil, err
 		}
