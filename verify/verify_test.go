@@ -1208,3 +1208,44 @@ func TestAttestationCertificateFetching(t *testing.T) {
 		})
 	}
 }
+
+func TestGetCrlAndCheckRootZeroNowRefetchesExpiredCRL(t *testing.T) {
+	signMu.Do(initSigner)
+	now := time.Now()
+	expiredDER, err := x509.CreateRevocationList(crand.Reader, &x509.RevocationList{
+		SignatureAlgorithm: x509.SHA384WithRSAPSS,
+		Number:             big.NewInt(1),
+		ThisUpdate:         now.Add(-2 * time.Hour),
+		NextUpdate:         now.Add(-time.Hour),
+	}, signer.Ark, signer.Keys.Ark)
+	if err != nil {
+		t.Fatalf("Setup: CreateRevocationList(expired) failed: %v", err)
+	}
+	expiredCRL, err := x509.ParseRevocationList(expiredDER)
+	if err != nil {
+		t.Fatalf("Setup: ParseRevocationList(expired) failed: %v", err)
+	}
+	freshDER, err := x509.CreateRevocationList(crand.Reader, &x509.RevocationList{
+		SignatureAlgorithm: x509.SHA384WithRSAPSS,
+		Number:             big.NewInt(2),
+		ThisUpdate:         now,
+		NextUpdate:         now.Add(time.Hour),
+	}, signer.Ark, signer.Keys.Ark)
+	if err != nil {
+		t.Fatalf("Setup: CreateRevocationList(fresh) failed: %v", err)
+	}
+	root := trust.AMDRootCertsProduct(test.GetProductLine())
+	root.ProductCerts = &trust.ProductCerts{Ark: signer.Ark, Ask: signer.Ask}
+	root.CRL = expiredCRL
+	getter := test.SimpleGetter(map[string][]byte{
+		signer.Ask.CRLDistributionPoints[0]: freshDER,
+	})
+
+	got, err := GetCrlAndCheckRoot(root, &Options{Getter: getter})
+	if err != nil {
+		t.Fatalf("GetCrlAndCheckRoot() returned unexpected error: %v", err)
+	}
+	if got.Number.Int64() != 2 {
+		t.Errorf("GetCrlAndCheckRoot() returned CRL number %v, want the refetched CRL number 2", got.Number)
+	}
+}
