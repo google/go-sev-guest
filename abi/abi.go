@@ -864,21 +864,41 @@ func ParseSnpCertTableHeader(certs []byte) ([]CertTableHeaderEntry, error) {
 
 // Unmarshal populates the certTable with the (GUID, Blob) pairs represented in the given bytes.
 // The format of the bytes is specified by the SEV SNP API for extended guest requests.
+//
+// The sum of all entry lengths must not exceed the size of the data that follows the header.
+// This bounds the bytes Unmarshal allocates to len(certs), even when entries overlap.
+// Unmarshal validates every entry before it allocates, so c is not changed on error.
 func (c *CertTable) Unmarshal(certs []byte) error {
 	certTableHeader, err := ParseSnpCertTableHeader(certs)
 	if err != nil {
 		return err
 	}
+	if len(certTableHeader) == 0 {
+		return nil
+	}
+	// ParseSnpCertTableHeader read every header entry and the zero terminator from certs,
+	// so headerSize <= len(certs).
+	headerSize := uint64(len(certTableHeader)+1) * CertTableEntrySize
+	dataSize := uint64(len(certs)) - headerSize
+	var total uint64
 	for i, entry := range certTableHeader {
-		var next CertTableEntry
-		copy(next.GUID[:], entry.GUID[:])
 		if uint64(entry.Offset)+uint64(entry.Length) > uint64(len(certs)) {
 			return fmt.Errorf("cert table entry %d specifies a byte range outside the certificate data block (size %d): offset=%d, length=%d", i, len(certs), entry.Offset, entry.Length)
 		}
-		next.RawCert = make([]byte, entry.Length)
-		copy(next.RawCert, certs[entry.Offset:entry.Offset+entry.Length])
-		c.Entries = append(c.Entries, next)
+		total += uint64(entry.Length)
+		if total > dataSize {
+			return fmt.Errorf("cert table entries specify %d or more bytes, which exceeds the certificate data block (size %d): entries overlap or repeat", total, dataSize)
+		}
 	}
+	entries := make([]CertTableEntry, len(certTableHeader))
+	for i, entry := range certTableHeader {
+		start := int(entry.Offset)
+		end := start + int(entry.Length)
+		entries[i].GUID = entry.GUID
+		entries[i].RawCert = make([]byte, entry.Length)
+		copy(entries[i].RawCert, certs[start:end])
+	}
+	c.Entries = append(c.Entries, entries...)
 	return nil
 }
 

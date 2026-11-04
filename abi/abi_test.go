@@ -428,6 +428,136 @@ func TestCertTableUnmarshalUint32Overflow(t *testing.T) {
 	}
 }
 
+// certTableBytes writes headers, a zero terminator, and dataSize zero bytes of data. Each header
+// with a zero Offset gets the offset of the first data byte.
+func certTableBytes(t testing.TB, headers []CertTableHeaderEntry, dataSize int) []byte {
+	t.Helper()
+	headerSize := (len(headers) + 1) * CertTableEntrySize
+	table := make([]byte, headerSize+dataSize)
+	for i, h := range headers {
+		if h.Offset == 0 {
+			h.Offset = uint32(headerSize)
+		}
+		if err := h.Write(table[i*CertTableEntrySize:]); err != nil {
+			t.Fatalf("could not write header %d: %v", i, err)
+		}
+	}
+	return table
+}
+
+func distinctGUID(i int) uuid.UUID {
+	var g uuid.UUID
+	binary.LittleEndian.PutUint64(g[:], uint64(i)+1)
+	return g
+}
+
+func TestCertTableUnmarshalOverlapBounded(t *testing.T) {
+	// Every entry points at the same data range. Before the fix, Unmarshal allocated one copy of
+	// the range per entry, so the allocation grew with entries * range length.
+	const entries = 256
+	const dataSize = 64 << 10
+	headers := make([]CertTableHeaderEntry, entries)
+	for i := range headers {
+		headers[i] = CertTableHeaderEntry{GUID: distinctGUID(i), Length: dataSize}
+	}
+	table := certTableBytes(t, headers, dataSize)
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	c := new(CertTable)
+	err := c.Unmarshal(table)
+	runtime.ReadMemStats(&after)
+
+	if err == nil {
+		t.Errorf("c.Unmarshal() succeeded unexpectedly, want error for overlapping entries")
+	}
+	if len(c.Entries) != 0 {
+		t.Errorf("c.Unmarshal() left %d entries after an error, want 0", len(c.Entries))
+	}
+	if got, limit := after.TotalAlloc-before.TotalAlloc, uint64(4*len(table)); got > limit {
+		t.Errorf("c.Unmarshal() allocated %d bytes for a %d-byte table, want at most %d", got, len(table), limit)
+	}
+}
+
+func TestCertTableUnmarshalLengthBudget(t *testing.T) {
+	const headerSize = 3 * CertTableEntrySize // two entries and the terminator
+	tcs := []struct {
+		name     string
+		headers  []CertTableHeaderEntry
+		dataSize int
+		wantErr  bool
+	}{
+		{
+			name: "contiguous entries fill data exactly",
+			headers: []CertTableHeaderEntry{
+				{GUID: distinctGUID(0), Offset: headerSize, Length: 10},
+				{GUID: distinctGUID(1), Offset: headerSize + 10, Length: 6},
+			},
+			dataSize: 16,
+		},
+		{
+			name: "entries with a gap",
+			headers: []CertTableHeaderEntry{
+				{GUID: distinctGUID(0), Offset: headerSize, Length: 4},
+				{GUID: distinctGUID(1), Offset: headerSize + 10, Length: 6},
+			},
+			dataSize: 16,
+		},
+		{
+			name: "entries overlap by one byte",
+			headers: []CertTableHeaderEntry{
+				{GUID: distinctGUID(0), Offset: headerSize, Length: 11},
+				{GUID: distinctGUID(1), Offset: headerSize + 10, Length: 6},
+			},
+			dataSize: 16,
+			wantErr:  true,
+		},
+		{
+			name: "same range twice",
+			headers: []CertTableHeaderEntry{
+				{GUID: distinctGUID(0), Offset: headerSize, Length: 16},
+				{GUID: distinctGUID(1), Offset: headerSize, Length: 16},
+			},
+			dataSize: 16,
+			wantErr:  true,
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			table := certTableBytes(t, tc.headers, tc.dataSize)
+			c := new(CertTable)
+			err := c.Unmarshal(table)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("c.Unmarshal() = %v, want error: %v", err, tc.wantErr)
+			}
+			if tc.wantErr {
+				return
+			}
+			if len(c.Entries) != len(tc.headers) {
+				t.Fatalf("c.Unmarshal() got %d entries, want %d", len(c.Entries), len(tc.headers))
+			}
+			for i, e := range c.Entries {
+				if e.GUID != tc.headers[i].GUID || uint32(len(e.RawCert)) != tc.headers[i].Length {
+					t.Errorf("entry %d = (%v, %d bytes), want (%v, %d bytes)", i, e.GUID, len(e.RawCert), tc.headers[i].GUID, tc.headers[i].Length)
+				}
+			}
+		})
+	}
+}
+
+// checkCertTableBudget reports a failure if the parsed entries hold more bytes than the input.
+func checkCertTableBudget(t *testing.T, c *CertTable, input []byte) {
+	t.Helper()
+	var total int
+	for _, e := range c.Entries {
+		total += len(e.RawCert)
+	}
+	if total > len(input) {
+		t.Fatalf("entries hold %d bytes, more than the %d-byte input", total, len(input))
+	}
+}
+
 func TestSevProduct(t *testing.T) {
 	oldCpuid := cpuid
 	defer func() { cpuid = oldCpuid }()
@@ -622,6 +752,7 @@ func FuzzCertTableUnmarshal(f *testing.F) {
 		if err := table.Unmarshal(data); err != nil {
 			return
 		}
+		checkCertTableBudget(t, table, data)
 		roundTrip := new(CertTable)
 		if err := roundTrip.Unmarshal(table.Marshal()); err != nil {
 			t.Fatalf("Unmarshal(Marshal()) failed on a table that parsed: %v", err)
@@ -658,6 +789,7 @@ func FuzzCertTableUnmarshalStructured(f *testing.F) {
 		if err := c.Unmarshal(table); err != nil {
 			return
 		}
+		checkCertTableBudget(t, c, table)
 		for i, e := range c.Entries {
 			if uint64(headers[i].Offset)+uint64(headers[i].Length) > uint64(len(table)) {
 				t.Fatalf("entry %d accepted with offset=%d length=%d beyond table size %d", i, headers[i].Offset, headers[i].Length, len(table))
