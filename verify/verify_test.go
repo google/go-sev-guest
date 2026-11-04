@@ -93,7 +93,6 @@ func TestEmbeddedCertsAppendixB3Expectations(t *testing.T) {
 
 func TestFakeCertsKDSExpectations(t *testing.T) {
 	for _, productLine := range kds.ProductLineCpuid {
-		trust.ClearProductCertCache()
 		signer, err := test.DefaultTestOnlyCertChain(productLine+"-B0", time.Now())
 		if err != nil {
 			t.Fatalf("no quote provider for productLine %s: %v", productLine, err)
@@ -213,7 +212,6 @@ func TestSnpReportSignature(t *testing.T) {
 
 func TestKdsMetadataLogic(t *testing.T) {
 	signMu.Do(initSigner)
-	trust.ClearProductCertCache()
 	asn1Zero, _ := asn1.Marshal(0)
 	productName, _ := asn1.MarshalWithParams("Cookie-B0", "ia5")
 	var hwid [64]byte
@@ -365,7 +363,6 @@ func TestKdsMetadataLogic(t *testing.T) {
 func TestCRLRootValidity(t *testing.T) {
 	// Tests that the CRL is signed by the ARK.
 	signMu.Do(initSigner)
-	trust.ClearProductCertCache()
 	now := time.Date(2022, time.June, 14, 12, 0, 0, 0, time.UTC)
 
 	ark2, err := rsa.GenerateKey(insecureRandomness, 4096)
@@ -557,7 +554,6 @@ func fmsFromReport(t testing.TB, report []byte) uint32 {
 // TestOpenGetExtendedReportVerifyClose tests the SnpAttestation function for the deprecated ioctl
 // API.
 func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
-	trust.ClearProductCertCache()
 	tests := test.TestCases()
 	reportOnly := func(qp sg.QuoteProvider, input [64]byte) (*spb.Attestation, error) {
 		attestation, err := sg.GetQuoteProto(qp, input)
@@ -619,7 +615,6 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 		}
 		for _, getReport := range reportGetters {
 			t.Run(tc.Name+"_"+getReport.name, func(t *testing.T) {
-				trust.ClearProductCertCache()
 				if !sg.UseDefaultSevGuest() && tc.EK == test.KeyChoiceVlek {
 					t.Skip()
 					return
@@ -647,7 +642,6 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 
 // TestGetQuoteProviderVerify tests the SnpAttestation function for the configfs-tsm report API.
 func TestGetQuoteProviderVerify(t *testing.T) {
-	trust.ClearProductCertCache()
 	tests := test.TestCases()
 	providerCache := &providerCache{tcs: tests, opts: &test.DeviceOptions{Now: time.Now()}}
 	for _, tc := range tests {
@@ -697,7 +691,6 @@ func TestGetQuoteProviderVerifyProductNameSteppingMismatch(t *testing.T) {
 		t.Skip("Cannot override true cpuid in hardware for negative testing")
 		return
 	}
-	trust.ClearProductCertCache()
 	tests := test.TestCases()
 	signerMilan0, err := test.DefaultTestOnlyCertChain("Milan-B0", time.Now())
 	if err != nil {
@@ -789,7 +782,6 @@ func TestGetQuoteProviderVerifyProductNameSteppingMismatch(t *testing.T) {
 }
 
 func TestRealAttestationVerification(t *testing.T) {
-	trust.ClearProductCertCache()
 	var nonce [64]byte
 	copy(nonce[:], []byte{1, 2, 3, 4, 5})
 	getter := test.SimpleGetter(
@@ -1100,8 +1092,6 @@ func TestTrustedRootsCertificateFetching(t *testing.T) {
 		} {
 			for name, verify := range snpAttestationFuncs {
 				t.Run(fmt.Sprintf("%s/%s/%s", keyName, tc.Name, name), func(t *testing.T) {
-					trust.ClearProductCertCache()
-					t.Cleanup(trust.ClearProductCertCache)
 					attestation, err := sg.GetQuoteProto(qp, input)
 					if err != nil {
 						t.Fatalf("GetQuoteProto() = %v", err)
@@ -1164,8 +1154,6 @@ func TestAttestationCertificateFetching(t *testing.T) {
 		},
 	} {
 		t.Run(tc.Name, func(t *testing.T) {
-			trust.ClearProductCertCache()
-			t.Cleanup(trust.ClearProductCertCache)
 			attestation, err := sg.GetQuoteProto(qp, [64]byte{})
 			if err != nil {
 				t.Fatal(err)
