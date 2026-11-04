@@ -47,6 +47,7 @@ import (
 	"github.com/google/go-sev-guest/verify/testdata"
 	"github.com/google/go-sev-guest/verify/trust"
 	"github.com/google/logger"
+	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
 
@@ -1207,4 +1208,50 @@ func TestAttestationCertificateFetching(t *testing.T) {
 			}
 		})
 	}
+}
+
+// FuzzSnpAttestation mutates an extended report: a raw attestation report followed by a
+// certificate table. ReportCertsToProto splits the input, and SnpAttestation checks the
+// certificate chain and the report signature. The report in both seeds is signed by AMD, so both
+// seeds pass and mutated inputs reach the reject paths.
+func FuzzSnpAttestation(f *testing.F) {
+	vcek, err := x509.ParseCertificate(testdata.VcekBytes)
+	if err != nil {
+		f.Fatalf("ParseCertificate(VcekBytes) failed: %v", err)
+	}
+	report, err := abi.ReportToProto(testdata.AttestationBytes)
+	if err != nil {
+		f.Fatalf("ReportToProto(AttestationBytes) failed: %v", err)
+	}
+	ask, ark, err := kds.ParseProductCertChain(trust.AskArkMilanVcekBytes)
+	if err != nil {
+		f.Fatalf("ParseProductCertChain(AskArkMilanVcekBytes) failed: %v", err)
+	}
+	// The seed with an empty certificate table makes SnpAttestation fetch the VCEK from KDS. The
+	// getter returns testdata.VcekBytes for that URL and a 404 error for every other URL.
+	// The report in both seeds is version 2, which has no CPUID family/model/stepping field.
+	// When the product is unknown, SnpAttestation defaults to Milan-B1 and requests the Milan URL.
+	getter := test.SimpleGetter(map[string][]byte{
+		kds.VCEKCertURL("Milan", report.GetChipId(), kds.DecomposeTCBVersionV0(report.GetReportedTcb())): testdata.VcekBytes,
+	})
+	// A fixed time inside the VCEK validity period keeps results the same after the VCEK expires.
+	now := vcek.NotBefore.Add(24 * time.Hour)
+	certTable := (&abi.CertTable{Entries: []abi.CertTableEntry{
+		{GUID: uuid.MustParse(abi.ArkGUID), RawCert: ark},
+		{GUID: uuid.MustParse(abi.AskGUID), RawCert: ask},
+		{GUID: uuid.MustParse(abi.VcekGUID), RawCert: testdata.VcekBytes},
+	}}).Marshal()
+	emptyTable := (&abi.CertTable{}).Marshal()
+	f.Add(append(append([]byte{}, testdata.AttestationBytes...), certTable...))
+	f.Add(append(append([]byte{}, testdata.AttestationBytes...), emptyTable...))
+
+	f.Fuzz(func(_ *testing.T, data []byte) {
+		attestation, err := abi.ReportCertsToProto(data)
+		if err != nil {
+			return
+		}
+		// SnpAttestation sets options.Product when it is nil. A shared Options would carry one
+		// input's product into the next input, so each call gets a new Options.
+		_ = SnpAttestation(attestation, &Options{Getter: getter, Now: now})
+	})
 }
