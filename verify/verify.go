@@ -272,7 +272,11 @@ func GetCrlAndCheckRootContext(ctx context.Context, r *trust.AMDRootCerts, opts 
 	if getter == nil {
 		getter = trust.DefaultHTTPSGetter()
 	}
-	if r.CRL != nil && opts.Now.Before(r.CRL.NextUpdate) {
+	now := opts.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if r.CRL != nil && now.Before(r.CRL.NextUpdate) {
 		if err := verifyCRL(r); err != nil {
 			return nil, err
 		}
