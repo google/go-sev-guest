@@ -31,6 +31,8 @@ import (
 	"github.com/google/go-sev-guest/kds"
 	test "github.com/google/go-sev-guest/testing"
 	"github.com/google/go-sev-guest/verify"
+	"github.com/google/go-sev-guest/verify/testdata"
+	"github.com/google/uuid"
 	"google.golang.org/protobuf/encoding/prototext"
 
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
@@ -612,6 +614,45 @@ func TestCheckMitigationVectors(t *testing.T) {
 				if !strings.Contains(err.Error(), tc.wantErrSubstr) {
 					t.Errorf("expected error substring %q, got error: %v", tc.wantErrSubstr, err)
 				}
+			}
+		})
+	}
+}
+
+func TestRawSnpAttestationRejectsWrongLengthOption(t *testing.T) {
+	certTable := (&abi.CertTable{Entries: []abi.CertTableEntry{
+		{GUID: uuid.MustParse(abi.VcekGUID), RawCert: testdata.VcekBytes},
+	}}).Marshal()
+	report, err := abi.ReportToProto(testdata.AttestationBytes)
+	if err != nil {
+		t.Fatalf("ReportToProto(AttestationBytes) failed: %v", err)
+	}
+	policy, err := abi.ParseSnpPolicy(report.GetPolicy())
+	if err != nil {
+		t.Fatalf("ParseSnpPolicy(%#x) failed: %v", report.GetPolicy(), err)
+	}
+	// The report's own policy passes, so only the length check fails.
+	tests := []struct {
+		name       string
+		opts       *Options
+		wantOption string
+	}{
+		{name: "report_data", opts: &Options{GuestPolicy: policy, ReportData: []byte{0}}, wantOption: "ReportData"},
+		{name: "host_data", opts: &Options{GuestPolicy: policy, HostData: []byte{0}}, wantOption: "HostData"},
+		{name: "family_id", opts: &Options{GuestPolicy: policy, FamilyID: []byte{0}}, wantOption: "FamilyID"},
+		{name: "image_id", opts: &Options{GuestPolicy: policy, ImageID: []byte{0}}, wantOption: "ImageID"},
+		{name: "report_id", opts: &Options{GuestPolicy: policy, ReportID: []byte{0}}, wantOption: "ReportID"},
+		{name: "report_id_ma", opts: &Options{GuestPolicy: policy, ReportIDMA: []byte{0}}, wantOption: "ReportIDMA"},
+		{name: "measurement", opts: &Options{GuestPolicy: policy, Measurement: []byte{0}}, wantOption: "Measurement"},
+		{name: "chip_id", opts: &Options{GuestPolicy: policy, ChipID: []byte{0}}, wantOption: "ChipID"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := RawSnpAttestation(testdata.AttestationBytes, certTable, tc.opts)
+			// The trailing space prevents "ReportID" from matching "ReportIDMA".
+			want := "option " + tc.wantOption + " "
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("RawSnpAttestation() = %v, want error containing %q", err, want)
 			}
 		})
 	}
