@@ -326,12 +326,24 @@ func validatePolicy(reportPolicy uint64, required abi.SnpPolicy) error {
 	return nil
 }
 
+// OptionLengthError reports an Options field with an incorrect byte length.
+// Option is the field name. Got is the provided length, and Want is the expected length.
+type OptionLengthError struct {
+	Option string
+	Got    int
+	Want   int
+}
+
+func (e *OptionLengthError) Error() string {
+	return fmt.Sprintf("option %s is %d bytes, want %d", e.Option, e.Got, e.Want)
+}
+
 func validateByteField(option, field string, size int, given, required []byte) error {
 	if len(required) == 0 {
 		return nil
 	}
 	if len(required) != size {
-		return fmt.Errorf("option %s must be nil or %d bytes", option, size)
+		return &OptionLengthError{Option: option, Got: len(required), Want: size}
 	}
 	if !bytes.Equal(required, given) {
 		return fmt.Errorf("report field %s is %s. Expect %s",
@@ -597,21 +609,21 @@ func addKeyHashesFromCerts(hashes [][]byte, certs []*x509.Certificate) [][]byte 
 }
 
 func consolidateKeyHashes(options *Options) error {
-	validateHashes := func(hashes [][]byte, size int) error {
+	validateHashes := func(option string, hashes [][]byte, size int) error {
 		for _, hash := range hashes {
 			if len(hash) != size {
-				return fmt.Errorf("found hash with length %d. Expect %d", len(hash), size)
+				return &OptionLengthError{Option: option, Got: len(hash), Want: size}
 			}
 		}
 		return nil
 	}
 
-	if err := validateHashes(options.TrustedIDKeyHashes, abi.IDKeyDigestSize); err != nil {
-		return fmt.Errorf("bad hash size in TrustedIDKeyHashes: %v", err)
+	if err := validateHashes("TrustedIDKeyHashes", options.TrustedIDKeyHashes, abi.IDKeyDigestSize); err != nil {
+		return err
 	}
 
-	if err := validateHashes(options.TrustedAuthorKeyHashes, abi.AuthorKeyDigestSize); err != nil {
-		return fmt.Errorf("bad hash size in TrustedAuthorKeyHashes: %v", err)
+	if err := validateHashes("TrustedAuthorKeyHashes", options.TrustedAuthorKeyHashes, abi.AuthorKeyDigestSize); err != nil {
+		return err
 	}
 
 	options.TrustedIDKeyHashes = addKeyHashesFromCerts(options.TrustedIDKeyHashes,
