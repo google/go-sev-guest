@@ -104,6 +104,10 @@ const (
 // request provides too few pages for the firmware to populate with data.
 const GuestRequestInvalidLength SevFirmwareStatus = 0x100000000
 
+// GuestRequestThrottled is set by the VMM and not the AMD-SP when a guest request has been rejected
+// for arriving too soon after the last.
+const GuestRequestThrottled SevFirmwareStatus = 0x200000000
+
 // SevFirmwareErr is an error that interprets firmware status codes from the AMD secure processor.
 type SevFirmwareErr struct {
 	Status SevFirmwareStatus
