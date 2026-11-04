@@ -25,12 +25,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-sev-guest/abi"
 	sg "github.com/google/go-sev-guest/client"
 	labi "github.com/google/go-sev-guest/client/linuxabi"
 	"github.com/google/go-sev-guest/kds"
 	test "github.com/google/go-sev-guest/testing"
 	"github.com/google/go-sev-guest/verify"
+	"github.com/google/go-sev-guest/verify/testdata"
+	"github.com/google/uuid"
 	"google.golang.org/protobuf/encoding/prototext"
 
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
@@ -612,6 +615,90 @@ func TestCheckMitigationVectors(t *testing.T) {
 				if !strings.Contains(err.Error(), tc.wantErrSubstr) {
 					t.Errorf("expected error substring %q, got error: %v", tc.wantErrSubstr, err)
 				}
+			}
+		})
+	}
+}
+
+func TestRawSnpAttestationRejectsWrongLengthOption(t *testing.T) {
+	certTable := (&abi.CertTable{Entries: []abi.CertTableEntry{
+		{GUID: uuid.MustParse(abi.VcekGUID), RawCert: testdata.VcekBytes},
+	}}).Marshal()
+	report, err := abi.ReportToProto(testdata.AttestationBytes)
+	if err != nil {
+		t.Fatalf("ReportToProto(AttestationBytes) failed: %v", err)
+	}
+	policy, err := abi.ParseSnpPolicy(report.GetPolicy())
+	if err != nil {
+		t.Fatalf("ParseSnpPolicy(%#x) failed: %v", report.GetPolicy(), err)
+	}
+	// The report's own policy passes, so only the length check fails.
+	tests := []struct {
+		name string
+		opts *Options
+		want *OptionLengthError
+	}{
+		{
+			name: "report_data",
+			opts: &Options{GuestPolicy: policy, ReportData: []byte{0}},
+			want: &OptionLengthError{Option: "ReportData", Got: 1, Want: abi.ReportDataSize},
+		},
+		{
+			name: "host_data",
+			opts: &Options{GuestPolicy: policy, HostData: []byte{0}},
+			want: &OptionLengthError{Option: "HostData", Got: 1, Want: abi.HostDataSize},
+		},
+		{
+			name: "family_id",
+			opts: &Options{GuestPolicy: policy, FamilyID: []byte{0}},
+			want: &OptionLengthError{Option: "FamilyID", Got: 1, Want: abi.FamilyIDSize},
+		},
+		{
+			name: "image_id",
+			opts: &Options{GuestPolicy: policy, ImageID: []byte{0}},
+			want: &OptionLengthError{Option: "ImageID", Got: 1, Want: abi.ImageIDSize},
+		},
+		{
+			name: "report_id",
+			opts: &Options{GuestPolicy: policy, ReportID: []byte{0}},
+			want: &OptionLengthError{Option: "ReportID", Got: 1, Want: abi.ReportIDSize},
+		},
+		{
+			name: "report_id_ma",
+			opts: &Options{GuestPolicy: policy, ReportIDMA: []byte{0}},
+			want: &OptionLengthError{Option: "ReportIDMA", Got: 1, Want: abi.ReportIDMASize},
+		},
+		{
+			name: "measurement",
+			opts: &Options{GuestPolicy: policy, Measurement: []byte{0}},
+			want: &OptionLengthError{Option: "Measurement", Got: 1, Want: abi.MeasurementSize},
+		},
+		{
+			name: "chip_id",
+			opts: &Options{GuestPolicy: policy, ChipID: []byte{0}},
+			want: &OptionLengthError{Option: "ChipID", Got: 1, Want: abi.ChipIDSize},
+		},
+		// Validation checks key hashes only when RequireIDBlock is true.
+		{
+			name: "trusted_id_key_hashes",
+			opts: &Options{GuestPolicy: policy, RequireIDBlock: true, TrustedIDKeyHashes: [][]byte{{0}}},
+			want: &OptionLengthError{Option: "TrustedIDKeyHashes", Got: 1, Want: abi.IDKeyDigestSize},
+		},
+		{
+			name: "trusted_author_key_hashes",
+			opts: &Options{GuestPolicy: policy, RequireIDBlock: true, TrustedAuthorKeyHashes: [][]byte{{0}}},
+			want: &OptionLengthError{Option: "TrustedAuthorKeyHashes", Got: 1, Want: abi.AuthorKeyDigestSize},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := RawSnpAttestation(testdata.AttestationBytes, certTable, tc.opts)
+			var got *OptionLengthError
+			if !errors.As(err, &got) {
+				t.Fatalf("RawSnpAttestation() = %v, want *OptionLengthError", err)
+			}
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("RawSnpAttestation() returned unexpected OptionLengthError (-want +got):\n%s", diff)
 			}
 		})
 	}
