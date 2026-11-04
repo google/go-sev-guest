@@ -65,7 +65,7 @@ func (d *LinuxDevice) Open(path string) error {
 
 // OpenDevice opens the SEV-SNP guest device.
 func OpenDevice() (*LinuxDevice, error) {
-	result := &LinuxDevice{}
+	result := &LinuxDevice{lastCmd: time.Now()} // Ensure there is always a delay.
 	path := *sevGuestPath
 	if UseDefaultSevGuest() {
 		path = defaultSevGuestDevicePath
@@ -214,6 +214,15 @@ func (p *LinuxConfigFsQuoteProvider) GetRawQuoteAtLevel(reportData [64]byte, lev
 		Privilege: &report.Privilege{
 			Level: level,
 		},
+	}
+	if *defaultVMPL != "" {
+		vmpl, err := strconv.ParseUint(*defaultVMPL, 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("bad default_vmpl: %q", *defaultVMPL)
+		}
+		req.Privilege = &report.Privilege{
+			Level: uint(vmpl),
+		}
 	}
 	resp, err := linuxtsm.GetReport(req)
 	if err != nil {
