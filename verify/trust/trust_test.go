@@ -268,6 +268,51 @@ func TestSimpleHTTPSGetterStatusError(t *testing.T) {
 	}
 }
 
+func TestSimpleHTTPSGetterBodyAtLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write(bytes.Repeat([]byte{'a'}, 16))
+	}))
+	t.Cleanup(srv.Close)
+
+	getter := &trust.SimpleHTTPSGetter{MaxResponseBytes: 16}
+	if body, err := getter.Get(srv.URL); err != nil || len(body) != 16 {
+		t.Errorf("Get() = %d bytes, %v; want 16 bytes, nil", len(body), err)
+	}
+}
+
+func TestSimpleHTTPSGetterBodyOverLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write(bytes.Repeat([]byte{'a'}, 17))
+	}))
+	t.Cleanup(srv.Close)
+
+	getter := &trust.SimpleHTTPSGetter{MaxResponseBytes: 16}
+	if body, err := getter.Get(srv.URL); err == nil {
+		t.Errorf("Get() = %d bytes, nil; want error", len(body))
+	}
+}
+
+func TestRetryHTTPSGetterBodyOverLimitNotRetried(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.Write(bytes.Repeat([]byte{'a'}, 17))
+	}))
+	t.Cleanup(srv.Close)
+	r := &trust.RetryHTTPSGetter{
+		Timeout:       5 * time.Second,
+		MaxRetryDelay: time.Millisecond,
+		Getter:        &trust.SimpleHTTPSGetter{MaxResponseBytes: 16},
+	}
+
+	if _, err := r.Get(srv.URL); err == nil {
+		t.Fatalf("Get() = _, nil, want error")
+	}
+	if got := calls.Load(); got != 1 {
+		t.Errorf("Get() requests = %d, want 1", got)
+	}
+}
+
 func TestRetryHTTPSGetter404NotRetried(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

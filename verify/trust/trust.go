@@ -155,8 +155,20 @@ func (e *AttestationRecreationErr) Error() string {
 	return e.Msg
 }
 
+// defaultMaxResponseBytes is the response body limit when SimpleHTTPSGetter.MaxResponseBytes
+// is zero. AMD KDS responses are much smaller: a VCEK certificate is about 1.5 KiB and a
+// certificate chain is about 4 KiB.
+const defaultMaxResponseBytes = 1 << 20
+
 // SimpleHTTPSGetter implements the HTTPSGetter interface with http.Get.
-type SimpleHTTPSGetter struct{}
+type SimpleHTTPSGetter struct {
+	// MaxResponseBytes is the largest response body that Get accepts. If zero, the limit
+	// is 1 MiB.
+	MaxResponseBytes int64
+}
+
+// errResponseTooLarge is returned when a response body exceeds the MaxResponseBytes limit.
+var errResponseTooLarge = errors.New("response body too large")
 
 // HTTPStatusError is returned by SimpleHTTPSGetter when the server responds with a status code
 // outside the 2xx range.
@@ -177,7 +189,8 @@ func (n *SimpleHTTPSGetter) Get(url string) ([]byte, error) {
 }
 
 // GetContext behaves like get, but forwards the context to the http package.
-// It returns an *HTTPStatusError for a non-2xx response.
+// It returns an *HTTPStatusError for a non-2xx response, and an error for a response body
+// larger than n.MaxResponseBytes.
 func (n *SimpleHTTPSGetter) GetContext(ctx context.Context, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -192,9 +205,16 @@ func (n *SimpleHTTPSGetter) GetContext(ctx context.Context, url string) ([]byte,
 		return nil, &HTTPStatusError{URL: url, StatusCode: resp.StatusCode}
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	limit := n.MaxResponseBytes
+	if limit == 0 {
+		limit = defaultMaxResponseBytes
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if err != nil {
 		return nil, err
+	}
+	if int64(len(body)) > limit {
+		return nil, fmt.Errorf("failed to retrieve '%s': %w: more than %d bytes", url, errResponseTooLarge, limit)
 	}
 	return body, nil
 }
@@ -203,8 +223,8 @@ func (n *SimpleHTTPSGetter) GetContext(ctx context.Context, url string) ([]byte,
 //
 // It retries only errors that can succeed later: an *HTTPStatusError with status 429 (Too Many
 // Requests) or 5xx, and errors that are not an HTTP status, such as network errors. It returns
-// immediately for other HTTP statuses (for example 404 for an unknown chip ID) and for context
-// cancellation or deadline errors.
+// immediately for other HTTP statuses (for example 404 for an unknown chip ID), for a response
+// body that is too large, and for context cancellation or deadline errors.
 type RetryHTTPSGetter struct {
 	// Timeout is how long to retry before failure.
 	// If Timeout is zero, the Get method will retry indefinitely and the GetContext method will
@@ -219,6 +239,9 @@ type RetryHTTPSGetter struct {
 // isRetryable reports whether a later request can succeed after err.
 func isRetryable(err error) bool {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	if errors.Is(err, errResponseTooLarge) {
 		return false
 	}
 	var statusErr *HTTPStatusError
