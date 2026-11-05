@@ -20,6 +20,7 @@ import (
 	"crypto/x509"
 	_ "embed"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -138,6 +139,9 @@ type ContextHTTPSGetter interface {
 // GetWith gets a resource from a URL using an HTTPSGetter.
 // If the HTTPSGetter implements ContextHTTPSGetter, the GetContext method will be used.
 func GetWith(ctx context.Context, getter HTTPSGetter, url string) ([]byte, error) {
+	if getter == nil {
+		return nil, errors.New("nil HTTPSGetter")
+	}
 	if contextGetter, ok := getter.(ContextHTTPSGetter); ok {
 		return contextGetter.GetContext(ctx, url)
 	}
@@ -203,6 +207,9 @@ func (n *RetryHTTPSGetter) Get(url string) ([]byte, error) {
 // GetContext behaves like get, but forwards the context to the Getter and stops retrying when the
 // context expired.
 func (n *RetryHTTPSGetter) GetContext(ctx context.Context, url string) ([]byte, error) {
+	if n.Getter == nil {
+		return nil, errors.New("nil HTTPSGetter")
+	}
 	delay := initialDelay
 	cancel := func() {}
 	if n.Timeout > 0 {
