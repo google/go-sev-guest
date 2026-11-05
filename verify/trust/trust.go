@@ -20,6 +20,7 @@ import (
 	"crypto/x509"
 	_ "embed"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -68,10 +69,6 @@ var (
 	// source: https://kdsintf.amd.com/vcek/v1/Turin/cert_chain
 	//go:embed ask_ark_turin_vlek.pem
 	AskArkTurinVlekBytes []byte
-
-	// A cache of product certificate KDS results per product.
-	prodCacheMu          sync.RWMutex
-	productLineCertCache map[string]*ProductCerts
 )
 
 // Communication with AMD suggests repeat requests of the same arguments will
@@ -138,6 +135,9 @@ type ContextHTTPSGetter interface {
 // GetWith gets a resource from a URL using an HTTPSGetter.
 // If the HTTPSGetter implements ContextHTTPSGetter, the GetContext method will be used.
 func GetWith(ctx context.Context, getter HTTPSGetter, url string) ([]byte, error) {
+	if getter == nil {
+		return nil, errors.New("nil HTTPSGetter")
+	}
 	if contextGetter, ok := getter.(ContextHTTPSGetter); ok {
 		return contextGetter.GetContext(ctx, url)
 	}
@@ -203,6 +203,9 @@ func (n *RetryHTTPSGetter) Get(url string) ([]byte, error) {
 // GetContext behaves like get, but forwards the context to the Getter and stops retrying when the
 // context expired.
 func (n *RetryHTTPSGetter) GetContext(ctx context.Context, url string) ([]byte, error) {
+	if n.Getter == nil {
+		return nil, errors.New("nil HTTPSGetter")
+	}
 	delay := initialDelay
 	cancel := func() {}
 	if n.Timeout > 0 {
@@ -334,54 +337,40 @@ func (r *ProductCerts) X509Options(now time.Time, key abi.ReportSigner) *x509.Ve
 	return &x509.VerifyOptions{Roots: roots, Intermediates: intermediates, CurrentTime: now}
 }
 
-// ClearProductCertCache clears the product certificate cache. This is useful for testing with
-// multiple roots of trust.
-func ClearProductCertCache() {
-	prodCacheMu.Lock()
-	productLineCertCache = nil
-	prodCacheMu.Unlock()
-}
+// ClearProductCertCache does nothing.
+//
+// Deprecated: GetProductChain no longer caches results.
+func ClearProductCertCache() {}
 
-// GetProductChain returns the ASK and ARK certificates of the given product line, either from getter
-// or from a cache of the results from the last successful call.
+// GetProductChain fetches the ASK and ARK certificates of the given product line with getter.
+// It returns an error if getter is nil.
 func GetProductChain(productLine string, s abi.ReportSigner, getter HTTPSGetter) (*ProductCerts, error) {
 	return GetProductChainContext(context.TODO(), productLine, s, getter)
 }
 
 // GetProductChainContext behaves like GetProductChain but forwards the context to the HTTPSGetter.
 func GetProductChainContext(ctx context.Context, productLine string, s abi.ReportSigner, getter HTTPSGetter) (*ProductCerts, error) {
-	ensureCache()
-
-	prodCacheMu.RLock()
-	result, ok := productLineCertCache[productLine]
-	prodCacheMu.RUnlock()
-	if !ok {
-		askark, err := GetWith(ctx, getter, kds.ProductCertChainURL(s, productLine))
-		if err != nil {
-			return nil, &AttestationRecreationErr{
-				Msg: fmt.Sprintf("could not download ASK and ARK certificates: %v", err),
-			}
+	askark, err := GetWith(ctx, getter, kds.ProductCertChainURL(s, productLine))
+	if err != nil {
+		return nil, &AttestationRecreationErr{
+			Msg: fmt.Sprintf("could not download ASK and ARK certificates: %v", err),
 		}
-
-		ask, ark, err := kds.ParseProductCertChain(askark)
-		if err != nil {
-			// Treat a bad parse as a network error since it's likely due to an incomplete transfer.
-			return nil, &AttestationRecreationErr{Msg: fmt.Sprintf("could not parse root cert_chain: %v", err)}
-		}
-		askCert, err := x509.ParseCertificate(ask)
-		if err != nil {
-			return nil, &AttestationRecreationErr{Msg: fmt.Sprintf("could not parse ASK cert: %v", err)}
-		}
-		arkCert, err := x509.ParseCertificate(ark)
-		if err != nil {
-			return nil, &AttestationRecreationErr{Msg: fmt.Sprintf("could not parse ARK cert: %v", err)}
-		}
-		result = &ProductCerts{Ask: askCert, Ark: arkCert}
-		prodCacheMu.Lock()
-		productLineCertCache[productLine] = result
-		prodCacheMu.Unlock()
 	}
-	return result, nil
+
+	ask, ark, err := kds.ParseProductCertChain(askark)
+	if err != nil {
+		// Treat a bad parse as a network error since it's likely due to an incomplete transfer.
+		return nil, &AttestationRecreationErr{Msg: fmt.Sprintf("could not parse root cert_chain: %v", err)}
+	}
+	askCert, err := x509.ParseCertificate(ask)
+	if err != nil {
+		return nil, &AttestationRecreationErr{Msg: fmt.Sprintf("could not parse ASK cert: %v", err)}
+	}
+	arkCert, err := x509.ParseCertificate(ark)
+	if err != nil {
+		return nil, &AttestationRecreationErr{Msg: fmt.Sprintf("could not parse ARK cert: %v", err)}
+	}
+	return &ProductCerts{Ask: askCert, Ark: arkCert}, nil
 }
 
 // Forward all the ProductCerts operations from the AMDRootCerts struct to follow the
@@ -439,19 +428,6 @@ func init() {
 		"Milan": milanCerts,
 		"Genoa": genoaCerts,
 		"Turin": turinCerts,
-	}
-}
-
-func ensureCache() {
-	prodCacheMu.RLock()
-	if productLineCertCache == nil {
-		prodCacheMu.RUnlock()
-
-		prodCacheMu.Lock()
-		productLineCertCache = make(map[string]*ProductCerts)
-		prodCacheMu.Unlock()
-	} else {
-		prodCacheMu.RUnlock()
 	}
 }
 

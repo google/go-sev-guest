@@ -167,36 +167,16 @@ func TestRetryHTTPSGetterContext(t *testing.T) {
 	}
 }
 
-func TestGetProductChainForRaceDetector(t *testing.T) {
-	testGetter := &test.Getter{
-		Responses: map[string][]test.GetResponse{
-			"https://kdsintf.amd.com/vcek/v1/test/cert_chain": {
-				{
-					Occurrences: 2,
-					Body:        trust.AskArkMilanVcekBytes,
-				},
-			},
-		},
+func TestGetProductChainNilGetter(t *testing.T) {
+	getter := test.SimpleGetter(map[string][]byte{
+		"https://kdsintf.amd.com/vcek/v1/Milan/cert_chain": trust.AskArkMilanVcekBytes,
+	})
+	if _, err := trust.GetProductChain("Milan", abi.VcekReportSigner, getter); err != nil {
+		t.Fatalf("Setup: GetProductChain() failed: %v", err)
 	}
 
-	// run GetProductChain concurrently to see if the race detector is triggered.
-	errCh := make(chan error)
-	go func() {
-		_, err := trust.GetProductChain("test", abi.VcekReportSigner, testGetter)
-		errCh <- err
-	}()
-
-	go func() {
-		_, err := trust.GetProductChain("test", abi.VcekReportSigner, testGetter)
-		errCh <- err
-	}()
-
-	var err error
-	for i := 0; i < 2; i++ {
-		err = errors.Join(err, <-errCh)
-	}
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if _, err := trust.GetProductChain("Milan", abi.VcekReportSigner, nil); err == nil {
+		t.Errorf("GetProductChain(_, _, nil) = _, nil, want error")
 	}
 }
 
@@ -246,6 +226,22 @@ func TestGetWith(t *testing.T) {
 		}
 	})
 
+}
+
+func TestGetWithNilGetter(t *testing.T) {
+	if _, err := trust.GetWith(context.Background(), nil, "https://fetch.me"); err == nil {
+		t.Errorf("GetWith(_, nil, _) = _, nil, want error")
+	}
+}
+
+func TestRetryHTTPSGetterNilGetter(t *testing.T) {
+	r := &trust.RetryHTTPSGetter{MaxRetryDelay: time.Millisecond}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := r.GetContext(ctx, "https://fetch.me"); err == nil || errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("GetContext() = _, %v, want an error without retrying until the deadline", err)
+	}
 }
 
 // Ensure that the HTTPSGetters implement the expected interfaces.
