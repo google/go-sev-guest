@@ -20,6 +20,7 @@ import (
 	"crypto/x509"
 	_ "embed"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -157,12 +158,24 @@ func (e *AttestationRecreationErr) Error() string {
 // SimpleHTTPSGetter implements the HTTPSGetter interface with http.Get.
 type SimpleHTTPSGetter struct{}
 
+// HTTPStatusError is returned by SimpleHTTPSGetter when the server responds with a status code
+// outside the 2xx range.
+type HTTPStatusError struct {
+	URL        string
+	StatusCode int
+}
+
+func (e *HTTPStatusError) Error() string {
+	return fmt.Sprintf("failed to retrieve '%s' status %d", e.URL, e.StatusCode)
+}
+
 // Get uses http.Get to return the HTTPS response body as a byte array.
 func (n *SimpleHTTPSGetter) Get(url string) ([]byte, error) {
 	return n.GetContext(context.TODO(), url)
 }
 
 // GetContext behaves like get, but forwards the context to the http package.
+// It returns an *HTTPStatusError for a non-2xx response.
 func (n *SimpleHTTPSGetter) GetContext(ctx context.Context, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -171,19 +184,21 @@ func (n *SimpleHTTPSGetter) GetContext(ctx context.Context, url string) ([]byte,
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
-	} else if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("failed to retrieve '%s' status %d", url, resp.StatusCode)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, &HTTPStatusError{URL: url, StatusCode: resp.StatusCode}
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
-	resp.Body.Close()
 	return body, nil
 }
 
 // RetryHTTPSGetter is a meta-HTTPS getter that will retry on failure a given number of times.
+// It retries network errors and HTTP 429 and 5xx responses, and returns other errors at once.
 type RetryHTTPSGetter struct {
 	// Timeout is how long to retry before failure.
 	// If Timeout is zero, the Get method will retry indefinitely and the GetContext method will
@@ -193,6 +208,17 @@ type RetryHTTPSGetter struct {
 	MaxRetryDelay time.Duration
 	// Getter is the non-retrying way of getting a URL.
 	Getter HTTPSGetter
+}
+
+func isRetryable(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var statusErr *HTTPStatusError
+	if errors.As(err, &statusErr) {
+		return statusErr.StatusCode == http.StatusTooManyRequests || statusErr.StatusCode >= 500
+	}
+	return true
 }
 
 // Get fetches the body of the URL, retrying a given amount of times on failure.
@@ -216,6 +242,10 @@ func (n *RetryHTTPSGetter) GetContext(ctx context.Context, url string) ([]byte, 
 			return body, nil
 		}
 		returnedError = multierr.Append(returnedError, err)
+		if !isRetryable(err) {
+			cancel()
+			return nil, returnedError
+		}
 		delay = delay + delay
 		if delay > n.MaxRetryDelay {
 			delay = n.MaxRetryDelay
