@@ -31,6 +31,8 @@ import (
 	"github.com/google/go-sev-guest/kds"
 	test "github.com/google/go-sev-guest/testing"
 	"github.com/google/go-sev-guest/verify"
+	"github.com/google/go-sev-guest/verify/testdata"
+	"github.com/google/uuid"
 	"google.golang.org/protobuf/encoding/prototext"
 
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
@@ -612,6 +614,46 @@ func TestCheckMitigationVectors(t *testing.T) {
 				if !strings.Contains(err.Error(), tc.wantErrSubstr) {
 					t.Errorf("expected error substring %q, got error: %v", tc.wantErrSubstr, err)
 				}
+			}
+		})
+	}
+}
+
+func TestRawSnpAttestationRejectsWrongLengthKeyHash(t *testing.T) {
+	certTable := (&abi.CertTable{Entries: []abi.CertTableEntry{
+		{GUID: uuid.MustParse(abi.VcekGUID), RawCert: testdata.VcekBytes},
+	}}).Marshal()
+	report, err := abi.ReportToProto(testdata.AttestationBytes)
+	if err != nil {
+		t.Fatalf("ReportToProto(AttestationBytes) failed: %v", err)
+	}
+	policy, err := abi.ParseSnpPolicy(report.GetPolicy())
+	if err != nil {
+		t.Fatalf("ParseSnpPolicy(%#x) failed: %v", report.GetPolicy(), err)
+	}
+	// Match the report policy to isolate key hash validation.
+	// Validation checks key hashes only when RequireIDBlock is true.
+	tests := []struct {
+		name       string
+		opts       *Options
+		wantOption string
+	}{
+		{
+			name:       "id_key_hash",
+			opts:       &Options{GuestPolicy: policy, RequireIDBlock: true, TrustedIDKeyHashes: [][]byte{{0}}},
+			wantOption: "TrustedIDKeyHashes",
+		},
+		{
+			name:       "author_key_hash",
+			opts:       &Options{GuestPolicy: policy, RequireIDBlock: true, TrustedAuthorKeyHashes: [][]byte{{0}}},
+			wantOption: "TrustedAuthorKeyHashes",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := RawSnpAttestation(testdata.AttestationBytes, certTable, tc.opts)
+			if err == nil || !strings.Contains(err.Error(), tc.wantOption) {
+				t.Errorf("RawSnpAttestation() = %v, want error naming %q", err, tc.wantOption)
 			}
 		})
 	}
