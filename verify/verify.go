@@ -278,7 +278,7 @@ func GetCrlAndCheckRootContext(ctx context.Context, r *trust.AMDRootCerts, opts 
 	}
 	getter := opts.Getter
 	if getter == nil {
-		return nil, fmt.Errorf("could not fetch product CRL: %w", ErrNoGetter)
+		return nil, fmt.Errorf("fetch product CRL: %w", ErrNoGetter)
 	}
 	var errs error
 	for _, url := range r.ProductCerts.Ask.CRLDistributionPoints {
@@ -552,8 +552,8 @@ type Options struct {
 	// DisableCertFetching prevents fetching missing certificates from AMD KDS. Verification only
 	// fetches the endorsement certificate; GetAttestationFromReport also fetches the root chain.
 	DisableCertFetching bool
-	// Getter fetches the response body for a URL. If Getter is nil, the library
-	// makes no network requests, and a missing certificate or CRL returns ErrNoGetter.
+	// Getter fetches resources over HTTPS. If nil, operations that require the
+	// network return ErrNoGetter.
 	// If Getter implements trust.ContextHTTPSGetter, the library calls GetContext instead of Get.
 	Getter trust.HTTPSGetter
 	// Now is the time at which to verify the validity of certificates. If unset, uses time.Now().
@@ -603,9 +603,14 @@ func RootOfTrustToOptions(rot *cpb.RootOfTrust) (*Options, error) {
 	if err != nil {
 		return nil, err
 	}
+	var getter trust.HTTPSGetter
+	if !rot.DisallowNetwork {
+		getter = trust.DefaultHTTPSGetter()
+	}
 	return &Options{
 		CheckRevocations:    rot.CheckCrl,
 		DisableCertFetching: rot.DisallowNetwork,
+		Getter:              getter,
 		TrustedRoots:        trustedRoots,
 	}, nil
 }
@@ -796,7 +801,7 @@ func fillInAttestation(ctx context.Context, attestation *spb.Attestation, option
 	}
 	if fetchChain && (len(chain.GetAskCert()) == 0 || len(chain.GetArkCert()) == 0) {
 		if getter == nil {
-			return fmt.Errorf("could not fetch ASK and ARK certificates: %w", ErrNoGetter)
+			return fmt.Errorf("fetch ASK and ARK certificates: %w", ErrNoGetter)
 		}
 		askark, err := trust.GetProductChainContext(ctx, productLine, info.SigningKey, getter)
 		if err != nil {
@@ -814,7 +819,7 @@ func fillInAttestation(ctx context.Context, attestation *spb.Attestation, option
 	case abi.VcekReportSigner:
 		if len(chain.GetVcekCert()) == 0 {
 			if getter == nil {
-				return fmt.Errorf("could not fetch VCEK certificate: %w", ErrNoGetter)
+				return fmt.Errorf("fetch VCEK certificate: %w", ErrNoGetter)
 			}
 			vcekURL := kds.VCEKCertURL(productLine, report.GetChipId(), kds.DecomposeTCBVersionV0(report.GetReportedTcb()))
 			vcek, err := trust.GetWith(ctx, getter, vcekURL)

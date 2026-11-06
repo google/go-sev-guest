@@ -42,6 +42,7 @@ import (
 	"github.com/google/go-sev-guest/abi"
 	sg "github.com/google/go-sev-guest/client"
 	"github.com/google/go-sev-guest/kds"
+	cpb "github.com/google/go-sev-guest/proto/check"
 	spb "github.com/google/go-sev-guest/proto/sevsnp"
 	test "github.com/google/go-sev-guest/testing"
 	testclient "github.com/google/go-sev-guest/testing/client"
@@ -1210,13 +1211,13 @@ func TestAttestationCertificateFetching(t *testing.T) {
 	}
 }
 
-// mustFakeAttestationWithCompleteChain returns a test attestation and root certificates to verify its chain.
-func mustFakeAttestationWithCompleteChain(t *testing.T) (*spb.Attestation, map[string][]*trust.AMDRootCerts) {
+func newTestAttestation(t *testing.T) (*spb.Attestation, map[string][]*trust.AMDRootCerts) {
 	t.Helper()
 	if !sg.UseDefaultSevGuest() {
 		t.Skip("requires test certificates")
 	}
-	qp, roots, _, _ := testclient.GetSevQuoteProvider(test.TestCases(), &test.DeviceOptions{Now: time.Now()}, t)
+	signMu.Do(initSigner)
+	qp, roots, _, _ := testclient.GetSevQuoteProvider(test.TestCases(), &test.DeviceOptions{Signer: signer}, t)
 	attestation, err := sg.GetQuoteProto(qp, [64]byte{})
 	if err != nil {
 		t.Fatalf("Setup: GetQuoteProto() failed: %v", err)
@@ -1224,31 +1225,8 @@ func mustFakeAttestationWithCompleteChain(t *testing.T) (*spb.Attestation, map[s
 	return attestation, roots
 }
 
-func mustSignCRL(t *testing.T, s *test.AmdSigner, number int64, thisUpdate, nextUpdate time.Time) []byte {
-	t.Helper()
-	der, err := x509.CreateRevocationList(crand.Reader, &x509.RevocationList{
-		SignatureAlgorithm: x509.SHA384WithRSAPSS,
-		Number:             big.NewInt(number),
-		ThisUpdate:         thisUpdate,
-		NextUpdate:         nextUpdate,
-	}, s.Ark, s.Keys.Ark)
-	if err != nil {
-		t.Fatalf("Setup: CreateRevocationList() failed: %v", err)
-	}
-	return der
-}
-
-func mustParseCRL(t *testing.T, der []byte) *x509.RevocationList {
-	t.Helper()
-	crl, err := x509.ParseRevocationList(der)
-	if err != nil {
-		t.Fatalf("Setup: ParseRevocationList() failed: %v", err)
-	}
-	return crl
-}
-
-func TestSnpAttestationNilGetterCompleteChainVerifies(t *testing.T) {
-	attestation, roots := mustFakeAttestationWithCompleteChain(t)
+func TestSnpAttestationNilGetterCompleteChain(t *testing.T) {
+	attestation, roots := newTestAttestation(t)
 	options := &Options{TrustedRoots: roots, Now: time.Now(), Product: attestation.Product}
 
 	if err := SnpAttestation(attestation, options); err != nil {
@@ -1256,8 +1234,8 @@ func TestSnpAttestationNilGetterCompleteChainVerifies(t *testing.T) {
 	}
 }
 
-func TestSnpAttestationNilGetterMissingVcekReturnsErrNoGetter(t *testing.T) {
-	attestation, roots := mustFakeAttestationWithCompleteChain(t)
+func TestSnpAttestationNilGetterMissingVcek(t *testing.T) {
+	attestation, roots := newTestAttestation(t)
 	attestation.CertificateChain.VcekCert = nil
 	options := &Options{TrustedRoots: roots, Now: time.Now(), Product: attestation.Product}
 
@@ -1266,8 +1244,8 @@ func TestSnpAttestationNilGetterMissingVcekReturnsErrNoGetter(t *testing.T) {
 	}
 }
 
-func TestGetAttestationFromReportNilGetterReturnsErrNoGetter(t *testing.T) {
-	attestation, roots := mustFakeAttestationWithCompleteChain(t)
+func TestGetAttestationFromReportNilGetter(t *testing.T) {
+	attestation, roots := newTestAttestation(t)
 	options := &Options{TrustedRoots: roots, Now: time.Now(), Product: attestation.Product}
 
 	if _, err := GetAttestationFromReport(attestation.Report, options); !errors.Is(err, ErrNoGetter) {
@@ -1275,8 +1253,8 @@ func TestGetAttestationFromReportNilGetterReturnsErrNoGetter(t *testing.T) {
 	}
 }
 
-func TestSnpAttestationNilGetterUncachedCRLFailsClosed(t *testing.T) {
-	attestation, roots := mustFakeAttestationWithCompleteChain(t)
+func TestSnpAttestationNilGetterUncachedCRL(t *testing.T) {
+	attestation, roots := newTestAttestation(t)
 	options := &Options{
 		TrustedRoots:     roots,
 		Now:              time.Now(),
@@ -1291,10 +1269,22 @@ func TestSnpAttestationNilGetterUncachedCRLFailsClosed(t *testing.T) {
 	}
 }
 
-func TestGetCrlAndCheckRootNilGetterUsesCachedCRL(t *testing.T) {
+func TestGetCrlAndCheckRootNilGetterCachedCRL(t *testing.T) {
 	signMu.Do(initSigner)
 	now := time.Now()
-	crl := mustParseCRL(t, mustSignCRL(t, signer, 1, now.Add(-time.Hour), now.Add(time.Hour)))
+	der, err := x509.CreateRevocationList(crand.Reader, &x509.RevocationList{
+		SignatureAlgorithm: x509.SHA384WithRSAPSS,
+		Number:             big.NewInt(1),
+		ThisUpdate:         now.Add(-time.Hour),
+		NextUpdate:         now.Add(time.Hour),
+	}, signer.Ark, signer.Keys.Ark)
+	if err != nil {
+		t.Fatalf("Setup: CreateRevocationList() failed: %v", err)
+	}
+	crl, err := x509.ParseRevocationList(der)
+	if err != nil {
+		t.Fatalf("Setup: ParseRevocationList() failed: %v", err)
+	}
 	root := trust.AMDRootCertsProduct(test.GetProductLine())
 	root.ProductCerts = &trust.ProductCerts{Ark: signer.Ark, Ask: signer.Ask}
 	root.CRL = crl
@@ -1302,5 +1292,35 @@ func TestGetCrlAndCheckRootNilGetterUsesCachedCRL(t *testing.T) {
 	got, err := GetCrlAndCheckRoot(root, &Options{Now: now})
 	if err != nil || got != crl {
 		t.Errorf("GetCrlAndCheckRoot() = %v, %v, want the cached CRL and nil", got, err)
+	}
+}
+
+func TestGetCrlAndCheckRootNilGetterExpiredCRL(t *testing.T) {
+	now := time.Now()
+	root := trust.AMDRootCertsProduct(test.GetProductLine())
+	root.CRL = &x509.RevocationList{NextUpdate: now.Add(-time.Hour)}
+
+	if _, err := GetCrlAndCheckRoot(root, &Options{Now: now}); !errors.Is(err, ErrNoGetter) {
+		t.Errorf("GetCrlAndCheckRoot() = _, %v, want _, %v", err, ErrNoGetter)
+	}
+}
+
+func TestRootOfTrustToOptionsGetter(t *testing.T) {
+	opts, err := RootOfTrustToOptions(&cpb.RootOfTrust{})
+	if err != nil {
+		t.Fatalf("RootOfTrustToOptions() failed: %v", err)
+	}
+	if opts.Getter == nil {
+		t.Errorf("RootOfTrustToOptions().Getter = nil, want non-nil")
+	}
+}
+
+func TestRootOfTrustToOptionsDisallowNetwork(t *testing.T) {
+	opts, err := RootOfTrustToOptions(&cpb.RootOfTrust{DisallowNetwork: true})
+	if err != nil {
+		t.Fatalf("RootOfTrustToOptions() failed: %v", err)
+	}
+	if opts.Getter != nil {
+		t.Errorf("RootOfTrustToOptions(&RootOfTrust{DisallowNetwork: true}).Getter = %v, want nil", opts.Getter)
 	}
 }
