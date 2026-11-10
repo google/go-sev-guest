@@ -620,6 +620,10 @@ func TestOpenGetExtendedReportVerifyClose(t *testing.T) {
 		for _, getReport := range reportGetters {
 			t.Run(tc.Name+"_"+getReport.name, func(t *testing.T) {
 				trust.ClearProductCertCache()
+				if !sg.UseDefaultSevGuest() && tc.EK == test.KeyChoiceVlek {
+					t.Skip()
+					return
+				}
 				if getReport.skipVlek && tc.EK == test.KeyChoiceVlek {
 					t.Skip()
 					return
