@@ -51,6 +51,9 @@ var (
 	ErrMissingVlek     = errors.New("report signed with VLEK, but VLEK certificate is missing")
 	workaroundStepping = flag.Bool("workaround_kds_productname", false, "If true, don't compare "+
 		"stepping values from the VCEK certificate and the attestation's or options' Product")
+	// ErrMissingVcek is returned when attempting to verify a VCEK-signed report that doesn't also
+	// have its VCEK certificate attached.
+	ErrMissingVcek = errors.New("report signed with VCEK, but VCEK certificate is missing")
 	// ErrNoGetter indicates that an operation must fetch a certificate or CRL, but Options.Getter is nil.
 	ErrNoGetter = errors.New("network fetch requires Options.Getter")
 )
@@ -463,6 +466,9 @@ func decodeCerts(chain *spb.CertificateChain, key abi.ReportSigner, knownProduct
 		ek = chain.GetVlekCert()
 	}
 	if len(ek) == 0 {
+		if key == abi.VcekReportSigner {
+			return nil, nil, ErrMissingVcek
+		}
 		return nil, nil, fmt.Errorf("missing %v certificate", key)
 	}
 	endorsementKeyCert, err := trust.ParseCert(ek)
@@ -549,8 +555,8 @@ type Options struct {
 	// CheckRevocations set to true if the verifier should retrieve the CRL from the network and check
 	// if the VCEK or ASK have been revoked according to the ARK.
 	CheckRevocations bool
-	// DisableCertFetching prevents fetching missing certificates from AMD KDS. Verification only
-	// fetches the endorsement certificate; GetAttestationFromReport also fetches the root chain.
+	// DisableCertFetching prevents GetAttestationFromReport from downloading missing certificates
+	// from AMD KDS.
 	DisableCertFetching bool
 	// Getter fetches resources over HTTPS. If nil, operations that require the
 	// network return ErrNoGetter.
@@ -650,7 +656,7 @@ func updateProductExpectation(product **spb.SevProduct, reportProduct *spb.SevPr
 
 // SnpAttestation verifies the protobuf representation of an attestation report's signature based
 // on the report's SignatureAlgo, provided the certificate chain is valid.
-// Missing ASK and ARK certificates are not added to the attestation.
+// It does not download missing certificates. A missing VCEK certificate returns ErrMissingVcek.
 func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 	return SnpAttestationContext(context.TODO(), attestation, options)
 }
@@ -778,8 +784,9 @@ func cpuidWorkaround(attestation *spb.Attestation, options *Options) (string, fu
 	return kds.ProductLine(product), productUpdate, updateExpectation, nil
 }
 
-// fillInAttestation fetches missing endorsement certificates and, if requested, the root chain.
-func fillInAttestation(ctx context.Context, attestation *spb.Attestation, options *Options, fetchChain bool) error {
+// fillInAttestation sets the expected product and, if fetch is true, downloads missing
+// certificates.
+func fillInAttestation(ctx context.Context, attestation *spb.Attestation, options *Options, fetch bool) error {
 	if options.DisableCertFetching {
 		return nil
 	}
@@ -799,7 +806,7 @@ func fillInAttestation(ctx context.Context, attestation *spb.Attestation, option
 		chain = &spb.CertificateChain{}
 		attestation.CertificateChain = chain
 	}
-	if fetchChain && (len(chain.GetAskCert()) == 0 || len(chain.GetArkCert()) == 0) {
+	if fetch && (len(chain.GetAskCert()) == 0 || len(chain.GetArkCert()) == 0) {
 		if getter == nil {
 			return fmt.Errorf("fetch ASK and ARK certificates: %w", ErrNoGetter)
 		}
@@ -817,7 +824,7 @@ func fillInAttestation(ctx context.Context, attestation *spb.Attestation, option
 	}
 	switch info.SigningKey {
 	case abi.VcekReportSigner:
-		if len(chain.GetVcekCert()) == 0 {
+		if fetch && len(chain.GetVcekCert()) == 0 {
 			if getter == nil {
 				return fmt.Errorf("fetch VCEK certificate: %w", ErrNoGetter)
 			}

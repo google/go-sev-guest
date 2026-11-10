@@ -504,6 +504,21 @@ func main() {
 			die(fmt.Errorf("could not unmarshal KDS database: %v", err))
 		}
 	}
+	info, err := abi.ParseSignerInfo(attestation.GetReport().GetSignerInfo())
+	if err != nil {
+		die(err)
+	}
+	if info.SigningKey == abi.VcekReportSigner && len(attestation.GetCertificateChain().GetVcekCert()) == 0 && !config.RootOfTrust.DisallowNetwork {
+		// Verification does not download certificates, so collect the VCEK certificate first.
+		filled, err := verify.GetAttestationFromReport(attestation.GetReport(), sopts)
+		if err != nil {
+			dieWith(fmt.Errorf("could not download VCEK certificate: %v", err), exitCerts)
+		}
+		if attestation.CertificateChain == nil {
+			attestation.CertificateChain = &spb.CertificateChain{}
+		}
+		attestation.CertificateChain.VcekCert = filled.GetCertificateChain().GetVcekCert()
+	}
 	if err := verify.SnpAttestation(attestation, sopts); err != nil {
 		// Make the exit code more helpful when there are network errors
 		// that affected the result.

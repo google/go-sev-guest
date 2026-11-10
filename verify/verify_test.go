@@ -1146,16 +1146,13 @@ func TestAttestationCertificateFetching(t *testing.T) {
 	now := time.Now()
 	qp, roots, _, fakeKDS := testclient.GetSevQuoteProvider(test.TestCases(), &test.DeviceOptions{Now: now}, t)
 	for _, tc := range []struct {
-		Name        string
-		Reconstruct bool
-		Offline     bool
-		WantErr     string
+		Name    string
+		Offline bool
+		WantErr string
 	}{
-		{Name: "missing VCEK"},
-		{Name: "missing VCEK offline", Offline: true, WantErr: "could not download VCEK certificate: network disabled"},
-		{Name: "reconstruct chain", Reconstruct: true},
+		{Name: "reconstruct chain"},
 		{
-			Name: "reconstruct chain offline", Reconstruct: true, Offline: true,
+			Name: "reconstruct chain offline", Offline: true,
 			WantErr: "could not download ASK and ARK certificates: network disabled",
 		},
 	} {
@@ -1175,18 +1172,11 @@ func TestAttestationCertificateFetching(t *testing.T) {
 			productLine := test.GetProductLine()
 			report := attestation.Report
 			vcekURL := kds.VCEKCertURL(productLine, report.ChipId, kds.DecomposeTCBVersionV0(report.ReportedTcb))
-			wantURLs := []string{vcekURL}
-			if tc.Reconstruct {
-				wantURLs = []string{kds.ProductCertChainURL(abi.VcekReportSigner, productLine)}
-				if !tc.Offline {
-					wantURLs = append(wantURLs, vcekURL)
-				}
-				attestation, err = GetAttestationFromReport(report, options)
-			} else {
-				attestation.CertificateChain = &spb.CertificateChain{}
-				options.Product = attestation.Product
-				err = SnpAttestation(attestation, options)
+			wantURLs := []string{kds.ProductCertChainURL(abi.VcekReportSigner, productLine)}
+			if !tc.Offline {
+				wantURLs = append(wantURLs, vcekURL)
 			}
+			attestation, err = GetAttestationFromReport(report, options)
 			if !test.Match(err, tc.WantErr) {
 				t.Fatalf("attestation = %v, error = %v. Want err: %v", attestation, err, tc.WantErr)
 			}
@@ -1199,15 +1189,27 @@ func TestAttestationCertificateFetching(t *testing.T) {
 			if !bytes.Equal(attestation.CertificateChain.VcekCert, wantChain.VcekCert) {
 				t.Error("VCEK differs from the original certificate")
 			}
-			if tc.Reconstruct {
-				if !bytes.Equal(attestation.CertificateChain.AskCert, wantChain.AskCert) {
-					t.Error("ASK differs from the original certificate")
-				}
-				if !bytes.Equal(attestation.CertificateChain.ArkCert, wantChain.ArkCert) {
-					t.Error("ARK differs from the original certificate")
-				}
+			if !bytes.Equal(attestation.CertificateChain.AskCert, wantChain.AskCert) {
+				t.Error("ASK differs from the original certificate")
+			}
+			if !bytes.Equal(attestation.CertificateChain.ArkCert, wantChain.ArkCert) {
+				t.Error("ARK differs from the original certificate")
 			}
 		})
+	}
+}
+
+func TestSnpAttestationMissingVcek(t *testing.T) {
+	attestation, roots := newTestAttestation(t)
+	attestation.CertificateChain.VcekCert = nil
+	getter := &recordingCertGetter{}
+	options := &Options{TrustedRoots: roots, Now: time.Now(), Getter: getter, Product: attestation.Product}
+
+	if err := SnpAttestation(attestation, options); !errors.Is(err, ErrMissingVcek) {
+		t.Errorf("SnpAttestation() = %v, want %v", err, ErrMissingVcek)
+	}
+	if len(getter.urls) != 0 {
+		t.Errorf("SnpAttestation() requested %v, want no requests", getter.urls)
 	}
 }
 
@@ -1231,16 +1233,6 @@ func TestSnpAttestationNilGetterCompleteChain(t *testing.T) {
 
 	if err := SnpAttestation(attestation, options); err != nil {
 		t.Errorf("SnpAttestation() = %v, want nil", err)
-	}
-}
-
-func TestSnpAttestationNilGetterMissingVcek(t *testing.T) {
-	attestation, roots := newTestAttestation(t)
-	attestation.CertificateChain.VcekCert = nil
-	options := &Options{TrustedRoots: roots, Now: time.Now(), Product: attestation.Product}
-
-	if err := SnpAttestation(attestation, options); !errors.Is(err, ErrNoGetter) {
-		t.Errorf("SnpAttestation() = %v, want %v", err, ErrNoGetter)
 	}
 }
 
