@@ -44,6 +44,7 @@ type Device struct {
 	Certs         []byte
 	Signer        *AmdSigner
 	SevProduct    *spb.SevProduct
+	ManifestRsp   map[string]any
 }
 
 // Open changes the mock device's state to open.
@@ -196,7 +197,37 @@ func (p *QuoteProvider) GetRawQuote(reportData [64]byte) ([]uint8, error) {
 	if err != nil {
 		return nil, err
 	}
-	return append(report, extended...), nil
+
+	report = append(report, extended...)
+
+	mockManifestI, ok := p.Device.ManifestRsp[hex.EncodeToString(reportData[:])]
+	if ok {
+		mockManifest, ok := mockManifestI.([]byte)
+		if !ok {
+			return nil, fmt.Errorf("test error: incorrect response type %v", mockManifest)
+		}
+		report = append(report, mockManifest...)
+	}
+
+	return report, nil
+}
+
+// GetRawQuoteSVSM returns the raw report assigned for given reportData, with a services manifest.
+func (p *QuoteProvider) GetRawQuoteSVSM(reportData [64]byte) ([]uint8, error) {
+	report, err := p.GetRawQuote(reportData)
+	if err != nil {
+		return nil, err
+	}
+	mockManifestI, ok := p.Device.ManifestRsp[hex.EncodeToString(reportData[:])]
+	if ok {
+		mockManifest, ok := mockManifestI.([]byte)
+		if !ok {
+			return nil, fmt.Errorf("test error: incorrect response type %v", mockManifest)
+		}
+		report = append(report, mockManifest...)
+	}
+
+	return report, nil
 }
 
 // GetResponse controls how often (Occurrences) a certain response should be

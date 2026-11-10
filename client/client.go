@@ -64,6 +64,14 @@ type QuoteProvider interface {
 	Product() *pb.SevProduct
 }
 
+// SVSMQuoteProvider encapsulates calls to collect an extended attestation report from the SVSM.
+type SVSMQuoteProvider interface {
+	QuoteProvider
+	// GetRawQuoteSVSM returns a raw report returned by the SVSM_ATTEST_SERVICES call, as defined in
+	// section 7.1 of the SEV-SNP API specification: https://www.amd.com/content/dam/amd/en/documents/epyc-technical-docs/specifications/58019.pdf
+	GetRawQuoteSVSM(reportData [64]byte) ([]uint8, error)
+}
+
 // UseDefaultSevGuest returns true iff -sev_guest_device_path=default.
 func UseDefaultSevGuest() bool {
 	return *sevGuestPath == "default"
@@ -258,6 +266,23 @@ func GetExtendedReportAtVmpl(d Device, reportData [64]byte, vmpl int) (*pb.Attes
 // Deprecated: Use GetQuoteProto.
 func GetExtendedReport(d Device, reportData [64]byte) (*pb.Attestation, error) {
 	return GetExtendedReportAtVmpl(d, reportData, 0)
+}
+
+// GetQuoteSVSMProto uses the given QuoteProvider to return the
+// protobuf representation of an attestation report with cached
+// certificate chain and services manifest.
+func GetQuoteSVSMProto(qp SVSMQuoteProvider, reportData [64]byte) (*pb.Attestation, error) {
+	reportcerts, err := qp.GetRawQuote(reportData)
+	if err != nil {
+		return nil, err
+	}
+	attestation, err := abi.ReportCertsAndManifestToProto(reportcerts)
+	if err != nil {
+		return nil, err
+	}
+	// TODO(Issue#109): Remove when Product is removed.
+	attestation.Product = qp.Product()
+	return attestation, nil
 }
 
 // GuestFieldSelect represents which guest-provided information will be mixed into a derived key.
