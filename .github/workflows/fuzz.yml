@@ -15,17 +15,15 @@ jobs:
         # Keep in sync with `go test -list '^Fuzz' ./...`.
         include:
           - pkg: ./abi
-            target: FuzzCertTableUnmarshal
+            target: FuzzCertTableRoundTrip
           - pkg: ./abi
-            target: FuzzCertTableUnmarshalStructured
-          - pkg: ./abi
-            target: FuzzReportToProto
-          - pkg: ./abi
-            target: FuzzReportToProtoStructured
+            target: FuzzReportRoundTrip
           - pkg: ./kds
             target: FuzzParseProductCertChain
-          - pkg: ./kds
-            target: FuzzParseProductCertChainStructured
+          - pkg: ./validate
+            target: FuzzRawSnpAttestation
+          - pkg: ./verify
+            target: FuzzSnpAttestation
           - pkg: ./verify/trust
             target: FuzzParseCert
     steps:
@@ -34,7 +32,8 @@ jobs:
         with:
           go-version: stable
       - name: Run Go Fuzz (${{ matrix.target }})
-        run: go test ${{ matrix.pkg }} -run=^$ -fuzz=^${{ matrix.target }}$ -fuzztime=30s
+        # Default minimization spends up to 60s on each new input and uses up the 30s -fuzztime.
+        run: go test ${{ matrix.pkg }} -run=^$ -fuzz=^${{ matrix.target }}$ -fuzztime=30s -fuzzminimizetime=0
       - name: Upload crashers
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
