@@ -33,6 +33,7 @@ import (
 	"github.com/google/go-sev-guest/verify/trust"
 	"github.com/google/logger"
 	"go.uber.org/multierr"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -458,7 +459,7 @@ func checkProductName(got, want *spb.SevProduct, key abi.ReportSigner) error {
 // decodeCerts checks that the V[CL]EK certificate matches expected fields
 // from the KDS specification and also that its certificate chain matches
 // hardcoded trusted root certificates from AMD.
-func decodeCerts(chain *spb.CertificateChain, key abi.ReportSigner, knownProductLine string, options *Options) (*x509.Certificate, *trust.AMDRootCerts, error) {
+func decodeCerts(chain *spb.CertificateChain, key abi.ReportSigner, knownProductLine string, wantProduct *spb.SevProduct, options *Options) (*x509.Certificate, *trust.AMDRootCerts, error) {
 	var ek []byte
 	switch key {
 	case abi.VcekReportSigner:
@@ -489,7 +490,7 @@ func decodeCerts(chain *spb.CertificateChain, key abi.ReportSigner, knownProduct
 
 		productLine = kds.ProductLine(product)
 		// Ensure the extension product info matches expectations.
-		if err := checkProductName(product, options.Product, key); err != nil {
+		if err := checkProductName(product, wantProduct, key); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -619,37 +620,39 @@ func RootOfTrustToOptions(rot *cpb.RootOfTrust) (*Options, error) {
 	}, nil
 }
 
-func updateProductExpectation(product **spb.SevProduct, reportProduct *spb.SevProduct) error {
-	// The expected product in verification options may be under-specified or conflicting with a given
-	// product, so check and update the expectation to match the reported product info.
-	if *product == nil {
+// expectedProduct returns the expected product without modifying want. If want is nil, it returns
+// reportProduct (only its name when the workaround_kds_productname flag is set). Otherwise it
+// returns an error when the names differ, or when both have a stepping and the steppings differ.
+// If want has no stepping, it returns a copy of want with the stepping of reportProduct.
+func expectedProduct(want, reportProduct *spb.SevProduct) (*spb.SevProduct, error) {
+	if want == nil {
 		if *workaroundStepping && reportProduct != nil {
-			*product = &spb.SevProduct{Name: reportProduct.Name}
-		} else {
-			*product = reportProduct
+			return &spb.SevProduct{Name: reportProduct.Name}, nil
 		}
-		return nil
+		return reportProduct, nil
 	}
-	if (*product).GetName() != reportProduct.GetName() {
-		return fmt.Errorf("expected product name %v, got %v", (*product).GetName(), reportProduct.GetName())
+	if want.GetName() != reportProduct.GetName() {
+		return nil, fmt.Errorf("expected product name %v, got %v", want.GetName(), reportProduct.GetName())
 	}
-	expectStepping := (*product).GetMachineStepping()
+	expectStepping := want.GetMachineStepping()
 	reportStepping := reportProduct.GetMachineStepping()
 	if expectStepping == nil {
-		if !*workaroundStepping {
-			(*product).MachineStepping = reportStepping
+		if *workaroundStepping {
+			return want, nil
 		}
-		return nil
+		result := proto.Clone(want).(*spb.SevProduct)
+		result.MachineStepping = reportStepping
+		return result, nil
 	}
 	if reportStepping == nil {
-		return nil
+		return want, nil
 	}
 	// This check is not skipped for Issue#115 since we only want to skip inferred stepping, not
 	// explicitly expected stepping.
 	if expectStepping.GetValue() != reportStepping.GetValue() {
-		return fmt.Errorf("expected product stepping %d, got %d", expectStepping.Value, reportStepping.Value)
+		return nil, fmt.Errorf("expected product stepping %d, got %d", expectStepping.Value, reportStepping.Value)
 	}
-	return nil
+	return want, nil
 }
 
 // SnpAttestation verifies the protobuf representation of an attestation report's signature based
@@ -671,6 +674,10 @@ func SnpAttestationContext(ctx context.Context, attestation *spb.Attestation, op
 	if err := fillInAttestation(ctx, attestation, options, false); err != nil {
 		return err
 	}
+	wantProduct, err := attestationExpectedProduct(attestation, options)
+	if err != nil {
+		return err
+	}
 
 	report := attestation.GetReport()
 	info, err := abi.ParseSignerInfo(report.GetSignerInfo())
@@ -683,7 +690,7 @@ func SnpAttestationContext(ctx context.Context, attestation *spb.Attestation, op
 	if fms := attestation.GetReport().GetCpuid1EaxFms(); fms != 0 {
 		knownProductLine = kds.ProductLineFromFms(fms)
 	}
-	endorsementKeyCert, root, err := decodeCerts(chain, info.SigningKey, knownProductLine, options)
+	endorsementKeyCert, root, err := decodeCerts(chain, info.SigningKey, knownProductLine, wantProduct, options)
 	if err != nil {
 		return err
 	}
@@ -729,17 +736,33 @@ func setProduct(attestation *spb.Attestation, product *spb.SevProduct) {
 	attestation.Product = product
 }
 
-// vcekProduct returns the product from a DER-encoded VCEK certificate.
-func vcekProduct(vcek []byte) (*spb.SevProduct, error) {
-	cert, err := x509.ParseCertificate(vcek)
-	if err != nil {
-		return nil, err
+// chipProductLine returns the KDS product line for the attestation. For version 3 reports, it
+// derives the product line from the CPU model. For version 2 reports, it uses the product in the
+// attestation, then options.Product, or Milan if neither is set.
+func chipProductLine(attestation *spb.Attestation, options *Options) string {
+	// Only version 3 reports set Cpuid1EaxFms; version 2 reports leave it zero.
+	if fms := attestation.GetReport().GetCpuid1EaxFms(); fms != 0 {
+		return kds.ProductLineFromFms(fms)
 	}
-	exts, err := kds.VcekCertificateExtensions(cert)
-	if err != nil {
-		return nil, err
+	product := getProduct(attestation)
+	if product == nil {
+		product = options.Product
 	}
-	return kds.ParseProductName(exts.ProductName, abi.VcekReportSigner)
+	return kds.ProductLine(product)
+}
+
+// attestationExpectedProduct returns the product that the VCEK or VLEK certificate must match
+// for a version 2 attestation, or nil for no check. Certificate checks ignore it for version 3
+// attestations.
+func attestationExpectedProduct(attestation *spb.Attestation, options *Options) (*spb.SevProduct, error) {
+	if options.DisableCertFetching || attestation.GetReport().GetCpuid1EaxFms() != 0 {
+		return options.Product, nil
+	}
+	reported := getProduct(attestation)
+	if reported == nil {
+		return options.Product, nil
+	}
+	return expectedProduct(options.Product, reported)
 }
 
 // fillInAttestation downloads a missing VCEK certificate and, when fetchChain is true, the ASK and
@@ -749,25 +772,10 @@ func fillInAttestation(ctx context.Context, attestation *spb.Attestation, option
 		return nil
 	}
 	report := attestation.GetReport()
-	// Only version 3 reports set Cpuid1EaxFms; version 2 reports leave it zero.
-	fms := report.GetCpuid1EaxFms()
-	var attestationProduct, product *spb.SevProduct
-	var productLine string
-	if fms != 0 {
-		productLine = kds.ProductLineFromFms(fms)
-	} else {
-		attestationProduct = getProduct(attestation)
-		product = attestationProduct
-		if product == nil {
-			if options.Product != nil {
-				product = options.Product
-			} else {
-				logger.Warning("Attestation missing product information. KDS certificate may be invalid. Using default Milan-B1")
-				attestation.Product = abi.DefaultSevProduct()
-			}
-		}
-		productLine = kds.ProductLine(product)
+	if report.GetCpuid1EaxFms() == 0 && getProduct(attestation) == nil && options.Product == nil {
+		logger.Warning("Attestation missing product information. Not checking the VCEK product; downloads use the Milan endpoint")
 	}
+	productLine := chipProductLine(attestation, options)
 
 	getter := options.Getter
 	info, err := abi.ParseSignerInfo(report.GetSignerInfo())
@@ -809,12 +817,6 @@ func fillInAttestation(ctx context.Context, attestation *spb.Attestation, option
 				}
 			}
 			chain.VcekCert = vcek
-			if fms == 0 && attestationProduct == nil {
-				product, err = vcekProduct(vcek)
-				if err != nil {
-					return err
-				}
-			}
 		}
 	case abi.VlekReportSigner:
 		// We can't lazily ask KDS for the certificate as a user. The CSP must cache their provisioned
@@ -823,11 +825,7 @@ func fillInAttestation(ctx context.Context, attestation *spb.Attestation, option
 			return ErrMissingVlek
 		}
 	}
-
-	if fms != 0 {
-		return nil
-	}
-	return updateProductExpectation(&options.Product, product)
+	return nil
 }
 
 // GetAttestationFromReport uses AMD's Key Distribution Service (KDS) to download the certificate
@@ -862,8 +860,9 @@ func GetAttestationFromReportContext(ctx context.Context, report *spb.Report, op
 		exts, _ = kds.VlekCertificateExtensions(parse(result.CertificateChain.VlekCert))
 	}
 	if exts != nil && report.GetCpuid1EaxFms() == 0 {
-		product, _ := kds.ParseProductName(exts.ProductName, info.SigningKey)
-		setProduct(result, product)
+		if product, err := kds.ParseProductName(exts.ProductName, info.SigningKey); err == nil {
+			setProduct(result, product)
+		}
 	}
 	return result, nil
 }

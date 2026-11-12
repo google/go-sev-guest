@@ -356,7 +356,7 @@ func TestKdsMetadataLogic(t *testing.T) {
 			options = &Options{Product: abi.DefaultSevProduct()}
 		}
 		vcekPem := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: newSigner.Vcek.Raw})
-		vcek, _, err := decodeCerts(&spb.CertificateChain{VcekCert: vcekPem, AskCert: newSigner.Ask.Raw, ArkCert: newSigner.Ark.Raw}, abi.VcekReportSigner, "", options)
+		vcek, _, err := decodeCerts(&spb.CertificateChain{VcekCert: vcekPem, AskCert: newSigner.Ask.Raw, ArkCert: newSigner.Ark.Raw}, abi.VcekReportSigner, "", options.Product, options)
 		if !test.Match(err, tc.wantErr) {
 			t.Errorf("%s: decodeCerts(...) = %+v, %v did not error as expected. Want %q", tc.name, vcek, err, tc.wantErr)
 		}
@@ -726,6 +726,9 @@ func TestGetQuoteProviderVerifyProductNameSteppingMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	ereport, _ := abi.ReportCertsToProto(reportcerts)
+	// This attestation has no product information. The next line attaches the product that the
+	// device reports.
+	ereport.Product = &spb.SevProduct{Name: spb.SevProduct_SEV_PRODUCT_MILAN, MachineStepping: wrapperspb.UInt32(1)}
 
 	ops := []struct {
 		name          string
@@ -1350,7 +1353,7 @@ func FuzzSnpAttestation(f *testing.F) {
 	// The seed with an empty certificate table makes SnpAttestation fetch the VCEK from KDS. The
 	// getter returns testdata.VcekBytes for that URL and a 404 error for every other URL.
 	// The report in both seeds is version 2, which has no CPUID family/model/stepping field.
-	// When the product is unknown, SnpAttestation defaults to Milan-B1 and requests the Milan URL.
+	// SnpAttestation requests the Milan URL when no product is set.
 	getter := test.SimpleGetter(map[string][]byte{
 		kds.VCEKCertURL("Milan", report.GetChipId(), kds.DecomposeTCBVersionV0(report.GetReportedTcb())): testdata.VcekBytes,
 	})
@@ -1364,15 +1367,14 @@ func FuzzSnpAttestation(f *testing.F) {
 	emptyTable := (&abi.CertTable{}).Marshal()
 	f.Add(append(append([]byte{}, testdata.AttestationBytes...), certTable...))
 	f.Add(append(append([]byte{}, testdata.AttestationBytes...), emptyTable...))
+	options := &Options{Getter: getter, Now: now}
 
 	f.Fuzz(func(_ *testing.T, data []byte) {
 		attestation, err := abi.ReportCertsToProto(data)
 		if err != nil {
 			return
 		}
-		// SnpAttestation sets options.Product when it is nil. A shared Options would carry one
-		// input's product into the next input, so each call gets a new Options.
-		_ = SnpAttestation(attestation, &Options{Getter: getter, Now: now})
+		_ = SnpAttestation(attestation, options)
 	})
 }
 
@@ -1382,5 +1384,87 @@ func TestGetCrlAndCheckRootZeroNowExpiredCRL(t *testing.T) {
 
 	if _, err := GetCrlAndCheckRoot(root, &Options{}); !errors.Is(err, ErrNoGetter) {
 		t.Errorf("GetCrlAndCheckRoot() = _, %v, want _, %v", err, ErrNoGetter)
+	}
+}
+
+func TestSnpAttestationKeepsOptionsProductUnset(t *testing.T) {
+	attestation, roots := newTestAttestation(t)
+	options := &Options{TrustedRoots: roots, Now: time.Now()}
+
+	if err := SnpAttestation(attestation, options); err != nil {
+		t.Fatalf("SnpAttestation() = %v, want nil", err)
+	}
+	if options.Product != nil {
+		t.Errorf("SnpAttestation() set options.Product to %v, want nil", options.Product)
+	}
+}
+
+func TestSnpAttestationKeepsOptionsProductStepping(t *testing.T) {
+	attestation, roots := newTestAttestation(t)
+	options := &Options{
+		TrustedRoots: roots,
+		Now:          time.Now(),
+		Product:      &spb.SevProduct{Name: attestation.GetProduct().GetName()},
+	}
+
+	if err := SnpAttestation(attestation, options); err != nil {
+		t.Fatalf("SnpAttestation() = %v, want nil", err)
+	}
+	if options.Product.MachineStepping != nil {
+		t.Errorf("SnpAttestation() set options.Product.MachineStepping to %v, want nil", options.Product.MachineStepping)
+	}
+}
+
+// newMilanB0AttestationWithoutProduct returns a Milan-B0 version 2 attestation with no product set.
+// The default Milan-B1 guess does not match its Milan-B0 VCEK.
+func newMilanB0AttestationWithoutProduct(t *testing.T) (*spb.Attestation, map[string][]*trust.AMDRootCerts) {
+	t.Helper()
+	if !sg.UseDefaultSevGuest() {
+		t.Skip("requires test certificates")
+	}
+	signerMilanB0, err := test.DefaultTestOnlyCertChain("Milan-B0", time.Now())
+	if err != nil {
+		t.Fatalf("Setup: DefaultTestOnlyCertChain() failed: %v", err)
+	}
+	qp, roots, _, _ := testclient.GetSevQuoteProvider(test.TestCases(), &test.DeviceOptions{Now: time.Now(), Signer: signerMilanB0}, t)
+	attestation, err := sg.GetQuoteProto(qp, [64]byte{})
+	if err != nil {
+		t.Fatalf("Setup: GetQuoteProto() failed: %v", err)
+	}
+	attestation.Product = nil
+	delete(attestation.GetCertificateChain().GetExtras(), abi.ExtraPlatformInfoGUID)
+	return attestation, roots
+}
+
+func TestSnpAttestationKeepsAttestationProductUnset(t *testing.T) {
+	attestation, roots := newMilanB0AttestationWithoutProduct(t)
+	options := &Options{TrustedRoots: roots, Now: time.Now()}
+
+	if err := SnpAttestation(attestation, options); err != nil {
+		t.Fatalf("SnpAttestation() = %v, want nil", err)
+	}
+	if got := getProduct(attestation); got != nil {
+		t.Errorf("SnpAttestation() set the attestation product to %v, want nil", got)
+	}
+}
+
+func TestSnpAttestationSecondCallSameResult(t *testing.T) {
+	attestation, roots := newMilanB0AttestationWithoutProduct(t)
+	options := &Options{TrustedRoots: roots, Now: time.Now()}
+
+	if err := SnpAttestation(attestation, options); err != nil {
+		t.Fatalf("first SnpAttestation() = %v, want nil", err)
+	}
+	if err := SnpAttestation(attestation, options); err != nil {
+		t.Errorf("second SnpAttestation() = %v, want nil", err)
+	}
+}
+
+func TestSnpAttestationOptionsProductMismatch(t *testing.T) {
+	attestation, roots := newMilanB0AttestationWithoutProduct(t)
+	options := &Options{TrustedRoots: roots, Now: time.Now(), Product: abi.DefaultSevProduct()}
+
+	if err := SnpAttestation(attestation, options); err == nil {
+		t.Errorf("SnpAttestation() with a Milan-B1 expectation for a Milan-B0 VCEK = nil, want error")
 	}
 }
