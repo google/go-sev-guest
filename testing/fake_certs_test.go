@@ -22,6 +22,7 @@ import (
 
 	"github.com/google/go-sev-guest/abi"
 	"github.com/google/go-sev-guest/kds"
+	spb "github.com/google/go-sev-guest/proto/sevsnp"
 	"github.com/google/uuid"
 )
 
@@ -119,5 +120,12 @@ func TestCertificatesExtras(t *testing.T) {
 	}
 	if !hasXtra {
 		t.Errorf("fake certs missing extra cert")
+	}
+}
+
+func TestFakeKDSFromSignerUnknownProduct(t *testing.T) {
+	signer := &AmdSigner{Product: &spb.SevProduct{Name: spb.SevProduct_SEV_PRODUCT_UNKNOWN}}
+	if _, err := FakeKDSFromSigner(signer); err == nil {
+		t.Error("FakeKDSFromSigner(unknown product) = nil error, want error")
 	}
 }
