@@ -386,49 +386,91 @@ func (b *AmdSignerBuilder) certifyAsvk() error {
 	return err
 }
 
-// CustomExtensionsV0 returns an array of StructVersion 0 extensions following the KDS specification
-// for the given values.
-func CustomExtensionsV0(tcb kds.TCBVersionV0, hwid []byte, cspid, productName string) []pkix.Extension {
-	var productNameAsn1 []byte
-	asn1Zero, _ := asn1.Marshal(0)
+// customExtensions returns KDS certificate extensions with the given struct version and
+// SPL extensions, followed by the HWID extension for a VCEK or the CSP_ID extension for a VLEK.
+func customExtensions(structVersion int, spls []pkix.Extension, hwid []byte, cspid, productName string) []pkix.Extension {
+	version, _ := asn1.Marshal(structVersion)
+	var productNameASN1 []byte
 	if hwid != nil {
-		productNameAsn1, _ = asn1.MarshalWithParams(productName, "ia5")
+		productNameASN1, _ = asn1.MarshalWithParams(productName, "ia5")
 	} else {
 		parts := strings.SplitN(productName, "-", 2)
 		// VLEK doesn't have a -stepping component to its productName.
-		productNameAsn1, _ = asn1.MarshalWithParams(parts[0], "ia5")
+		productNameASN1, _ = asn1.MarshalWithParams(parts[0], "ia5")
 	}
-	blSpl, _ := asn1.Marshal(int(tcb.BlSpl))
-	teeSpl, _ := asn1.Marshal(int(tcb.TeeSpl))
-	snpSpl, _ := asn1.Marshal(int(tcb.SnpSpl))
-	spl4, _ := asn1.Marshal(int(tcb.Spl4))
-	spl5, _ := asn1.Marshal(int(tcb.Spl5))
-	spl6, _ := asn1.Marshal(int(tcb.Spl6))
-	spl7, _ := asn1.Marshal(int(tcb.Spl7))
-	ucodeSpl, _ := asn1.Marshal(int(tcb.UcodeSpl))
-	exts := []pkix.Extension{
-		{Id: kds.OidStructVersion, Value: asn1Zero},
-		{Id: kds.OidProductName1, Value: productNameAsn1},
-		{Id: kds.OidBlSpl, Value: blSpl},
-		{Id: kds.OidTeeSpl, Value: teeSpl},
-		{Id: kds.OidSnpSpl, Value: snpSpl},
-		{Id: kds.OidSpl4, Value: spl4},
-		{Id: kds.OidSpl5, Value: spl5},
-		{Id: kds.OidSpl6, Value: spl6},
-		{Id: kds.OidSpl7, Value: spl7},
-		{Id: kds.OidUcodeSpl, Value: ucodeSpl},
-	}
+	exts := append([]pkix.Extension{
+		{Id: kds.OidStructVersion, Value: version},
+		{Id: kds.OidProductName1, Value: productNameASN1},
+	}, spls...)
 	if hwid != nil {
-		asn1Hwid, _ := asn1.Marshal(hwid[:])
-		exts = append(exts, pkix.Extension{Id: kds.OidHwid, Value: asn1Hwid})
-	} else {
-		if cspid == "" {
-			cspid = "placeholder"
-		}
-		asn1cspid, _ := asn1.MarshalWithParams(cspid, "ia5")
-		exts = append(exts, pkix.Extension{Id: kds.OidCspID, Value: asn1cspid})
+		asn1HWID, _ := asn1.Marshal(hwid)
+		return append(exts, pkix.Extension{Id: kds.OidHwid, Value: asn1HWID})
 	}
-	return exts
+	if cspid == "" {
+		cspid = "placeholder"
+	}
+	asn1CSPID, _ := asn1.MarshalWithParams(cspid, "ia5")
+	return append(exts, pkix.Extension{Id: kds.OidCspID, Value: asn1CSPID})
+}
+
+// splExtension returns the KDS certificate extension for one SPL value.
+func splExtension(id asn1.ObjectIdentifier, spl uint8) pkix.Extension {
+	v, _ := asn1.Marshal(int(spl))
+	return pkix.Extension{Id: id, Value: v}
+}
+
+// CustomExtensionsV0 returns an array of StructVersion 0 extensions following the KDS specification
+// for the given values.
+func CustomExtensionsV0(tcb kds.TCBVersionV0, hwid []byte, cspid, productName string) []pkix.Extension {
+	return customExtensions(0, []pkix.Extension{
+		splExtension(kds.OidBlSpl, tcb.BlSpl),
+		splExtension(kds.OidTeeSpl, tcb.TeeSpl),
+		splExtension(kds.OidSnpSpl, tcb.SnpSpl),
+		splExtension(kds.OidSpl4, tcb.Spl4),
+		splExtension(kds.OidSpl5, tcb.Spl5),
+		splExtension(kds.OidSpl6, tcb.Spl6),
+		splExtension(kds.OidSpl7, tcb.Spl7),
+		splExtension(kds.OidUcodeSpl, tcb.UcodeSpl),
+	}, hwid, cspid, productName)
+}
+
+// CustomExtensionsV1 returns an array of StructVersion 1 extensions following the KDS specification.
+func CustomExtensionsV1(tcb kds.TCBVersionV1, hwid []byte, cspid, productName string) []pkix.Extension {
+	if len(hwid) > kds.VcekHWIDStruct1Size {
+		hwid = hwid[:kds.VcekHWIDStruct1Size]
+	}
+	return customExtensions(1, []pkix.Extension{
+		splExtension(kds.OidFmcSpl, tcb.FmcSpl),
+		splExtension(kds.OidBlSpl, tcb.BlSpl),
+		splExtension(kds.OidTeeSpl, tcb.TeeSpl),
+		splExtension(kds.OidSnpSpl, tcb.SnpSpl),
+		splExtension(kds.OidSpl5, tcb.Spl5),
+		splExtension(kds.OidSpl6, tcb.Spl6),
+		splExtension(kds.OidSpl7, tcb.Spl7),
+		splExtension(kds.OidUcodeSpl, tcb.UcodeSpl),
+	}, hwid, cspid, productName)
+}
+
+func (b *AmdSignerBuilder) extensions(hwid []byte) []pkix.Extension {
+	tcb := b.TCB
+	if tcb == nil {
+		switch b.productLine() {
+		case "Turin":
+			tcb = kds.TCBVersionV1{}
+		case "Milan", "Genoa":
+			tcb = kds.TCBVersionV0{}
+		default:
+			return nil
+		}
+	}
+	switch v := tcb.(type) {
+	case kds.TCBVersionV1:
+		return CustomExtensionsV1(v, hwid, b.CSPID, b.productName())
+	case kds.TCBVersionV0:
+		return CustomExtensionsV0(v, hwid, b.CSPID, b.productName())
+	default:
+		return nil
+	}
 }
 
 func (b *AmdSignerBuilder) endorsementKeyPrecert(creationTime time.Time, hwid []byte, serialNumber *big.Int, key abi.ReportSigner) *x509.Certificate {
@@ -447,12 +489,12 @@ func (b *AmdSignerBuilder) endorsementKeyPrecert(creationTime time.Time, hwid []
 		SerialNumber:       serialNumber,
 		NotBefore:          time.Time{},
 		NotAfter:           creationTime.Add(vcekExpirationYears * 365 * 24 * time.Hour),
-		ExtraExtensions:    CustomExtensionsV0(kds.TCBVersionV0{}, hwid, b.CSPID, b.productName()),
+		ExtraExtensions:    b.extensions(hwid),
 	}
 }
 
 func (b *AmdSignerBuilder) certifyVcek() error {
-	cert := b.endorsementKeyPrecert(b.VcekCreationTime, make([]byte, abi.ChipIDSize), big.NewInt(0), abi.VcekReportSigner)
+	cert := b.endorsementKeyPrecert(b.VcekCreationTime, b.HWID[:], big.NewInt(0), abi.VcekReportSigner)
 	b.VcekCustom.override(cert)
 
 	caBytes, err := x509.CreateCertificate(insecureRandomness, cert, b.Ask, b.Keys.Vcek.Public(), b.Keys.Ask)

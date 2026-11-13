@@ -1178,7 +1178,10 @@ func TestAttestationCertificateFetching(t *testing.T) {
 			wantChain := attestation.CertificateChain
 			productLine := test.GetProductLine()
 			report := attestation.Report
-			vcekURL := kds.VCEKCertURL(productLine, report.ChipId, kds.DecomposeTCBVersionV0(report.ReportedTcb))
+			vcekURL, err := kds.VCEKCertURL(productLine, report.ChipId, kds.DecomposeTCBVersionV0(report.ReportedTcb))
+			if err != nil {
+				t.Fatalf("kds.VCEKCertURL(%q, %v) failed: %v", productLine, report.ChipId, err)
+			}
 			wantURLs := []string{vcekURL}
 			if tc.Reconstruct {
 				wantURLs = []string{kds.ProductCertChainURL(abi.VcekReportSigner, productLine)}
@@ -1326,5 +1329,34 @@ func TestRootOfTrustToOptionsDisallowNetwork(t *testing.T) {
 	}
 	if opts.Getter != nil {
 		t.Errorf("RootOfTrustToOptions(&RootOfTrust{DisallowNetwork: true}).Getter = %v, want nil", opts.Getter)
+	}
+}
+
+func TestFillInAttestationVcekURLErrors(t *testing.T) {
+	tcs := []struct {
+		name    string
+		report  *spb.Report
+		wantErr string
+	}{
+		{
+			name:    "unknown product returns AttestationRecreationErr",
+			report:  &spb.Report{Cpuid1EaxFms: 0x00c00f00, ChipId: make([]byte, abi.ChipIDSize)},
+			wantErr: "could not decompose reported TCB",
+		},
+		{
+			name:    "Milan 8-byte CHIP_ID returns AttestationRecreationErr",
+			report:  &spb.Report{Cpuid1EaxFms: 0x00a00f10, ChipId: make([]byte, 8)},
+			wantErr: "could not construct VCEK certificate URL",
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			attestation := &spb.Attestation{Report: tc.report}
+			err := fillInAttestation(context.Background(), attestation, &Options{Getter: test.SimpleGetter(nil)}, false)
+			var recreationErr *trust.AttestationRecreationErr
+			if !errors.As(err, &recreationErr) || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("fillInAttestation(%v) = %v, want *trust.AttestationRecreationErr containing %q", tc.report, err, tc.wantErr)
+			}
+		})
 	}
 }
