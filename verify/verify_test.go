@@ -355,7 +355,7 @@ func TestKdsMetadataLogic(t *testing.T) {
 			options = &Options{Product: abi.DefaultSevProduct()}
 		}
 		vcekPem := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: newSigner.Vcek.Raw})
-		vcek, _, err := decodeCerts(&spb.CertificateChain{VcekCert: vcekPem, AskCert: newSigner.Ask.Raw, ArkCert: newSigner.Ark.Raw}, abi.VcekReportSigner, "", options)
+		vcek, _, err := decodeCerts(&spb.CertificateChain{VcekCert: vcekPem, AskCert: newSigner.Ask.Raw, ArkCert: newSigner.Ark.Raw}, abi.VcekReportSigner, "", options.Product, options)
 		if !test.Match(err, tc.wantErr) {
 			t.Errorf("%s: decodeCerts(...) = %+v, %v did not error as expected. Want %q", tc.name, vcek, err, tc.wantErr)
 		}
@@ -725,6 +725,8 @@ func TestGetQuoteProviderVerifyProductNameSteppingMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	ereport, _ := abi.ReportCertsToProto(reportcerts)
+	// Version 2 reports do not carry the product, so attach the product the device reports.
+	ereport.Product = &spb.SevProduct{Name: spb.SevProduct_SEV_PRODUCT_MILAN, MachineStepping: wrapperspb.UInt32(1)}
 
 	ops := []struct {
 		name          string
@@ -897,7 +899,7 @@ func TestV3KDSProduct(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			report, _ := abi.ReportToProto(tc.Output[:])
 			a := &spb.Attestation{Report: report}
-			if err := fillInAttestation(context.Background(), a, options, true); err != nil {
+			if _, err := fillInAttestation(context.Background(), a, options, true); err != nil {
 				t.Fatalf("fillInAttestation(%v, %v) = %v, want nil", a, options, err)
 			}
 			var want []byte
@@ -1326,5 +1328,47 @@ func TestRootOfTrustToOptionsDisallowNetwork(t *testing.T) {
 	}
 	if opts.Getter != nil {
 		t.Errorf("RootOfTrustToOptions(&RootOfTrust{DisallowNetwork: true}).Getter = %v, want nil", opts.Getter)
+	}
+}
+
+func TestSnpAttestationKeepsOptionsProductUnset(t *testing.T) {
+	attestation, roots := newTestAttestation(t)
+	options := &Options{TrustedRoots: roots, Now: time.Now()}
+
+	if err := SnpAttestation(attestation, options); err != nil {
+		t.Fatalf("SnpAttestation() = %v, want nil", err)
+	}
+	if options.Product != nil {
+		t.Errorf("SnpAttestation() set options.Product to %v, want nil", options.Product)
+	}
+}
+
+func TestSnpAttestationKeepsOptionsProductStepping(t *testing.T) {
+	attestation, roots := newTestAttestation(t)
+	options := &Options{
+		TrustedRoots: roots,
+		Now:          time.Now(),
+		Product:      &spb.SevProduct{Name: attestation.GetProduct().GetName()},
+	}
+
+	if err := SnpAttestation(attestation, options); err != nil {
+		t.Fatalf("SnpAttestation() = %v, want nil", err)
+	}
+	if options.Product.MachineStepping != nil {
+		t.Errorf("SnpAttestation() set options.Product.MachineStepping to %v, want nil", options.Product.MachineStepping)
+	}
+}
+
+func TestSnpAttestationKeepsAttestationProductUnset(t *testing.T) {
+	attestation, roots := newTestAttestation(t)
+	attestation.Product = nil
+	delete(attestation.GetCertificateChain().GetExtras(), abi.ExtraPlatformInfoGUID)
+	options := &Options{TrustedRoots: roots, Now: time.Now()}
+
+	if err := SnpAttestation(attestation, options); err != nil {
+		t.Fatalf("SnpAttestation() = %v, want nil", err)
+	}
+	if attestation.Product != nil {
+		t.Errorf("SnpAttestation() set attestation.Product to %v, want nil", attestation.Product)
 	}
 }
