@@ -21,6 +21,7 @@ import (
 	"encoding/asn1"
 	"encoding/hex"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -789,14 +790,53 @@ func ProductCertChainURL(s abi.ReportSigner, productLine string) string {
 	return fmt.Sprintf("%s/cert_chain", productBaseURL(s, productLine))
 }
 
+func validateProductTCB(product string, tcb TCBVersion) error {
+	if tcb == nil {
+		return errors.New("tcb cannot be nil")
+	}
+	expectedVersion, err := StructVersionForProductLine(product)
+	if err != nil {
+		return err
+	}
+	if tcb.StructVersion() != expectedVersion {
+		return fmt.Errorf("product %q requires TCB StructVersion %d, got %d", product, expectedVersion, tcb.StructVersion())
+	}
+	return nil
+}
+
 // VCEKCertURL returns the AMD KDS URL for retrieving the VCEK on a given product
-// at a given TCB version. The hwid is the CHIP_ID field in an attestation report.
-func VCEKCertURL(productLine string, hwid []byte, tcb TCBVersion) string {
+// at a given TCB version. The hwid may be either the raw silicon ID or the 64-byte
+// CHIP_ID field from an attestation report.
+//
+// Per AMD Publication #57230 Table 13, the KDS REST endpoint expects a hexadecimal
+// HWID string of:
+//   - 128 hex characters (64 bytes) for Family 19h (Milan, Genoa, Siena)
+//   - 16 hex characters (8 bytes) for Family 1Ah (Turin and later)
+//
+// If a 64-byte attestation report CHIP_ID is passed for Turin, the first 8 bytes are used.
+func VCEKCertURL(productLine string, hwid []byte, tcb TCBVersion) (string, error) {
+	if err := validateProductTCB(productLine, tcb); err != nil {
+		return "", err
+	}
+	want := vcekHWIDSize(tcb.StructVersion())
+	hwidBytes := hwid
+	switch {
+	case len(hwid) == want:
+	case want == abi.TurinSiliconIDSize && len(hwid) == abi.ChipIDSize:
+		// Turin hwID is 8 bytes (AMD pub. 57230, section 3.1). In the 64-byte
+		// CHIP_ID report field (AMD pub. 56860, Table 27), bytes 8-63 are unspecified
+		// and not checked.
+		hwidBytes = hwid[:abi.TurinSiliconIDSize]
+	case want == abi.TurinSiliconIDSize:
+		return "", fmt.Errorf("hwid has size %d, want %d or %d", len(hwid), abi.TurinSiliconIDSize, abi.ChipIDSize)
+	default:
+		return "", fmt.Errorf("hwid has size %d, want %d", len(hwid), want)
+	}
 	return fmt.Sprintf("%s/%s?%s",
 		productBaseURL(abi.VcekReportSigner, productLine),
-		hex.EncodeToString(hwid),
+		hex.EncodeToString(hwidBytes),
 		tcb.Values().Encode(),
-	)
+	), nil
 }
 
 // VLEKCertURL returns the GET URL for retrieving a VLEK certificate, but without the necessary
@@ -910,12 +950,12 @@ func ParseProductCertChainURL(kdsurl string) (string, CertFunction, error) {
 	return parsed.productLine, parsed.function, nil
 }
 
-func parseTCBURL(u *url.URL) (TCBVersionV0, error) {
+func parseTCBURL(productLine string, u *url.URL) (TCBVersion, error) {
 	values, err := url.ParseQuery(u.RawQuery)
 	if err != nil {
-		return TCBVersionV0{}, fmt.Errorf("invalid AMD KDS URL query %q: %v", u.RawQuery, err)
+		return nil, fmt.Errorf("invalid AMD KDS URL query %q: %v", u.RawQuery, err)
 	}
-	return ParseTCBVersionV0(values)
+	return ParseProductTCB(productLine, values)
 }
 
 // ParseVCEKCertURL returns the attestation report components represented in the given KDS VCEK
@@ -935,14 +975,20 @@ func ParseVCEKCertURL(kdsurl string) (VCEKCert, error) {
 	if err != nil {
 		return result, fmt.Errorf("hwid component of KDS URL is not a hex string: %q", parsed.simpleURL.Path)
 	}
-	if len(hwid) != abi.ChipIDSize {
-		return result, fmt.Errorf("hwid component of KDS URL has size %d, want %d", len(hwid), abi.ChipIDSize)
+	structVersion, err := StructVersionForProductLine(parsed.productLine)
+	if err != nil {
+		return result, fmt.Errorf("unexpected product %q in VCEK URL: %w", parsed.productLine, err)
 	}
-
+	if want := vcekHWIDSize(structVersion); len(hwid) != want {
+		return result, fmt.Errorf("unexpected HWID length %d for product %q, want %d", len(hwid), parsed.productLine, want)
+	}
 	result.HWID = hwid
-
-	result.TCB, err = parseTCBURL(parsed.simpleURL)
-	return result, err
+	tcb, err := parseTCBURL(parsed.productLine, parsed.simpleURL)
+	if err != nil {
+		return result, err
+	}
+	result.TCB = tcb
+	return result, nil
 }
 
 // ParseVLEKCertURL returns the attestation report components represented in the given KDS VLEK
@@ -962,7 +1008,7 @@ func ParseVLEKCertURL(kdsurl string) (VLEKCert, error) {
 		return result, fmt.Errorf("vlek function is %q, want 'cert'", parsed.simpleURL.Path)
 	}
 
-	result.TCB, err = parseTCBURL(parsed.simpleURL)
+	result.TCB, err = parseTCBURL(parsed.productLine, parsed.simpleURL)
 	return result, err
 }
 
