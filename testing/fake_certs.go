@@ -451,7 +451,34 @@ func CustomExtensionsV1(tcb kds.TCBVersionV1, hwid []byte, cspid, productName st
 	}, hwid, cspid, productName)
 }
 
-func (b *AmdSignerBuilder) endorsementKeyPrecert(creationTime time.Time, hwid []byte, serialNumber *big.Int, key abi.ReportSigner) *x509.Certificate {
+func (b *AmdSignerBuilder) extensions(hwid []byte) ([]pkix.Extension, error) {
+	tcb := b.TCB
+	if tcb == nil {
+		productLine := b.productLine()
+		switch productLine {
+		case "Turin":
+			tcb = kds.TCBVersionV1{}
+		case "Milan", "Genoa":
+			tcb = kds.TCBVersionV0{}
+		default:
+			return nil, fmt.Errorf("unknown product line: %q", productLine)
+		}
+	}
+	switch v := tcb.(type) {
+	case kds.TCBVersionV1:
+		return CustomExtensionsV1(v, hwid, b.CSPID, b.productName()), nil
+	case kds.TCBVersionV0:
+		return CustomExtensionsV0(v, hwid, b.CSPID, b.productName()), nil
+	default:
+		return nil, fmt.Errorf("unsupported TCB type %T", tcb)
+	}
+}
+
+func (b *AmdSignerBuilder) endorsementKeyPrecert(creationTime time.Time, hwid []byte, serialNumber *big.Int, key abi.ReportSigner) (*x509.Certificate, error) {
+	exts, err := b.extensions(hwid)
+	if err != nil {
+		return nil, err
+	}
 	subject := amdPkixName(fmt.Sprintf("SEV-%s", key.String()), "0")
 	subject.SerialNumber = fmt.Sprintf("%x", serialNumber)
 	ica := b.Ask
@@ -467,12 +494,15 @@ func (b *AmdSignerBuilder) endorsementKeyPrecert(creationTime time.Time, hwid []
 		SerialNumber:       serialNumber,
 		NotBefore:          time.Time{},
 		NotAfter:           creationTime.Add(vcekExpirationYears * 365 * 24 * time.Hour),
-		ExtraExtensions:    CustomExtensionsV0(kds.TCBVersionV0{}, hwid, b.CSPID, b.productName()),
-	}
+		ExtraExtensions:    exts,
+	}, nil
 }
 
 func (b *AmdSignerBuilder) certifyVcek() error {
-	cert := b.endorsementKeyPrecert(b.VcekCreationTime, make([]byte, abi.ChipIDSize), big.NewInt(0), abi.VcekReportSigner)
+	cert, err := b.endorsementKeyPrecert(b.VcekCreationTime, b.HWID[:], big.NewInt(0), abi.VcekReportSigner)
+	if err != nil {
+		return err
+	}
 	b.VcekCustom.override(cert)
 
 	caBytes, err := x509.CreateCertificate(insecureRandomness, cert, b.Ask, b.Keys.Vcek.Public(), b.Keys.Ask)
@@ -485,7 +515,10 @@ func (b *AmdSignerBuilder) certifyVcek() error {
 }
 
 func (b *AmdSignerBuilder) certifyVlek() error {
-	cert := b.endorsementKeyPrecert(b.VlekCreationTime, nil, big.NewInt(0), abi.VlekReportSigner)
+	cert, err := b.endorsementKeyPrecert(b.VlekCreationTime, nil, big.NewInt(0), abi.VlekReportSigner)
+	if err != nil {
+		return err
+	}
 	b.VlekCustom.override(cert)
 
 	caBytes, err := x509.CreateCertificate(insecureRandomness, cert, b.Asvk, b.Keys.Vlek.Public(), b.Keys.Asvk)
