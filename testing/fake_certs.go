@@ -434,6 +434,23 @@ func CustomExtensionsV0(tcb kds.TCBVersionV0, hwid []byte, cspid, productName st
 	}, hwid, cspid, productName)
 }
 
+// CustomExtensionsV1 returns an array of StructVersion 1 extensions following the KDS specification.
+func CustomExtensionsV1(tcb kds.TCBVersionV1, hwid []byte, cspid, productName string) []pkix.Extension {
+	if len(hwid) > abi.TurinSiliconIDSize {
+		hwid = hwid[:abi.TurinSiliconIDSize]
+	}
+	return customExtensions(1, []pkix.Extension{
+		splExtension(kds.OidFmcSpl, tcb.FmcSpl),
+		splExtension(kds.OidBlSpl, tcb.BlSpl),
+		splExtension(kds.OidTeeSpl, tcb.TeeSpl),
+		splExtension(kds.OidSnpSpl, tcb.SnpSpl),
+		splExtension(kds.OidSpl5, tcb.Spl5),
+		splExtension(kds.OidSpl6, tcb.Spl6),
+		splExtension(kds.OidSpl7, tcb.Spl7),
+		splExtension(kds.OidUcodeSpl, tcb.UcodeSpl),
+	}, hwid, cspid, productName)
+}
+
 func (b *AmdSignerBuilder) endorsementKeyPrecert(creationTime time.Time, hwid []byte, serialNumber *big.Int, key abi.ReportSigner) *x509.Certificate {
 	subject := amdPkixName(fmt.Sprintf("SEV-%s", key.String()), "0")
 	subject.SerialNumber = fmt.Sprintf("%x", serialNumber)
