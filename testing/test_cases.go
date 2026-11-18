@@ -82,6 +82,15 @@ var userZeros14 = [64]byte{
 	0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 0, 0,
 	0, 0, 0, 0, 0, 0, 1, 4}
+var userZeros15 = [64]byte{
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 0, 0,
+	0, 0, 0, 0, 0, 0, 1, 5}
 
 // zeroReport is a textproto representing an unsigned report response to UserZeros.
 // The policy just sets the debug bit and bit 17 to 1, and the signature algo 1 is the encoding for
@@ -205,7 +214,11 @@ func makeTestCerts(opts *DeviceOptions) ([]byte, *AmdSigner, error) {
 	signer := opts.Signer
 	var productName string
 	if opts.Product != nil {
-		productName = kds.ProductName(opts.Product)
+		if opts.Product.MachineStepping == nil {
+			productName = fmt.Sprintf("%s-B0", kds.ProductLine(opts.Product))
+		} else {
+			productName = kds.ProductName(opts.Product)
+		}
 	} else {
 		productName = GetProductName()
 	}
@@ -250,10 +263,19 @@ func TestCases() []TestCase {
 	zeroRaw := TestRawReport(userZeros)
 	milanReportV3Raw := TestRawReportV3(userZeros13, 0x00a00f10)
 	genoaReportV3Raw := TestRawReportV3(userZeros14, 0x00a10f10)
+	turinReportV3Raw := TestRawReportV3(userZeros15, 0x00b00f20)
 	milanReportV3proto, _ := abi.ReportToProto(milanReportV3Raw[:])
 	genoaReportV3proto, _ := abi.ReportToProto(genoaReportV3Raw[:])
+	turinReportV3proto, err := abi.ReportToProto(turinReportV3Raw[:])
+	if err != nil {
+		panic(fmt.Sprintf("abi.ReportToProto(turinReportV3Raw): %v", err))
+	}
 	milanReportV3, _ := prototext.MarshalOptions{Multiline: true}.Marshal(milanReportV3proto)
 	genoaReportV3, _ := prototext.MarshalOptions{Multiline: true}.Marshal(genoaReportV3proto)
+	turinReportV3, err := prototext.MarshalOptions{Multiline: true}.Marshal(turinReportV3proto)
+	if err != nil {
+		panic(fmt.Sprintf("prototext.Marshal(turinReportV3proto): %v", err))
+	}
 	oneRaw := TestRawReport(userZeros1)
 	vlekRaw := CreateRawReport(&TestReportOptions{
 		ReportData: userZeros12[:],
@@ -296,6 +318,12 @@ func TestCases() []TestCase {
 			Input:       userZeros14,
 			Output:      genoaReportV3Raw,
 			OutputProto: string(genoaReportV3),
+		},
+		{
+			Name:        "zeros turin v3",
+			Input:       userZeros15,
+			Output:      turinReportV3Raw,
+			OutputProto: string(turinReportV3),
 		},
 	}
 }
