@@ -54,7 +54,8 @@ type Options struct {
 	ReportIDMA []byte
 	// Measurement is the expected MEASUREMENT field. Must be nil or 48 bytes long. Not checked if nil.
 	Measurement []byte
-	// ChipID is the expected CHIP_ID field. Must be nil or 64 bytes long. Not checked if nil.
+	// ChipID is the expected CHIP_ID field. Must be nil, 8 bytes long (Turin), or 64 bytes long.
+	// Not checked if nil.
 	ChipID []byte
 	// MinimumBuild is the minimum firmware build version reported in the attestation report.
 	MinimumBuild uint8
@@ -144,6 +145,10 @@ func lengthCheck(name string, length int, value []byte) error {
 }
 
 func checkOptionsLengths(opts *Options) error {
+	var chipIDErr error
+	if opts.ChipID != nil && len(opts.ChipID) != abi.TurinSiliconIDSize && len(opts.ChipID) != abi.ChipIDSize {
+		chipIDErr = fmt.Errorf("option %q length is %d. Want %d or %d", "chip_id", len(opts.ChipID), abi.TurinSiliconIDSize, abi.ChipIDSize)
+	}
 	return multierr.Combine(
 		lengthCheck("family_id", abi.FamilyIDSize, opts.FamilyID),
 		lengthCheck("image_id", abi.ImageIDSize, opts.ImageID),
@@ -152,7 +157,7 @@ func checkOptionsLengths(opts *Options) error {
 		lengthCheck("host_data", abi.HostDataSize, opts.HostData),
 		lengthCheck("report_id", abi.ReportIDSize, opts.ReportID),
 		lengthCheck("report_id_ma", abi.ReportIDMASize, opts.ReportIDMA),
-		lengthCheck("chip_id", abi.ChipIDSize, opts.ChipID))
+		chipIDErr)
 }
 
 // Converts "maj.min" to its uint16 representation or errors.
@@ -374,7 +379,41 @@ func validateByteField(option, field string, size int, given, required []byte) e
 	return nil
 }
 
+// validateChipID checks the report's CHIP_ID against expectedChipID.
+// CHIP_ID is a 64-byte field (AMD Publication #56860 Table 23).
+// Milan and Genoa use 64-byte socket hardware IDs (AMD Publication #57230 Table 10).
+// Turin uses an 8-byte socket hardware ID in the first 8 bytes of CHIP_ID
+// (AMD Publication #57230 Table 11).
+func validateChipID(product spb.SevProduct_SevProductName, reportChipID, expectedChipID []byte) error {
+	if len(expectedChipID) == 0 {
+		return nil
+	}
+	switch product {
+	case spb.SevProduct_SEV_PRODUCT_TURIN:
+	case spb.SevProduct_SEV_PRODUCT_UNKNOWN, spb.SevProduct_SEV_PRODUCT_MILAN, spb.SevProduct_SEV_PRODUCT_GENOA:
+		return validateByteField("ChipID", "CHIP_ID", abi.ChipIDSize, reportChipID, expectedChipID)
+	default:
+		return fmt.Errorf("unknown product: %v", product)
+	}
+	switch len(expectedChipID) {
+	case abi.ChipIDSize:
+		return validateByteField("ChipID", "CHIP_ID", abi.ChipIDSize, reportChipID, expectedChipID)
+	case abi.TurinSiliconIDSize:
+		if len(reportChipID) < abi.TurinSiliconIDSize {
+			return fmt.Errorf("report field CHIP_ID has size %d, want at least %d", len(reportChipID), abi.TurinSiliconIDSize)
+		}
+		if !bytes.Equal(expectedChipID, reportChipID[:abi.TurinSiliconIDSize]) {
+			return fmt.Errorf("report field CHIP_ID is %s. Expect %s",
+				hex.EncodeToString(reportChipID[:abi.TurinSiliconIDSize]), hex.EncodeToString(expectedChipID))
+		}
+		return nil
+	default:
+		return fmt.Errorf("option ChipID for Turin must be nil, %d, or %d bytes", abi.TurinSiliconIDSize, abi.ChipIDSize)
+	}
+}
+
 func validateVerbatimFields(report *spb.Report, options *Options) error {
+	product := abi.SevProductFromCpuid1Eax(report.GetCpuid1EaxFms()).GetName()
 	return multierr.Combine(
 		validateByteField("ReportData", "REPORT_DATA", abi.ReportDataSize, report.GetReportData(), options.ReportData),
 		validateByteField("HostData", "HOST_DATA", abi.HostDataSize, report.GetHostData(), options.HostData),
@@ -383,7 +422,7 @@ func validateVerbatimFields(report *spb.Report, options *Options) error {
 		validateByteField("ReportID", "REPORT_ID", abi.ReportIDSize, report.GetReportId(), options.ReportID),
 		validateByteField("ReportIDMA", "REPORT_ID_MA", abi.ReportIDMASize, report.GetReportIdMa(), options.ReportIDMA),
 		validateByteField("Measurement", "MEASUREMENT", abi.MeasurementSize, report.GetMeasurement(), options.Measurement),
-		validateByteField("ChipID", "CHIP_ID", abi.ChipIDSize, report.GetChipId(), options.ChipID),
+		validateChipID(product, report.GetChipId(), options.ChipID),
 	)
 }
 
@@ -847,10 +886,19 @@ func SnpAttestation(attestation *spb.Attestation, options *Options) error {
 		return fmt.Errorf("report VMPL %d is not %d", report.GetVmpl(), *options.VMPL)
 	}
 
-	// MaskChipId might be 1 for the host, so only check if the the CHIP_ID is not all zeros.
-	if info.SigningKey == abi.VcekReportSigner && !allZero(report.GetChipId()) && !bytes.Equal(report.GetChipId(), exts.HWID[:]) {
-		return fmt.Errorf("report field CHIP_ID %s is not the same as the VCEK certificate's HWID %s",
-			hex.EncodeToString(report.GetChipId()), hex.EncodeToString(exts.HWID[:]))
+	// Milan and Genoa VCEKs have a 64-byte HWID (AMD Publication #57230 Table 10).
+	// Turin VCEKs have an 8-byte HWID (AMD Publication #57230 Table 11) that matches
+	// the first 8 bytes of the 64-byte CHIP_ID field (AMD Publication #56860 Table 23).
+	// If MaskChipId on the host sets CHIP_ID to zero, there is nothing to compare.
+	if info.SigningKey == abi.VcekReportSigner {
+		hwidLen := len(exts.HWID)
+		if len(report.GetChipId()) < hwidLen {
+			return fmt.Errorf("report field CHIP_ID has size %d, want at least %d", len(report.GetChipId()), hwidLen)
+		}
+		if !allZero(report.GetChipId()[:hwidLen]) && !bytes.Equal(report.GetChipId()[:hwidLen], exts.HWID) {
+			return fmt.Errorf("report field CHIP_ID %s is not the same as the VCEK certificate's HWID %s",
+				hex.EncodeToString(report.GetChipId()[:hwidLen]), hex.EncodeToString(exts.HWID))
+		}
 	}
 
 	return certTableOptions(attestation, options.CertTableOptions)
