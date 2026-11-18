@@ -982,3 +982,148 @@ func TestPolicyToOptionsUnknownProductReturnsError(t *testing.T) {
 		t.Errorf("PolicyToOptions(%v) = %+v, %v, want error containing %q", policy, got, err, wantErr)
 	}
 }
+
+func TestValidateChipIDPasses(t *testing.T) {
+	hwid8 := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	chipID64 := [abi.ChipIDSize]byte{1, 2, 3, 4, 5, 6, 7, 8, 8: 0xaa, 63: 0xff}
+
+	tcs := []struct {
+		name           string
+		product        spb.SevProduct_SevProductName
+		reportChipID   []byte
+		expectedChipID []byte
+	}{
+		{name: "nil option", product: spb.SevProduct_SEV_PRODUCT_TURIN, reportChipID: chipID64[:], expectedChipID: nil},
+		{name: "Turin 8-byte prefix match", product: spb.SevProduct_SEV_PRODUCT_TURIN, reportChipID: chipID64[:], expectedChipID: hwid8},
+		{name: "Turin 64-byte full match", product: spb.SevProduct_SEV_PRODUCT_TURIN, reportChipID: chipID64[:], expectedChipID: chipID64[:]},
+		{name: "Milan 64-byte full match", product: spb.SevProduct_SEV_PRODUCT_MILAN, reportChipID: chipID64[:], expectedChipID: chipID64[:]},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validateChipID(tc.product, tc.reportChipID, tc.expectedChipID); err != nil {
+				t.Errorf("validateChipID(%v, %x, %x) = %v, want nil", tc.product, tc.reportChipID, tc.expectedChipID, err)
+			}
+		})
+	}
+}
+
+func TestValidateChipIDReturnsError(t *testing.T) {
+	hwid8 := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	badHWID8 := []byte{1, 2, 3, 4, 5, 6, 7, 9}
+	chipID64 := [abi.ChipIDSize]byte{1, 2, 3, 4, 5, 6, 7, 8}
+	badChipID64 := [abi.ChipIDSize]byte{1, 2, 3, 4, 5, 6, 7, 8, 63: 0xff}
+	id16 := [16]byte{1, 2, 3, 4}
+
+	tcs := []struct {
+		name           string
+		product        spb.SevProduct_SevProductName
+		reportChipID   []byte
+		expectedChipID []byte
+		wantErr        string
+	}{
+		{name: "Milan 8-byte option", product: spb.SevProduct_SEV_PRODUCT_MILAN, reportChipID: chipID64[:], expectedChipID: hwid8, wantErr: "option ChipID is 8 bytes, want 64"},
+		{name: "unrecognized product", product: spb.SevProduct_SevProductName(999), reportChipID: chipID64[:], expectedChipID: hwid8, wantErr: "unknown product"},
+		{name: "64-byte mismatch", product: spb.SevProduct_SEV_PRODUCT_TURIN, reportChipID: chipID64[:], expectedChipID: badChipID64[:], wantErr: "report field CHIP_ID is"},
+		{name: "Turin short report CHIP_ID with 8-byte option", product: spb.SevProduct_SEV_PRODUCT_TURIN, reportChipID: []byte{1, 2, 3, 4}, expectedChipID: hwid8, wantErr: "CHIP_ID has size 4"},
+		{name: "Turin 8-byte mismatch", product: spb.SevProduct_SEV_PRODUCT_TURIN, reportChipID: chipID64[:], expectedChipID: badHWID8, wantErr: "report field CHIP_ID is"},
+		{name: "Turin 16-byte option", product: spb.SevProduct_SEV_PRODUCT_TURIN, reportChipID: chipID64[:], expectedChipID: id16[:], wantErr: "option ChipID for Turin"},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validateChipID(tc.product, tc.reportChipID, tc.expectedChipID); err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("validateChipID(%v, %x, %x) = %v, want error containing %q", tc.product, tc.reportChipID, tc.expectedChipID, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestCheckOptionsLengthsChipIDPasses(t *testing.T) {
+	chipID64 := [abi.ChipIDSize]byte{1, 2, 3, 4, 5, 6, 7, 8}
+	tcs := []struct {
+		name string
+		opts *Options
+	}{
+		{name: "nil ChipID", opts: &Options{}},
+		{name: "8-byte ChipID", opts: &Options{ChipID: []byte{1, 2, 3, 4, 5, 6, 7, 8}}},
+		{name: "64-byte ChipID", opts: &Options{ChipID: chipID64[:]}},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := checkOptionsLengths(tc.opts); err != nil {
+				t.Errorf("checkOptionsLengths(%+v) = %v, want nil", tc.opts, err)
+			}
+		})
+	}
+}
+
+func TestCheckOptionsLengthsChipIDReturnsError(t *testing.T) {
+	id16 := [16]byte{1, 2, 3, 4}
+	tcs := []struct {
+		name    string
+		opts    *Options
+		wantErr string
+	}{
+		{name: "empty non-nil ChipID", opts: &Options{ChipID: []byte{}}, wantErr: `option "chip_id" length is 0`},
+		{name: "16-byte ChipID", opts: &Options{ChipID: id16[:]}, wantErr: `option "chip_id" length is 16`},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := checkOptionsLengths(tc.opts); err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("checkOptionsLengths(%+v) = %v, want error containing %q", tc.opts, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestSnpAttestationTurinChipIDPasses(t *testing.T) {
+	signTurin := turinTestSigner(t)
+	hwid8 := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	matchingZeroTail := [abi.ChipIDSize]byte{1, 2, 3, 4, 5, 6, 7, 8}
+	matchingNonZeroTail := [abi.ChipIDSize]byte{1, 2, 3, 4, 5, 6, 7, 8, 8: 0xaa, 63: 0xff}
+	var maskedChipID [abi.ChipIDSize]byte
+
+	tcs := []struct {
+		name         string
+		reportChipID []byte
+		opts         *Options
+	}{
+		{name: "non-zero trailing CHIP_ID bytes with matching prefix", reportChipID: matchingNonZeroTail[:], opts: &Options{}},
+		{name: "all-zero masked CHIP_ID", reportChipID: maskedChipID[:], opts: &Options{}},
+		{name: "matching 8-byte ChipID option", reportChipID: matchingZeroTail[:], opts: &Options{ChipID: hwid8}},
+		{name: "matching 64-byte ChipID option", reportChipID: matchingNonZeroTail[:], opts: &Options{ChipID: matchingNonZeroTail[:]}},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			attestation := turinTestAttestation(t, signTurin.Vcek.Raw, tc.reportChipID, turinTestTCB.Uint64())
+			if err := SnpAttestation(attestation, tc.opts); err != nil {
+				t.Errorf("SnpAttestation(%v, %+v) = %v, want nil", attestation, tc.opts, err)
+			}
+		})
+	}
+}
+
+func TestSnpAttestationTurinChipIDReturnsError(t *testing.T) {
+	signTurin := turinTestSigner(t)
+	badHWID8 := []byte{1, 2, 3, 4, 5, 6, 7, 9}
+	matchingChipID := [abi.ChipIDSize]byte{1, 2, 3, 4, 5, 6, 7, 8}
+	badPrefixChipID := [abi.ChipIDSize]byte{1, 2, 3, 4, 5, 6, 7, 9}
+
+	tcs := []struct {
+		name         string
+		reportChipID []byte
+		opts         *Options
+		wantErr      string
+	}{
+		{name: "CHIP_ID prefix mismatch with VCEK HWID", reportChipID: badPrefixChipID[:], opts: &Options{}, wantErr: "VCEK certificate's HWID"},
+		{name: "report CHIP_ID shorter than VCEK HWID", reportChipID: []byte{1, 2, 3, 4}, opts: &Options{}, wantErr: "CHIP_ID has size 4"},
+		{name: "mismatched 8-byte ChipID option", reportChipID: matchingChipID[:], opts: &Options{ChipID: badHWID8}, wantErr: "report field CHIP_ID is"},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			attestation := turinTestAttestation(t, signTurin.Vcek.Raw, tc.reportChipID, turinTestTCB.Uint64())
+			if err := SnpAttestation(attestation, tc.opts); err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("SnpAttestation(%v, %+v) = %v, want error containing %q", attestation, tc.opts, err, tc.wantErr)
+			}
+		})
+	}
+}
