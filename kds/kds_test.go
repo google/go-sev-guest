@@ -15,6 +15,9 @@
 package kds
 
 import (
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/hex"
 	"fmt"
 	"net/url"
@@ -1120,5 +1123,139 @@ func TestParseProductTCB(t *testing.T) {
 func TestParseProductTCB_Unknown(t *testing.T) {
 	if _, err := ParseProductTCB("Unknown", url.Values{}); err == nil {
 		t.Errorf("ParseProductTCB(Unknown) expected error, got nil")
+	}
+}
+
+// marshalExtension returns an extension for the OID with value v marshaled using the ASN.1
+// params.
+func marshalExtension(t *testing.T, id asn1.ObjectIdentifier, v any, params string) pkix.Extension {
+	t.Helper()
+	b, err := asn1.MarshalWithParams(v, params)
+	if err != nil {
+		t.Fatalf("asn1.MarshalWithParams(%v, %q) failed: %v", v, params, err)
+	}
+	return pkix.Extension{Id: id, Value: b}
+}
+
+// vcekCertificate returns a certificate with VCEK KDS extensions. The SPLs are bl=1, tee=2, snp=3,
+// the SPL at fourth=4, spl5=5, spl6=6, spl7=7, ucode=8. A nil hwid leaves out the HWID extension.
+func vcekCertificate(t *testing.T, structVersion int, fourth asn1.ObjectIdentifier, hwid []byte) *x509.Certificate {
+	t.Helper()
+	exts := []pkix.Extension{
+		marshalExtension(t, OidStructVersion, structVersion, ""),
+		marshalExtension(t, OidProductName1, "Turin-B0", "ia5"),
+		marshalExtension(t, OidBlSpl, 1, ""),
+		marshalExtension(t, OidTeeSpl, 2, ""),
+		marshalExtension(t, OidSnpSpl, 3, ""),
+		marshalExtension(t, fourth, 4, ""),
+		marshalExtension(t, OidSpl5, 5, ""),
+		marshalExtension(t, OidSpl6, 6, ""),
+		marshalExtension(t, OidSpl7, 7, ""),
+		marshalExtension(t, OidUcodeSpl, 8, ""),
+	}
+	if hwid != nil {
+		// The KDS writes the HWID without an ASN.1 type tag.
+		exts = append(exts, pkix.Extension{Id: OidHwid, Value: hwid})
+	}
+	return &x509.Certificate{Extensions: exts}
+}
+
+func TestVcekCertificateExtensions(t *testing.T) {
+	tcs := []struct {
+		name          string
+		structVersion int
+		fourth        asn1.ObjectIdentifier
+		hwid          []byte
+		want          *Extensions
+	}{
+		{
+			name:          "structVersion 0 parses spl4 and a 64-byte HWID",
+			structVersion: 0,
+			fourth:        OidSpl4,
+			hwid:          make([]byte, 64),
+			want: &Extensions{
+				StructVersion: 0,
+				ProductName:   "Turin-B0",
+				HWID:          make([]byte, 64),
+				TCBVersion:    TCBVersionV0{BlSpl: 1, TeeSpl: 2, SnpSpl: 3, Spl4: 4, Spl5: 5, Spl6: 6, Spl7: 7, UcodeSpl: 8},
+			},
+		},
+		{
+			name:          "structVersion 1 parses fmcSPL and an 8-byte HWID",
+			structVersion: 1,
+			fourth:        OidFmcSpl,
+			hwid:          []byte{1, 2, 3, 4, 5, 6, 7, 8},
+			want: &Extensions{
+				StructVersion: 1,
+				ProductName:   "Turin-B0",
+				HWID:          []byte{1, 2, 3, 4, 5, 6, 7, 8},
+				TCBVersion:    TCBVersionV1{BlSpl: 1, TeeSpl: 2, SnpSpl: 3, FmcSpl: 4, Spl5: 5, Spl6: 6, Spl7: 7, UcodeSpl: 8},
+			},
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := VcekCertificateExtensions(vcekCertificate(t, tc.structVersion, tc.fourth, tc.hwid))
+			if err != nil {
+				t.Fatalf("VcekCertificateExtensions() failed: %v", err)
+			}
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("VcekCertificateExtensions() mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestVcekCertificateExtensionsErrors(t *testing.T) {
+	tcs := []struct {
+		name          string
+		structVersion int
+		fourth        asn1.ObjectIdentifier
+		hwid          []byte
+		wantErr       string
+	}{
+		{
+			name:          "structVersion 0 without spl4",
+			structVersion: 0,
+			fourth:        OidFmcSpl,
+			hwid:          make([]byte, 64),
+			wantErr:       "Spl4",
+		},
+		{
+			name:          "structVersion 1 without fmcSPL",
+			structVersion: 1,
+			fourth:        OidSpl4,
+			hwid:          []byte{1, 2, 3, 4, 5, 6, 7, 8},
+			wantErr:       "FmcSpl",
+		},
+		{
+			name:          "structVersion 1 with a 64-byte HWID",
+			structVersion: 1,
+			fourth:        OidFmcSpl,
+			hwid:          make([]byte, 64),
+			wantErr:       "could not parse extension as an octet string",
+		},
+		{
+			name:          "structVersion 1 without HWID",
+			structVersion: 1,
+			fourth:        OidFmcSpl,
+			hwid:          nil,
+			wantErr:       "missing HWID extension",
+		},
+		{
+			name:          "structVersion 2",
+			structVersion: 2,
+			fourth:        OidFmcSpl,
+			hwid:          []byte{1, 2, 3, 4, 5, 6, 7, 8},
+			wantErr:       "unsupported structVersion 2",
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := VcekCertificateExtensions(vcekCertificate(t, tc.structVersion, tc.fourth, tc.hwid))
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("VcekCertificateExtensions() = %v, want error containing %q", err, tc.wantErr)
+			}
+		})
 	}
 }
