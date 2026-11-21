@@ -16,30 +16,35 @@ report fields against a user-provided policy.
 This library should be used within the confidential workload to collect an
 attestation report along with requisite certificates.
 
-Your main interactions with it will be to open the device, get an attestation
-report with your provided 64 bytes of user data (typically a nonce or a hash of
-a public key), and then close the device. For convenience, the attestation with
-its associated certificates can be collected in a wire-transmittable protocol
-buffer format.
+Use a quote provider to collect an attestation report with your provided 64 bytes
+of user data (typically a nonce or a hash of a public key). The report and its
+associated certificates can be collected in protocol buffer format.
+
+### `func GetQuoteProvider() (QuoteProvider, error)`
+
+Returns a supported quote provider. On Linux, it tries the ConfigFS TSM interface
+first, then falls back to `/dev/sev-guest`. The provider manages its resources;
+callers do not need to open or close a device.
+
+### `func GetQuoteProto(qp QuoteProvider, reportData [64]byte) (*pb.Attestation, error)`
+
+Returns the protocol buffer representation of the attestation report and
+associated certificates using the given quote provider. This replaces the
+deprecated `GetExtendedReport` API.
+
+On Linux, `-default_vmpl` overrides the provider's default VM privilege level.
+Without an override, the ConfigFS provider uses the driver's default and the
+ioctl provider uses VMPL0. To select a level explicitly, obtain a provider with
+`GetLeveledQuoteProvider` and pass it to `GetQuoteProtoAtLevel` with the desired
+VMPL.
+
+Use `QuoteProvider.GetRawQuote` or `LeveledQuoteProvider.GetRawQuoteAtLevel` for
+the AMD SEV-SNP binary report followed by the certificate table.
 
 ### `func OpenDevice() (*LinuxDevice, error)`
 
-This function creates a file descriptor to the `/dev/sev-guest` device and
-returns an object that has methods encapsulating commands to the device. When
-done, remember to `Close()` the device.
-
-### `func GetExtendedReport(d Device, reportData [64]byte) (*pb.Attestation, error)`
-
-This function takes an object implementing the `Device` interface (e.g., a
-`LinuxDevice`) and returns the protocol buffer representation of the attestation
-report and associated certificates. The report will be associated with VM
-privilege level 0. You can provide a different privilege level as the third
-argument to `GetExtendedReportAtVmpl`.
-
-You can use `GetRawExtendedReport` or `GetRawExtendedReportAtVmpl` to get the
-AMD SEV-SNP API formatted report and certificate table, or just `GetReport`,
-`GetReportAtVmpl`, `GetRawReport`, or `GetRawReportAtVmpl` to avoid fetching the
-certificate table.
+Opens `/dev/sev-guest` for device commands such as key derivation. When done,
+remember to `Close()` the device.
 
 ### `func GetDerivedKeyAcknowledgingItsLimitations(d Device, request *SnpDerivedKeyReq) ([]byte, error)`
 
