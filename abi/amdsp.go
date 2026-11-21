@@ -98,6 +98,8 @@ const (
 	// updateFailed = 36
 	// Platform management error, unexpected.
 	// restoreRequired = 37
+	// InvalidKey indicates that the requested key is unavailable or disallowed.
+	InvalidKey = 0x27
 )
 
 // GuestRequestInvalidLength is set by the ccp driver and not the AMD-SP when an guest extended
