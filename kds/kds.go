@@ -59,6 +59,9 @@ var (
 	OidSpl7 = asn1.ObjectIdentifier([]int{1, 3, 6, 1, 4, 1, 3704, 1, 3, 7})
 	// OidUcodeSpl is the x509v3 extension for V[CL]EK microcode security patch level.
 	OidUcodeSpl = asn1.ObjectIdentifier([]int{1, 3, 6, 1, 4, 1, 3704, 1, 3, 8})
+	// OidFmcSpl is the x509v3 extension for V[CL]EK certificate FMC
+	// security patch level. Only structVersion 1 certificates have it.
+	OidFmcSpl = asn1.ObjectIdentifier([]int{1, 3, 6, 1, 4, 1, 3704, 1, 3, 9})
 	// OidHwid is the x509v3 extension for VCEK certificate associated hardware identifier.
 	OidHwid = asn1.ObjectIdentifier([]int{1, 3, 6, 1, 4, 1, 3704, 1, 4})
 	// OidCspID is the x509v3 extension for a VLEK certificate's Cloud Service Provider's
@@ -78,6 +81,7 @@ var (
 	kdsSpl6          = kdsOID{major: 3, minor: 6}
 	kdsSpl7          = kdsOID{major: 3, minor: 7}
 	kdsUcodeSpl      = kdsOID{major: 3, minor: 8}
+	kdsFmcSpl        = kdsOID{major: 3, minor: 9}
 	kdsHwid          = kdsOID{major: 4}
 	kdsCspID         = kdsOID{major: 5}
 
@@ -134,8 +138,9 @@ type Extensions struct {
 	StructVersion uint8
 	ProductName   string
 	// The host driver knows the difference between primary and secondary HWID.
-	// Primary vs secondary is irrelevant to verification. Must be nil or
-	// abi.ChipIDSize long.
+	// Primary vs secondary is irrelevant to verification. Must be nil,
+	// 64 bytes for StructVersion 0 (Milan, Genoa), or 8 bytes for
+	// StructVersion 1 (Turin).
 	HWID       []byte
 	TCBVersion TCBVersion
 	CspID      string
@@ -174,6 +179,9 @@ func oidTokdsOID(id asn1.ObjectIdentifier) (kdsOID, error) {
 	}
 	if id.Equal(OidUcodeSpl) {
 		return kdsUcodeSpl, nil
+	}
+	if id.Equal(OidFmcSpl) {
+		return kdsFmcSpl, nil
 	}
 	if id.Equal(OidCspID) {
 		return kdsCspID, nil
@@ -590,7 +598,11 @@ func kdsOidMapToExtensions(exts map[kdsOID]*pkix.Extension) (*Extensions, error)
 	}
 	hwidExt, ok := exts[kdsHwid]
 	if ok {
-		octet, err := asn1OctetString(hwidExt, "HWID", 64)
+		hwidSize, err := vcekHWIDSize(result.StructVersion)
+		if err != nil {
+			return nil, err
+		}
+		octet, err := asn1OctetString(hwidExt, "HWID", hwidSize)
 		if err != nil {
 			return nil, err
 		}
@@ -605,7 +617,7 @@ func kdsOidMapToExtensions(exts map[kdsOID]*pkix.Extension) (*Extensions, error)
 			return nil, fmt.Errorf("certificate has both HWID (%s) and CSP_ID (%s) extensions", hex.EncodeToString(result.HWID), result.CspID)
 		}
 	}
-	var blspl, snpspl, teespl, spl4, spl5, spl6, spl7, ucodespl uint8
+	var blspl, snpspl, teespl, spl5, spl6, spl7, ucodespl uint8
 	if err := asn1U8(exts[kdsBlSpl], "BlSpl", &blspl); err != nil {
 		return nil, err
 	}
@@ -613,9 +625,6 @@ func kdsOidMapToExtensions(exts map[kdsOID]*pkix.Extension) (*Extensions, error)
 		return nil, err
 	}
 	if err := asn1U8(exts[kdsSnpSpl], "SnpSpl", &snpspl); err != nil {
-		return nil, err
-	}
-	if err := asn1U8(exts[kdsSpl4], "Spl4", &spl4); err != nil {
 		return nil, err
 	}
 	if err := asn1U8(exts[kdsSpl5], "Spl5", &spl5); err != nil {
@@ -630,15 +639,39 @@ func kdsOidMapToExtensions(exts map[kdsOID]*pkix.Extension) (*Extensions, error)
 	if err := asn1U8(exts[kdsUcodeSpl], "UcodeSpl", &ucodespl); err != nil {
 		return nil, err
 	}
-	result.TCBVersion = TCBVersionV0{
-		BlSpl:    blspl,
-		TeeSpl:   teespl,
-		Spl4:     spl4,
-		Spl5:     spl5,
-		Spl6:     spl6,
-		Spl7:     spl7,
-		SnpSpl:   snpspl,
-		UcodeSpl: ucodespl,
+	switch result.StructVersion {
+	case 0:
+		var spl4 uint8
+		if err := asn1U8(exts[kdsSpl4], "Spl4", &spl4); err != nil {
+			return nil, err
+		}
+		result.TCBVersion = TCBVersionV0{
+			BlSpl:    blspl,
+			TeeSpl:   teespl,
+			Spl4:     spl4,
+			Spl5:     spl5,
+			Spl6:     spl6,
+			Spl7:     spl7,
+			SnpSpl:   snpspl,
+			UcodeSpl: ucodespl,
+		}
+	case 1:
+		var fmcspl uint8
+		if err := asn1U8(exts[kdsFmcSpl], "FmcSpl", &fmcspl); err != nil {
+			return nil, err
+		}
+		result.TCBVersion = TCBVersionV1{
+			FmcSpl:   fmcspl,
+			BlSpl:    blspl,
+			TeeSpl:   teespl,
+			SnpSpl:   snpspl,
+			Spl5:     spl5,
+			Spl6:     spl6,
+			Spl7:     spl7,
+			UcodeSpl: ucodespl,
+		}
+	default:
+		return nil, fmt.Errorf("unsupported structVersion %d", result.StructVersion)
 	}
 	return &result, nil
 }
@@ -670,10 +703,23 @@ func VcekCertificateExtensions(cert *x509.Certificate) (*Extensions, error) {
 	if exts.CspID != "" {
 		return nil, fmt.Errorf("unexpected CSP_ID in VCEK certificate: %s", exts.CspID)
 	}
-	if len(exts.HWID) != abi.ChipIDSize {
+	if len(exts.HWID) == 0 {
 		return nil, fmt.Errorf("missing HWID extension for VCEK certificate")
 	}
 	return exts, nil
+}
+
+// vcekHWIDSize returns the VCEK HWID length in bytes for a structVersion
+// (AMD #57230 Tables 10 and 11).
+func vcekHWIDSize(structVersion uint8) (int, error) {
+	switch structVersion {
+	case 0:
+		return abi.ChipIDSize, nil
+	case 1:
+		return abi.TurinSiliconIDSize, nil
+	default:
+		return 0, fmt.Errorf("unsupported structVersion %d", structVersion)
+	}
 }
 
 // VlekCertificateExtensions returns the x509v3 extensions from the KDS specification of a VLEK
