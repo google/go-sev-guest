@@ -40,7 +40,10 @@ func TestVCEKCertURL(t *testing.T) {
 	hwid := make([]byte, abi.ChipIDSize)
 	hwid[0] = 0xfe
 	hwid[abi.ChipIDSize-1] = 0xc0
-	got := VCEKCertURL("Milan", hwid, TCBVersionV0{})
+	got, err := VCEKCertURL("Milan", hwid, TCBVersionV0{})
+	if err != nil {
+		t.Fatalf("VCEKCertURL(\"Milan\", %v, 0) unexpected error: %v", hwid, err)
+	}
 	want := "https://kdsintf.amd.com/vcek/v1/Milan/fe0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0?blSPL=0&snpSPL=0&teeSPL=0&ucodeSPL=0"
 	if got != want {
 		t.Errorf("VCEKCertURL(\"Milan\", %v, 0) = %q, want %q", hwid, got, want)
@@ -139,13 +142,33 @@ func TestParseVCEKCertURL(t *testing.T) {
 	}{
 		{
 			name: "happy path",
-			url:  VCEKCertURL("Milan", hwid, TCBVersionV0{}),
+			url:  "https://kdsintf.amd.com/vcek/v1/Milan/00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000?blSPL=0&snpSPL=0&teeSPL=0&ucodeSPL=0",
 			want: func() VCEKCert {
 				c := VCEKCertProduct("Milan")
 				c.HWID = hwid
 				c.TCB = TCBVersionV0{}
 				return c
 			}(),
+		},
+		{
+			name:    "fmcSPL on Milan returns error",
+			url:     "https://kdsintf.amd.com/vcek/v1/Milan/fe0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0?fmcSPL=1&blSPL=2",
+			wantErr: "unexpected KDS TCB version URL argument \"fmcSPL\" for product line \"Milan\"",
+		},
+		{
+			name:    "fmcSPL on Genoa returns error",
+			url:     "https://kdsintf.amd.com/vcek/v1/Genoa/fe0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0?fmcSPL=1",
+			wantErr: "unexpected KDS TCB version URL argument \"fmcSPL\" for product line \"Genoa\"",
+		},
+		{
+			name:    "Turin with 64-byte HWID returns error",
+			url:     "https://kdsintf.amd.com/vcek/v1/Turin/fe0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0?fmcSPL=1",
+			wantErr: "unexpected HWID length 64 for product \"Turin\", want 8",
+		},
+		{
+			name:    "Milan wrong HWID length 8 bytes",
+			url:     "https://kdsintf.amd.com/vcek/v1/Milan/0102030405060708?blSPL=1",
+			wantErr: "unexpected HWID length 8 for product \"Milan\", want 64",
 		},
 		{
 			name:    "bad query format",
@@ -1120,5 +1143,242 @@ func TestParseProductTCB(t *testing.T) {
 func TestParseProductTCB_Unknown(t *testing.T) {
 	if _, err := ParseProductTCB("Unknown", url.Values{}); err == nil {
 		t.Errorf("ParseProductTCB(Unknown) expected error, got nil")
+	}
+}
+
+func TestVCEKCertURL_Turin(t *testing.T) {
+	tcb := TCBVersionV1{FmcSpl: 1, BlSpl: 2, TeeSpl: 3, SnpSpl: 4, UcodeSpl: 5}
+	want := "https://kdsintf.amd.com/vcek/v1/Turin/fe000000000000c0?blSPL=2&fmcSPL=1&snpSPL=4&teeSPL=3&ucodeSPL=5"
+	hwid8 := []byte{0xfe, 0, 0, 0, 0, 0, 0, 0xc0}
+	hwid64 := make([]byte, abi.ChipIDSize)
+	copy(hwid64, hwid8)
+
+	tcs := []struct {
+		name string
+		hwid []byte
+	}{
+		{name: "8-byte HWID builds URL", hwid: hwid8},
+		{name: "64-byte CHIP_ID builds URL from first 8 bytes", hwid: hwid64},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := VCEKCertURL("Turin", tc.hwid, tcb)
+			if err != nil {
+				t.Fatalf("VCEKCertURL(%q, %x, %v) unexpected error: %v", "Turin", tc.hwid, tcb, err)
+			}
+			if got != want {
+				t.Errorf("VCEKCertURL(%q, %x, %v) = %q, want %q", "Turin", tc.hwid, tcb, got, want)
+			}
+		})
+	}
+}
+
+func TestVCEKCertURL_ProductTCBMismatch(t *testing.T) {
+	tcs := []struct {
+		name    string
+		product string
+		hwid    []byte
+		tcb     TCBVersion
+	}{
+		{name: "Turin with V0 TCB returns error", product: "Turin", hwid: make([]byte, 8), tcb: TCBVersionV0{}},
+		{name: "Milan with V1 TCB returns error", product: "Milan", hwid: make([]byte, 64), tcb: TCBVersionV1{}},
+		{name: "Genoa with V1 TCB returns error", product: "Genoa", hwid: make([]byte, 64), tcb: TCBVersionV1{}},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			if got, err := VCEKCertURL(tc.product, tc.hwid, tc.tcb); err == nil {
+				t.Errorf("VCEKCertURL(%q, %x, %v) = %q, want error", tc.product, tc.hwid, tc.tcb, got)
+			}
+		})
+	}
+}
+
+func TestVCEKCertURLNilTCB(t *testing.T) {
+	hwid := make([]byte, 8)
+	if got, err := VCEKCertURL("Turin", hwid, nil); err == nil {
+		t.Errorf("VCEKCertURL(%q, %x, nil) = %q, %v, want error", "Turin", hwid, got, err)
+	}
+}
+
+func TestVCEKCertURLUnknownProduct(t *testing.T) {
+	hwid := make([]byte, 8)
+	tcb := TCBVersionV1{}
+	if got, err := VCEKCertURL("UnknownProduct", hwid, tcb); err == nil {
+		t.Errorf("VCEKCertURL(%q, %x, %v) = %q, %v, want error", "UnknownProduct", hwid, tcb, got, err)
+	}
+}
+
+func TestVCEKCertURLInvalidHWIDLength(t *testing.T) {
+	tcs := []struct {
+		name        string
+		productLine string
+		hwidLen     int
+		tcb         TCBVersion
+		wantErr     string
+	}{
+		{
+			name:        "milan with 8-byte hwid",
+			productLine: "Milan",
+			hwidLen:     8,
+			tcb:         TCBVersionV0{},
+			wantErr:     "hwid has size 8, want 64",
+		},
+		{
+			name:        "milan with empty hwid",
+			productLine: "Milan",
+			hwidLen:     0,
+			tcb:         TCBVersionV0{},
+			wantErr:     "hwid has size 0, want 64",
+		},
+		{
+			name:        "genoa with 8-byte hwid",
+			productLine: "Genoa",
+			hwidLen:     8,
+			tcb:         TCBVersionV0{},
+			wantErr:     "hwid has size 8, want 64",
+		},
+		{
+			name:        "turin with 0-byte hwid",
+			productLine: "Turin",
+			hwidLen:     0,
+			tcb:         TCBVersionV1{},
+			wantErr:     "hwid has size 0, want 8 or 64",
+		},
+		{
+			name:        "turin with 16-byte hwid",
+			productLine: "Turin",
+			hwidLen:     16,
+			tcb:         TCBVersionV1{},
+			wantErr:     "hwid has size 16, want 8 or 64",
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := VCEKCertURL(tc.productLine, make([]byte, tc.hwidLen), tc.tcb)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("VCEKCertURL(%q, %d bytes) = %v, want error containing %q", tc.productLine, tc.hwidLen, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestParseVCEKCertURLTurin(t *testing.T) {
+	hwid := []byte{0xfe, 0, 0, 0, 0, 0, 0, 0xc0}
+
+	tcs := []struct {
+		name string
+		url  string
+		want VCEKCert
+	}{
+		{
+			name: "valid Turin URL parses",
+			url:  "https://kdsintf.amd.com/vcek/v1/Turin/fe000000000000c0?blSPL=2&fmcSPL=1&snpSPL=4&teeSPL=3&ucodeSPL=5",
+			want: VCEKCert{
+				Product:     "Turin",
+				ProductLine: "Turin",
+				HWID:        hwid,
+				TCB: TCBVersionV1{
+					FmcSpl:   1,
+					BlSpl:    2,
+					TeeSpl:   3,
+					SnpSpl:   4,
+					UcodeSpl: 5,
+				},
+			},
+		},
+		{
+			name: "fmcSPL of 127 parses",
+			url:  "https://kdsintf.amd.com/vcek/v1/Turin/fe000000000000c0?blSPL=2&fmcSPL=127&snpSPL=4&teeSPL=3&ucodeSPL=5",
+			want: VCEKCert{
+				Product:     "Turin",
+				ProductLine: "Turin",
+				HWID:        hwid,
+				TCB: TCBVersionV1{
+					FmcSpl:   127,
+					BlSpl:    2,
+					TeeSpl:   3,
+					SnpSpl:   4,
+					UcodeSpl: 5,
+				},
+			},
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ParseVCEKCertURL(tc.url)
+			if err != nil {
+				t.Fatalf("ParseVCEKCertURL(%q) = %+v, %v, want nil error", tc.url, got, err)
+			}
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Errorf("ParseVCEKCertURL(%q) = %+v, want %+v (-want +got):\n%s", tc.url, got, tc.want, diff)
+			}
+		})
+	}
+}
+
+func TestParseVCEKCertURLTurinErrors(t *testing.T) {
+	tcs := []struct {
+		name    string
+		url     string
+		wantErr string
+	}{
+		{
+			name:    "blSPL above 127 returns error",
+			url:     "https://kdsintf.amd.com/vcek/v1/Turin/fe000000000000c0?blSPL=128&fmcSPL=1&snpSPL=4&teeSPL=3&ucodeSPL=5",
+			wantErr: `invalid KDS TCB version URL argument value "128", want a value 0-127`,
+		},
+		{
+			name:    "fmcSPL above 127 returns error",
+			url:     "https://kdsintf.amd.com/vcek/v1/Turin/fe000000000000c0?blSPL=2&fmcSPL=128&snpSPL=4&teeSPL=3&ucodeSPL=5",
+			wantErr: `invalid KDS TCB version URL argument value "128", want a value 0-127`,
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ParseVCEKCertURL(tc.url)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("ParseVCEKCertURL(%q) = %+v, %v, want error containing %q", tc.url, got, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestParseVCEKCertURLUnknownProduct(t *testing.T) {
+	rawURL := "https://kdsintf.amd.com/vcek/v1/Unknown/fe000000000000c0?blSPL=0&snpSPL=0&teeSPL=0&ucodeSPL=0"
+	wantErr := `unexpected product "Unknown" in VCEK URL`
+	got, err := ParseVCEKCertURL(rawURL)
+	if err == nil || !strings.Contains(err.Error(), wantErr) {
+		t.Errorf("ParseVCEKCertURL(%q) = %+v, %v, want error containing %q", rawURL, got, err, wantErr)
+	}
+}
+
+func TestParseVLEKCertURLTurin(t *testing.T) {
+	rawURL := "https://kdsintf.amd.com/vlek/v1/Turin/cert?blSPL=2&fmcSPL=1&snpSPL=4&teeSPL=3&ucodeSPL=5"
+	got, err := ParseVLEKCertURL(rawURL)
+	if err != nil {
+		t.Fatalf("ParseVLEKCertURL(%q) = %+v, %v, want nil error", rawURL, got, err)
+	}
+	want := VLEKCert{
+		Product:     "Turin",
+		ProductLine: "Turin",
+		TCB: TCBVersionV1{
+			FmcSpl:   1,
+			BlSpl:    2,
+			TeeSpl:   3,
+			SnpSpl:   4,
+			UcodeSpl: 5,
+		},
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("ParseVLEKCertURL(%q) = %+v, want %+v (-want +got):\n%s", rawURL, got, want, diff)
+	}
+}
+
+func TestParseVLEKCertURLErrors(t *testing.T) {
+	rawURL := "https://kdsintf.amd.com/vlek/v1/Milan/cert?blSPL=2&fmcSPL=1&snpSPL=4&teeSPL=3&ucodeSPL=5"
+	wantErr := `unexpected KDS TCB version URL argument "fmcSPL" for product line "Milan"`
+	got, err := ParseVLEKCertURL(rawURL)
+	if err == nil || !strings.Contains(err.Error(), wantErr) {
+		t.Errorf("ParseVLEKCertURL(%q) = %+v, %v, want error containing %q", rawURL, got, err, wantErr)
 	}
 }
