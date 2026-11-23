@@ -205,7 +205,11 @@ func makeTestCerts(opts *DeviceOptions) ([]byte, *AmdSigner, error) {
 	signer := opts.Signer
 	var productName string
 	if opts.Product != nil {
-		productName = kds.ProductName(opts.Product)
+		if opts.Product.MachineStepping == nil {
+			productName = fmt.Sprintf("%s-B0", kds.ProductLine(opts.Product))
+		} else {
+			productName = kds.ProductName(opts.Product)
+		}
 	} else {
 		productName = GetProductName()
 	}

@@ -1179,7 +1179,14 @@ func TestAttestationCertificateFetching(t *testing.T) {
 			wantChain := attestation.CertificateChain
 			productLine := test.GetProductLine()
 			report := attestation.Report
-			vcekURL := kds.VCEKCertURL(productLine, report.ChipId, kds.DecomposeTCBVersionV0(report.ReportedTcb))
+			tcb, err := kds.DecomposeProductTCB(productLine, report.ReportedTcb)
+			if err != nil {
+				t.Fatalf("kds.DecomposeProductTCB(%q, 0x%x) = %v, %v, want nil error", productLine, report.ReportedTcb, tcb, err)
+			}
+			vcekURL, err := kds.VCEKCertURL(productLine, report.ChipId, tcb)
+			if err != nil {
+				t.Fatalf("kds.VCEKCertURL(%q, %x, %v) = %q, %v, want nil error", productLine, report.ChipId, tcb, vcekURL, err)
+			}
 			wantURLs := []string{vcekURL}
 			if tc.Reconstruct {
 				wantURLs = []string{kds.ProductCertChainURL(abi.VcekReportSigner, productLine)}
@@ -1351,8 +1358,12 @@ func FuzzSnpAttestation(f *testing.F) {
 	// getter returns testdata.VcekBytes for that URL and a 404 error for every other URL.
 	// The report in both seeds is version 2, which has no CPUID family/model/stepping field.
 	// When the product is unknown, SnpAttestation defaults to Milan-B1 and requests the Milan URL.
+	vcekURL, err := kds.VCEKCertURL("Milan", report.GetChipId(), kds.DecomposeTCBVersionV0(report.GetReportedTcb()))
+	if err != nil {
+		f.Fatalf("VCEKCertURL(Milan) failed: %v", err)
+	}
 	getter := test.SimpleGetter(map[string][]byte{
-		kds.VCEKCertURL("Milan", report.GetChipId(), kds.DecomposeTCBVersionV0(report.GetReportedTcb())): testdata.VcekBytes,
+		vcekURL: testdata.VcekBytes,
 	})
 	// A fixed time inside the VCEK validity period keeps results the same after the VCEK expires.
 	now := vcek.NotBefore.Add(24 * time.Hour)
@@ -1382,5 +1393,34 @@ func TestGetCrlAndCheckRootZeroNowExpiredCRL(t *testing.T) {
 
 	if _, err := GetCrlAndCheckRoot(root, &Options{}); !errors.Is(err, ErrNoGetter) {
 		t.Errorf("GetCrlAndCheckRoot() = _, %v, want _, %v", err, ErrNoGetter)
+	}
+}
+
+func TestFillInAttestationVcekURLErrors(t *testing.T) {
+	tcs := []struct {
+		name    string
+		report  *spb.Report
+		wantErr string
+	}{
+		{
+			name:    "unknown product returns AttestationRecreationErr",
+			report:  &spb.Report{Cpuid1EaxFms: 0x00c00f00, ChipId: make([]byte, abi.ChipIDSize)},
+			wantErr: "could not decompose reported TCB",
+		},
+		{
+			name:    "Milan 8-byte CHIP_ID returns AttestationRecreationErr",
+			report:  &spb.Report{Cpuid1EaxFms: 0x00a00f10, ChipId: make([]byte, 8)},
+			wantErr: "could not construct VCEK certificate URL",
+		},
+	}
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			attestation := &spb.Attestation{Report: tc.report}
+			err := fillInAttestation(context.Background(), attestation, &Options{Getter: test.SimpleGetter(nil)}, false)
+			var recreationErr *trust.AttestationRecreationErr
+			if !errors.As(err, &recreationErr) || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("fillInAttestation(%v) = %v, want *trust.AttestationRecreationErr containing %q", tc.report, err, tc.wantErr)
+			}
+		})
 	}
 }
