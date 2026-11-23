@@ -688,7 +688,7 @@ func SnpAttestationContext(ctx context.Context, attestation *spb.Attestation, op
 		return err
 	}
 	if options.CheckRevocations {
-		if err := VcekNotRevoked(root, endorsementKeyCert, options); err != nil {
+		if err := VcekNotRevokedContext(ctx, root, endorsementKeyCert, options); err != nil {
 			return err
 		}
 	}
