@@ -1384,3 +1384,33 @@ func TestGetCrlAndCheckRootZeroNowExpiredCRL(t *testing.T) {
 		t.Errorf("GetCrlAndCheckRoot() = _, %v, want _, %v", err, ErrNoGetter)
 	}
 }
+
+func TestSnpAttestationContextRevocation(t *testing.T) {
+	attestation, roots := newTestAttestation(t)
+	now := time.Now()
+	crl, err := x509.CreateRevocationList(crand.Reader, &x509.RevocationList{
+		SignatureAlgorithm: x509.SHA384WithRSAPSS,
+		Number:             big.NewInt(1),
+		ThisUpdate:         now.Add(-time.Hour),
+		NextUpdate:         now.Add(time.Hour),
+	}, signer.Ark, signer.Keys.Ark)
+	if err != nil {
+		t.Fatalf("Setup: CreateRevocationList() failed: %v", err)
+	}
+	getter := test.SimpleGetter(map[string][]byte{
+		signer.Ask.CRLDistributionPoints[0]: crl,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	options := &Options{
+		TrustedRoots:     roots,
+		Now:              now,
+		Product:          attestation.Product,
+		CheckRevocations: true,
+		Getter:           getter,
+	}
+
+	if err := SnpAttestationContext(ctx, attestation, options); !test.Match(err, context.Canceled.Error()) {
+		t.Errorf("SnpAttestationContext() = %v, want error containing %q", err, context.Canceled.Error())
+	}
+}
